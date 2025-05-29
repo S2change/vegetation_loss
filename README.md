@@ -65,16 +65,16 @@ See applications for HPC resources: (documents/HPC_resources)
 
 *Duração: Mês 1-6*
 
-Entregáveis:
+entregaveis:
   * E1.1 – [Relatório com a descrição do problema, condicionantes, dados de input e especificações técnicas dos outputs](documents/deliverables/Entregavel_1_1.pdf) (10 de dezembro de 2023).
   * E1.2 – [Relatório com seleção e justificação das metodologias a operacionalizar](documents/deliverables/Entregavel_1_2.pdf) (1 de maio de 2024); [versão revista](documents/deliverables/Entregavel_1_2_v2.pdf) (14 de maio de 2024)
-  * E1.3 – [Relatório sobre potenciais adaptações tecnológicas a implementar na cadeia de produção da DGT](documents/deliverables/Entregável_1.3_v3.pdf) (5 de julho de 2024).
+  * E1.3 – [Relatório sobre potenciais adaptações tecnológicas a implementar na cadeia de produção da DGT](documents/deliverables/entregavel_1.3_v3.pdf) (5 de julho de 2024).
 
 **Tarefa 2** - Construção da uma base de dados de referência (BDR) para calibração e validação espacial e temporal das metodologias a operacionalizar com base em dados resultantes de interpretação de imagens aéreas e de satélite, do Instituto de Conservação da Natureza e Florestas (ICNF) e outras fontes consideradas relevantes.
 
 *Duração: Meses 2-18*
 
-Entregáveis:  
+entregaveis:  
   * E2.1 – [Relatório com metodologia de criação da BDR](documents/deliverables/Entregavel_2_1.pdf) (1 de maio de 2024); [versão revista](documents/deliverables/Entregavel_2_1_v2.pdf) (14 de maio de 2024)
   * E2.2 – [Metadads Base de dados de referência em formato ESRI shapefile ou Geopackage para uma tile Sentinel-2 sobre Portugal Continental](documents/deliverables/Entregavel_2_2_BDR_navigator_sentinel2_metadados_v4.pdf) (7 de julho de 2024).
   * E2.3 – Extensão da base de dados para outras regiões de Portugal Continental. Ver [BRD_NVG](data_info/reference_data/NVG) para acesso aos dados (protegido) e à documentação.
@@ -83,7 +83,7 @@ Entregáveis:
 
 *Duração: Meses 9-20*
 
-Entregáveis:
+entregaveis:
   * E3.1 – [Manual de utilização operacional da metodologia implementada na cadeia de produção da DGT](documents/deliverables/Entregavel_3_1_manuel_utilizacao_pyccd_v1.pdf) (20 de outubro de 2024).
   * E3.2 – Demonstrador prático: mapas nacionais vetoriais a delimitar manchas de perda recente de floresta e mato superiores a 0.5 ha com uma frequência bimestral relativos a um período contínuo de dois anos entre 2023 e 2025.
   * E3.3 – Relatório de validação dos mapas nacionais.
@@ -93,7 +93,7 @@ Entregáveis:
 
 *Duração: Meses 13-24*
 
-Entregáveis:
+entregaveis:
   * E4.1 – Manual de utilização operacional da metodologia implementada na cadeia de produção da DGT.
   * E4.2 – Demonstrador prático: mapas nacionais a identificar o agente causador das perdas recentes de floresta e mato superiores a 0.5 ha produzidas na tarefa 3.
   * E4.3 – Relatório de validação dos mapas nacionais.
