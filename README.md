@@ -56,7 +56,7 @@ base em análise automática de imagens de satélite
 <details markdown="block">
 <summary> HPC resources</summary>
 
-See applications for HPC resources: (documents/HPC_resources)
+See [applications for HPC resources](documents/HPC_resources)
 </details>
 
 ## Tarefas
@@ -76,7 +76,7 @@ entregaveis:
 
 entregaveis:  
   * E2.1 – [Relatório com metodologia de criação da BDR](documents/deliverables/Entregavel_2_1.pdf) (1 de maio de 2024); [versão revista](documents/deliverables/Entregavel_2_1_v2.pdf) (14 de maio de 2024)
-  * E2.2 – [Metadads Base de dados de referência em formato ESRI shapefile ou Geopackage para uma tile Sentinel-2 sobre Portugal Continental](documents/deliverables/Entregavel_2_2_BDR_navigator_sentinel2_metadados_v4.pdf) (7 de julho de 2024).
+  * E2.2 – [Metadados da base de dados de referência em formato ESRI shapefile ou Geopackage para uma tile Sentinel-2 sobre Portugal Continental](documents/deliverables/Entregavel_2_2_BDR_navigator_sentinel2_metadados_v4.pdf) (7 de julho de 2024).
   * E2.3 – Extensão da base de dados para outras regiões de Portugal Continental. Ver [BRD_NVG](data_info/reference_data/NVG) para acesso aos dados (protegido) e à documentação.
 
 **Tarefa 3** – Adaptação e implementação operacional de uma metodologia automática com base em imagens de satélite para a criação sistemática de um produto nacional de delimitação de manchas vetoriais superiores a 0.5 ha de perda recente de floresta e mato, com uma periodicidade de pelo menos dois meses.
@@ -84,7 +84,7 @@ entregaveis:
 *Duração: Meses 9-20*
 
 entregaveis:
-  * E3.1 – [Manual de utilização operacional da metodologia implementada na cadeia de produção da DGT](documents/deliverables/Entregavel_3_1_manuel_utilizacao_pyccd_v1.pdf) (20 de outubro de 2024).
+  * E3.1 – [Manual de utilização operacional da metodologia implementada na cadeia de produção da DGT](documents/deliverables/Entregavel_3.1_v3.pdf) (20 de outubro de 2024).
   * E3.2 – Demonstrador prático: mapas nacionais vetoriais a delimitar manchas de perda recente de floresta e mato superiores a 0.5 ha com uma frequência bimestral relativos a um período contínuo de dois anos entre 2023 e 2025.
   * E3.3 – Relatório de validação dos mapas nacionais.
   * E3.4 – Aplicação informática que possa ser integrada na cadeia de produção da DGT.
