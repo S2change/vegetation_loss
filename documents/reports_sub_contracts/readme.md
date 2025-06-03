@@ -19,3 +19,4 @@
 * T1.1: Deteção de Alterações na Ocupação do Solo – Perdas de Vegetação
 * T2: Metadados – Base de Dados de Referência para validação de mapas de perdas de vegetação
 * T3.1: Implementação exploratória dos métodos desenvolvidos no procedimento na cadeia de processamento da DGT
+* T3.2: Implementação exploratória dos métodos desenvolvidos no procedimento na cadeia de processamento da DGT: Relatório com comparação dos resultados obtidos com produtos equivalentes do SMOS
