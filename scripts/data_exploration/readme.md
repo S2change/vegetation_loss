@@ -33,9 +33,9 @@
 * dts_d1 até dts_d10: datas posteriores à quebra, com dts_d1 sendo a data imediatamente seguinte.
 
 #### Localização dos datasets para cada BDR
-    -> BDR DGT (one drive: ref_datasets/training_data/BDR DGT) -- complete
-    -> BDR NVG (one drive: ref_datasets/training_data/BDR NVG) -- to do
-    -> BDR ICNF (one drive: ref_datasets/training_data/BDR ICNF) -- to do
+    -> BDR DGT (PC ISA: C:/ref_datasets/amostras_por_pixel/BDR DGT)
+    -> BDR NVG (PC ISA: C:/ref_datasets/amostras_por_pixel/BDR NVG)
+    -> BDR ICNF (PC ISA: C:/ref_datasets/amostras_por_pixel/BDR ICNF)
 
 </details>
 
