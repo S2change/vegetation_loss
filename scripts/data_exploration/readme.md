@@ -11,7 +11,7 @@
 ### Extraction of 2N observations around the reference data change date (for quality control)
 
 <details>
-  <summary>(script name)</summary>
+  <summary>(Extraction_S2_2N_observations)</summary>
 
 #### Inputs
     - Reference data: geopackage; shapefile
