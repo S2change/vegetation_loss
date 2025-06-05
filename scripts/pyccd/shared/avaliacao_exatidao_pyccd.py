@@ -1,3 +1,36 @@
+"""
+Script that conducts accuracy assessment of pyccd results.
+
+Usage:
+
+python avaliacao_exatidao_pyccd.py
+
+Inputs:
+FOLDER_PARQUET: directory containing the parquet files (pyccd's results)
+BDR_DGT: path to the shp/gpkg of the reference dataset used for validation (e.g. BDR_CCDC_TNE_Adjusted.shp)
+
+Outputs:
+creates a csv file with the dataframe resulting from the accuracy assessment.
+file is saved in the accuracy_assessment folder inside FOLDER_PARQUET
+prints accuracy metrics (F1-score, omission and commission errors) to the console
+
+
+"""
+
+# ---------------------------------
+#      PARAMETROS DA VALIDACAO
+# ---------------------------------
+# dates defining the temporal extent of the validation (validation will only consider detections within this period)
+dt_ini = '2018-09-12' # initial date
+dt_end = '2021-09-30' # final date
+# Tolerance margin between model breaks and analyst dates
+theta = 60 # +/- theta days of tolerance
+# band used for magnitude filtering
+bandFilter = None #not implemented yet - do not touch
+
+FOLDER_PARQUET = r'C:\Users\scaetano\Downloads\T29TNE'
+BDR_DGT = r'C:\Users\Public\Documents\BDR_300_artigo\BDR_CCDC_TNE_Adjusted.shp'
+
 import sys, os
 from datetime import datetime
 import pandas as pd
@@ -627,17 +660,5 @@ def runValidation(FOLDER_PARQUET, BDR_DGT, dt_ini, dt_end, bandFilter, theta):
 
     DF_FINAL_T.to_csv(os.path.join(results_path, f'VAL_{group_name}.csv'), index=False)
 #%%
-# ---------------------------------
-#      PARAMETROS DA VALIDACAO
-# ---------------------------------
-# datas do filtro das datas da analise (DGT 300)
-dt_ini = '2018-09-12' # data inicial
-dt_end = '2021-09-30' # data final
-# Margem de tolerancia entre a quebra do Modelo e do Analista
-theta = 60 # +/- theta dias de diferenca
-# banda a filtrar com base na magnitude
-bandFilter = None #nao implementado ainda - nao mexer
 
-FOLDER_PARQUET = r'C:\Users\scaetano\Downloads\T29TNE'
-BDR_DGT = r'C:\Users\Public\Documents\BDR_300_artigo\BDR_CCDC_TNE_Adjusted.shp'
 runValidation(FOLDER_PARQUET, BDR_DGT, dt_ini, dt_end, bandFilter, theta)
