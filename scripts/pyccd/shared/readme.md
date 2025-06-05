@@ -1,5 +1,5 @@
 # About
-Description of the files contained in this folder
+This folder contains python modules used for processing the pyccd algorithm
 
 
 ## PyCCD Processing
