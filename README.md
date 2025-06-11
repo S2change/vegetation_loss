@@ -52,11 +52,10 @@ base em análise automática de imagens de satélite
 </details>
 
 
-
 <details markdown="block">
 <summary> HPC resources</summary>
 
-* See [applications for HPC resources](documents/HPC_resources)
+* See [HPC resources](documents/HPC_resources) 
 </details>
 
 ## Tarefas
