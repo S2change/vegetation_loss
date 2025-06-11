@@ -11,4 +11,3 @@ Reference data:
 2. NVG
 3. ICNF áreas ardidas 2020--2024 
 
-[Tabela de processamento INCD](https://ulisboa-my.sharepoint.com/:x:/r/personal/mlc_office365_ulisboa_pt/_layouts/15/Doc.aspx?sourcedoc=%7BE6821FD1-3EA3-4430-8AFD-FE1853792839%7D&file=tiles_incd.xlsx&action=default&mobileredirect=true)
