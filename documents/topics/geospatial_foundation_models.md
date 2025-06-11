@@ -1,0 +1,7 @@
+Some GFM for burned areas and other applications from Sentinel-2 imagery
+1. Dynamic One-For-All foundation model for Remote sensing and Earth observation [DOFA](https://github.com/zhu-xlab/DOFA/blob/master/README.md). Goal: object detection and instance segmentation
+2. [MSR-BACD](https://zenodo.org/records/15336666). Goal: change detection caused by burned areas. Input: 12 S2 bands (before+after)
+3. IBM-NASA Prithvi Models Family at https://huggingface.co/ibm-nasa-geospatial
+   - Burned scars model: [Prithvi-EO-2.0-300M-BurnScars](https://huggingface.co/ibm-nasa-geospatial/Prithvi-EO-2.0-300M-BurnScars). Input: 6 S2 bands (after)
+
+
