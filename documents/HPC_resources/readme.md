@@ -8,7 +8,7 @@ Processing file statistics for 17 tiles: [Tabela de processamento INCD](https://
   
 ## Deucalion: Call for Advanced Computing Projects (5th ed) - Grant 2024_10004_CPCA_A1
 
-Results: TO DO
+[Results](../reports_sub_contracts/Entregavel_3.1.pdf)
 
 ---
 ## Deucalion: EuroHPC Development Access Call (EHPC-DEV-2025D03-088) 
