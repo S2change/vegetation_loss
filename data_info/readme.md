@@ -2,11 +2,11 @@
 
 ## Files per S2 tile:
 - tiff files bands B3, B4, B8, B12 (downloaded from GEE); ISA (all); from Apr 2017 approx to end of 2024
-- tiff files bands B2 and B11 (downloaded from GEE); ISA (? ); from Apr 2017 approx to end of 2024
+- tiff files bands B2 and B11 (downloaded from GEE); ISA (6 missing); from Apr 2017 approx to end of 2024
 - hdf5 for B3,B4,B8,B12; ISA (all), INCD (some)
-- hdf5 for B2, B11; ?
+- hdf5 for B2, B11 (none yet)
 - parquets pyccd with chisq=0.999: ISA (all); INCD (all); oneDrive (some)
-- dates, bands, for N=10 window around each reference change for ICNF 2020--2024 and NVG ?
+- dates, bands, for N=10 window around each reference change for BDR-DGT-300,  ICNF 2020--2024 (falta 1 tile), and BDR_NVG (ISA)
 
 ## Reference data (available in oneDrive, folder ref_datasets)
 1. NBR-DGT-300
