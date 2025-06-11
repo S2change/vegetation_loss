@@ -1,3 +1,24 @@
+"""
+This script performs the download, processing, cloud/shadow masking, and mosaic creation of Sentinel-2 (S2) images More actions
+for a specific tile using the Google Earth Engine (GEE) API.
+
+The processing steps include:
+1. **Image Filtering**: Selection of images from the Sentinel-2 SR (Surface Reflectance) collection based on a defined date range and tile.
+2. **Cloud/Shadow Masking**: Uses the S2_CLOUD_PROBABILITY (s2cloudless) collection to mask areas affected by clouds and shadows.
+3. **Parallel Download**: Images are divided into subtiles (6x6) and transferred in parallel in GeoTIFF format.
+4. **Mosaic Creation**: Subtiles are combined into mosaics and clipped using a shapefile of mainland Portugal (GPKG).
+5. **NODATA Handling**: Pixels with value 0 across all bands are set to NODATA (value 65535).
+
+Dependencies: Earth Engine Python API, Rasterio, GeoPandas, NumPy, Requests
+
+Main configurations (defined in the inputs):
+- Sentinel-2 tile to be processed (e.g., 'T29SPD')
+- Date range for image selection
+- Selected bands
+- Path to the GeoPackage containing geographic boundaries for clipping
+
+Performance: The script uses parallel processing (up to 24 simultaneous processes) to speed up image download and export.
+"""
 # -*- coding: utf-8 -*- 
 import ee 
 import os 
