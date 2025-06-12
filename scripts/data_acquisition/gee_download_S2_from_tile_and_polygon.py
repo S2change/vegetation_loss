@@ -1,3 +1,15 @@
+'''
+Script to produce tiff files to help visualization over time (see Inês Silveira thesis visualization step )
+Inputs:
+1. Leitura bandas GEE
+2. lista bandas
+3. tile_to_test 
+4. ROI: geopackage
+5. date_start, date_end
+Output:
+colection of tiff files, one per date, just with regions of ROI processed
+
+'''
 import ee
 import geopandas as gpd
 from shapely.geometry import Polygon, MultiPolygon
