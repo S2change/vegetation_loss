@@ -1,3 +1,15 @@
+'''
+Apply CCD and compute segments (slow because just local machine cores). See HPC version for multicore.
+Calls code in shared for both local and HPC
+Input:
+1. tile 
+2a. hdf5 file, and  npy file for dates, if it exists, or
+2b. mask (e.g. DGT vegetation loss mask), tiff files (with N bands), parameters in Config file
+3.
+Output:
+* (if 2b) hdf5 file and npy dates file
+* one parquet file with CCD segments
+'''
 # PyCCD v01 - 24/02/2025 / Contrato N.ยบ 3044 DGT/ISA/CEXC/2152/2023
 #%% Imports and Path Setup
 # Standard library imports
