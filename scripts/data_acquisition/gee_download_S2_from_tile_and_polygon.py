@@ -1,14 +1,13 @@
 '''
 Script to produce tiff files to help visualization over time (see Inês Silveira thesis visualization step )
 Inputs:
-1. Leitura bandas GEE
-2. lista bandas
-3. tile_to_test 
-4. ROI: geopackage
+1. S2 bands to read
+2. Cloud filter (S2cloudness)
+3. Tile to process: tile_to_test
+4. ROI in geopackage format
 5. date_start, date_end
 Output:
-colection of tiff files, one per date, just with regions of ROI processed
-
+* colection of tiff files, one per date, just with regions of ROI processed. Creates NDVI band from B4 and B8 (that can be optionally saturated between 0 and 5000 for convenience)
 '''
 import ee
 import geopandas as gpd
