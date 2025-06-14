@@ -14,6 +14,7 @@
    - Original NVG data base in polygon format: BRD_NVG_V01_polygons_3763
    - BDR corrected and validated by Inês Silveira in point format: folder BRD_NVG_S2_V02
    - Vectorial version created by Dominic using the most recent date and in polygon format: BDR_NVG_S2_V02_Polygons
+      - Polygons were created by buffering the points by 5.01 meters with a square end cap style, dissolving the polygons based on data_0 and data_1 values, and then buffering by -0.01 meters
 4. ICNF áreas ardidas 2020--2024
    - download from https://geocatalogo.icnf.pt/catalogo_tema5.html
 
