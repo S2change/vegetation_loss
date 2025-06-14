@@ -7,6 +7,7 @@ visualization files for use in GIS software like QGIS.
 MAIN FUNCTIONALITY:
 - Reads multiple parquet files containing change detection break points (tBreak values)
 - Filters data by date range (optional)
+- Filters data by shapefile boundary (optional)
 - For each pixel location, selects the most relevant break point using these rules:
   * If only one break exists: keep it
   * If multiple breaks exist: keep the one with the second-highest tBreak value
@@ -21,6 +22,7 @@ INPUTS:
   * Other columns are preserved but not used for filtering
 - search_start: Optional start date for filtering (format: 'YYYY-MM-DD' or datetime object)
 - search_end: Optional end date for filtering (format: 'YYYY-MM-DD' or datetime object)
+- boundary_shapefile: Optional shapefile path for spatial filtering
 
 OUTPUTS:
 - GeoTIFF raster file (.tif): 
@@ -86,12 +88,91 @@ def filter_pixel_group(group, search_start=None, search_end=None):
         second_highest_idx = group['tBreak'].nlargest(2).index[-1]
         return group.loc[second_highest_idx]
 
-def process_parquet_file(file_path, search_start=None, search_end=None):
+def load_boundary_shapefile(shapefile_path, source_crs="EPSG:32629"):
+    """
+    Load boundary shapefile and ensure it's in the same CRS as the data
+    
+    Parameters:
+    -----------
+    shapefile_path : str
+        Path to the boundary shapefile
+    source_crs : str
+        CRS of the input data (default: EPSG:32629)
+        
+    Returns:
+    --------
+    geopandas.GeoDataFrame
+        Boundary geometry in the same CRS as the input data
+    """
+    try:
+        boundary_gdf = gpd.read_file(shapefile_path)
+        
+        # Reproject to match source CRS if necessary
+        if boundary_gdf.crs.to_string() != source_crs:
+            print(f"Reprojecting boundary from {boundary_gdf.crs} to {source_crs}")
+            boundary_gdf = boundary_gdf.to_crs(source_crs)
+        
+        # Dissolve all geometries into a single boundary if multiple features exist
+        boundary_dissolved = boundary_gdf.dissolve().reset_index(drop=True)
+        
+        print(f"Loaded boundary shapefile: {shapefile_path}")
+        print(f"Boundary CRS: {boundary_dissolved.crs}")
+        print(f"Number of boundary features: {len(boundary_gdf)} (dissolved to 1)")
+        
+        return boundary_dissolved
+        
+    except Exception as e:
+        raise Exception(f"Error loading boundary shapefile {shapefile_path}: {str(e)}")
+
+def filter_points_by_boundary(df, boundary_gdf, source_crs="EPSG:32629"):
+    """
+    Filter points to only include those within the boundary
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame with x_coord and y_coord columns
+    boundary_gdf : geopandas.GeoDataFrame
+        Boundary geometry
+    source_crs : str
+        CRS of the coordinates
+        
+    Returns:
+    --------
+    pandas.DataFrame
+        Filtered DataFrame with only points inside boundary
+    """
+    # Create GeoDataFrame from points
+    points_gdf = gpd.GeoDataFrame(
+        df,
+        geometry=gpd.points_from_xy(df.x_coord, df.y_coord),
+        crs=source_crs
+    )
+    
+    # Perform spatial join to find points within boundary
+    points_within = gpd.sjoin(points_gdf, boundary_gdf, predicate='within')
+    
+    # Remove the extra columns from the spatial join and return as DataFrame
+    result_df = points_within.drop(columns=['geometry', 'index_right']).reset_index(drop=True)
+    
+    print(f"Points before boundary filtering: {len(df)}")
+    print(f"Points after boundary filtering: {len(result_df)}")
+    
+    return result_df
+
+def process_parquet_file(file_path, search_start=None, search_end=None, boundary_gdf=None, source_crs="EPSG:32629"):
     """
     Process a single parquet file and return filtered rows
     """
     try:
         df = pd.read_parquet(file_path)
+        
+        # Apply boundary filtering first if specified
+        if boundary_gdf is not None:
+            df = filter_points_by_boundary(df, boundary_gdf, source_crs)
+            if len(df) == 0:
+                return []
+        
         grouped = df.groupby(['x_coord', 'y_coord'])
         filtered_rows = []
         
@@ -105,7 +186,7 @@ def process_parquet_file(file_path, search_start=None, search_end=None):
         print(f"Error processing {file_path}: {str(e)}")
         return []
 
-def collect_data_from_directory(input_dir, search_start=None, search_end=None):
+def collect_data_from_directory(input_dir, search_start=None, search_end=None, boundary_shapefile=None, source_crs="EPSG:32629"):
     """
     Collect and process data from all parquet files in a directory
     """
@@ -117,26 +198,43 @@ def collect_data_from_directory(input_dir, search_start=None, search_end=None):
     
     print(f"Found {len(parquet_files)} parquet files to process")
     
-    # Print date range information
+    # Load boundary shapefile if specified
+    boundary_gdf = None
+    if boundary_shapefile is not None:
+        boundary_gdf = load_boundary_shapefile(boundary_shapefile, source_crs)
+    
+    # Print filtering information
+    filter_info = []
     if search_start is not None or search_end is not None:
         date_info = "Date filtering: "
         if search_start is not None:
             date_info += f"from {search_start} "
         if search_end is not None:
             date_info += f"to {search_end}"
-        print(date_info)
+        filter_info.append(date_info)
+    
+    if boundary_shapefile is not None:
+        filter_info.append(f"Spatial filtering: using boundary from {boundary_shapefile}")
+    
+    if filter_info:
+        print("Filters applied:")
+        for info in filter_info:
+            print(f"  - {info}")
+    else:
+        print("No filters applied")
     
     all_filtered_rows = []
     
     for i, file_path in enumerate(parquet_files, 1):
         print(f"Processing file {i}/{len(parquet_files)}: {os.path.basename(file_path)}")
-        filtered_rows = process_parquet_file(file_path, search_start, search_end)
+        filtered_rows = process_parquet_file(file_path, search_start, search_end, boundary_gdf, source_crs)
         all_filtered_rows.extend(filtered_rows)
     
     if not all_filtered_rows:
-        print("No valid data found in any files (possibly due to date filtering)")
+        print("No valid data found in any files (possibly due to filtering)")
         return None
     
+    print(f"Total points after all filtering: {len(all_filtered_rows)}")
     return pd.DataFrame(all_filtered_rows)
 
 def create_geodataframe(df, source_crs="EPSG:32629"):
@@ -383,7 +481,8 @@ def create_qgis_style_file(gdf, output_style_file):
     print(f"QGIS style file saved to: {output_style_file}")
     print(f"Years in data: {years}")
 
-def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_file, target_crs="EPSG:32629", search_start=None, search_end=None):
+def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_file, target_crs="EPSG:32629", 
+                                search_start=None, search_end=None, boundary_shapefile=None):
     """
     Main function to process all parquet files in a directory and save as a single GeoTIFF
     and a vector file of used points.
@@ -403,6 +502,8 @@ def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_fi
         Start date for filtering (e.g., '2020-01-01')
     search_end : str or datetime, optional
         End date for filtering (e.g., '2023-12-31')
+    boundary_shapefile : str, optional
+        Path to shapefile for spatial boundary filtering
     """
     # Create output directories if they don't exist
     for output_file in [output_raster_file, output_vector_file]:
@@ -413,7 +514,7 @@ def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_fi
             Path(output_dir).mkdir(parents=True, exist_ok=True)
     
     # Collect data from all parquet files
-    df = collect_data_from_directory(input_dir, search_start, search_end)
+    df = collect_data_from_directory(input_dir, search_start, search_end, boundary_shapefile)
     if df is None:
         print("No data")
         return
@@ -455,10 +556,14 @@ if __name__ == "__main__":
     search_start = None  # Start date for filtering break dates ("YYYY-MM-DD" format)
     search_end = None    # End date for filtering break dates ("YYYY-MM-DD" format)
     
+    # Boundary shapefile filtering (set to None to disable)
+    boundary_shapefile = None  # Path to shapefile for spatial boundary filtering
+    
     process_directory_to_geotiff(
         input_directory, 
         output_raster_file, 
         output_vector_file, 
         search_start=search_start, 
-        search_end=search_end
+        search_end=search_end,
+        boundary_shapefile=boundary_shapefile
     ) # target_crs='EPSG:4326'
