@@ -15,7 +15,7 @@ Main configurations (defined in the inputs):
 - Sentinel-2 tile to be processed (e.g., 'T29SPD')
 - Date range for image selection
 - Selected bands
-- Path to the GeoPackage containing geographic boundaries for clipping
+- Path to the GeoPackage containing geographic boundaries for clipping (file: portugal_continental_32629.gpkg)
 
 Performance: The script uses parallel processing (up to 24 simultaneous processes) to speed up image download and export.
 """
@@ -308,7 +308,7 @@ def process_and_mosaic_images(imageList, tile_to_test, base_folder):
         # Criar caminhos para guardar e combinar o mosaico
         tile_folder = os.path.join(base_folder, tile_to_test)
         mosaic_folder = os.path.join(tile_folder, str(date_millis))
-        geopackage_path = r"C:/Users/scaetano/Downloads/portugal_continental.gpkg"
+        geopackage_path = r"C:/Users/scaetano/Downloads/portugal_continental_32629.gpkg"
 
         # Combinar as imagens e gerar o mosaico
         combine_tiffs_to_mosaic(mosaic_folder, tile_folder, geopackage_path, date_millis)
