@@ -1,4 +1,27 @@
 # -*- coding: utf-8 -*-
+"""
+Script for parallel processing of Sentinel-2 time series data using PyCCD.
+
+This script is designed to run in a distributed environment using MPI (via `mpi4py`)
+and is used to apply change detection on preprocessed Sentinel-2 reflectance data
+(stored in HDF5 files). Processing is performed in batches, and results are exported
+in Parquet format.
+
+Inputs:
+- 'output_file` (HDF5): File containing Sentinel-2 reflectance data (values, dates, coordinates),
+  already filtered by the region of interest (ROI).
+- 'tiles': List of Sentinel-2 tiles to be processed.
+- 'data_source_folder': Root folder with input data.
+- 's2_tile_folder': Folder containing Sentinel-2 tile images.
+- Configuration parameters defined in the 'config.py'.
+
+Outputs:
+- '.parquet' files containing the CCD analysis results (one per MPI rank).
+
+Requirements:
+- MPI-compatible environment (e.g., SLURM or `mpiexec`)
+- Multi-core CPU with thread control via environment variables
+"""
 #%% Imports and Path Setup
 # Standard library imports
 import os
