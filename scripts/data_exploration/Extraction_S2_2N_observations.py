@@ -1,3 +1,52 @@
+"""
+This script generates per-pixel tabular data based on reference geometries (polygons) from a shapefile 
+or GeoPackage. For each pixel falling within a geometry, it extracts Sentinel-2 band values from an HDF5 
+file, organizing the time series into structured features before and after a central change date 
+(data_0 or midpoint between data_0 and data_1).
+
+Inputs:
+- Reference data:
+  - Shapefile or GeoPackage containing geometries and associated attributes:
+    - `id`: Unique identifier for each geometry
+    - `data_0`: Date of change or event (e.g., deforestation start)
+    - `data_1` (optional): End date (if available)
+- Sentinel-2 bands in an HDF5 file:
+  - Shape: (bands, dates, pixels)
+  - Expected bands: g (green), r (red), n (NIR), s (SWIR2)
+- Dates file: `tif_dates_ord.npy` containing acquisition dates for the Sentinel-2 time series
+- Tile ID: Sentinel-2 tile code (e.g., T29TME)
+- Dataset type: "ICNF" (multi-year reference polygons, stored in separate files per year) or "NVG" (single file containing all years' reference data)
+
+Output:
+- `.parquet` file: A flat table with time series organized per pixel.
+
+Description:
+The data are organized per pixel, based on the input geometries. For each pixel within a polygon:
+- The N most recent observations **before** and the N earliest **after** a central date are extracted.
+  - If both `data_0` and `data_1` are provided, the midpoint between them is used as the central date (`data_mid`).
+  - Otherwise, `data_mid` = `data_0`.
+- The extracted values include:
+  - Sentinel-2 band values: `g` (green), `r` (red), `n` (near-infrared), `s` (SWIR)
+  - Corresponding acquisition dates
+
+Output Column Structure:
+- `x`, `y`: Pixel coordinates
+- `ID`, `buffer_ID`: Geometry identifiers
+- `data_0`, `data_1`, `data_mid`: Reference dates
+- `g_a1` to `g_aN`: Values of band `g` before `data_mid` (suffix `_a` = "antes")
+  - `g_aN` is the closest value to the date (possibly on the same day)
+- `g_d1` to `g_dN`: Values of band `g` after `data_mid` (suffix `_d` = "depois")
+  - `g_d1` is the first observation after the date
+- Same structure applies for other bands: `r`, `n`, and `s`
+- `dts_a1` to `dts_aN`: Dates of observations before the break
+  - `dts_aN` is the date immediately before or equal to `data_mid`
+- `dts_d1` to `dts_dN`: Dates of observations after the break
+  - `dts_d1` is the first date after `data_mid`
+
+Note:
+- Invalid values (e.g., 65535) are removed.
+- Only pixels strictly inside the polygons are used.
+"""
 import geopandas as gpd
 import numpy as np
 import h5py
