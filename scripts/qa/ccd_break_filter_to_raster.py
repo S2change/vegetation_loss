@@ -82,11 +82,7 @@ def filter_pixel_group(group, search_start=None, search_end=None):
             
         group = filtered_group
     
-    if len(group) == 1:
-        return group.iloc[0]
-    else:
-        second_highest_idx = group['tBreak'].nlargest(2).index[-1]
-        return group.loc[second_highest_idx]
+    return group.loc[group['tBreak'].idxmax()]
 
 def load_boundary_shapefile(shapefile_path, source_crs="EPSG:32629"):
     """
