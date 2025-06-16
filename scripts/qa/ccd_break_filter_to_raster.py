@@ -160,12 +160,35 @@ def filter_points_by_boundary(df, boundary_gdf, source_crs="EPSG:32629"):
     
     return result_df
 
+def read_parquet_identify_breaks(filepath):
+    """
+    Separate segments that corresponds to breaks from terminal segments (not breaks)
+    Assumption: all segments in the parquet file for the same pixel are in sequence, from the earlier segment to the last one (the terminal one)
+
+    Inputs: 
+    * path to parquet file (output of a pyccd task); each row is a ccd segment; the file has columns 'x_coord' and 'y_coord'
+
+    Output dataframe with additional column ['is_break'] ; each row is still a segment
+    
+    Note: 'is_break' is 0 for a terminal segment (not a break) and 'is_break' is 1 otherwise 
+    """
+    df=pd.read_parquet(filepath)
+    df['is_break']=0 #is_break==0 terminal segment; is_break==1 for segment with break
+
+    # create mask and new binary column 'is_break'
+    mask = (df['x_coord'] == df['x_coord'].shift(-1)) & (df['y_coord'] == df['y_coord'].shift(-1))
+    df.loc[mask, 'is_break'] = 1
+
+    return df 
+
 def process_parquet_file(file_path, search_start=None, search_end=None, boundary_gdf=None, source_crs="EPSG:32629"):
     """
     Process a single parquet file and return filtered rows
     """
     try:
-        df = pd.read_parquet(file_path)
+        df = read_parquet_identify_breaks(file_path)
+
+        df = df[df['is_break'] == 1]
         
         # Apply boundary filtering first if specified
         if boundary_gdf is not None:
@@ -549,7 +572,7 @@ def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_fi
 if __name__ == "__main__":
     # Set input directory and output files
     input_directory = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo" # UPDATE
-    output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/accuracy_assessment/last_break_dates_date_filter_test.tif" # UPDATE
+    output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/testing_new_parquet_processing.tif" # UPDATE
     output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
     
     # String date range filtering (set both to None to disable filtering)
