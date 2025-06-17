@@ -4,7 +4,7 @@
 - (20 fev 2024)  [Deteção de alterações com CCD](PPT_CCD_20fev.pptx)
 - (23 maio 2024) [PyCCD: Análise do desempenho e dos tempos de computação](presentations/PPT_CCD_23maio2024.pdf). Discussão de diferentes formatos de input/output para uma máquina local (**não HPC**). Componentes do pyCCD mais exigentes em recursos computacionais. Estratágias para reduzir o tempo de computação (leitura dados, LASSO, ...)
 - (23 de maio de 2024) [Melhoramento da BDR NVG usando informação espetral](Apresentacao_DatasCorte_DGT_23maio2024.pdf)  Implementação de técnicas baseadas nas quedas médias de NVDI em cada sub-talhão (posteriormente, o trabalho evoluiu para análise ao nível do pixel).
-- (4 de julho de 2024) [Reunião DGT/INCD/LIP](reuniao_DGT_4_julho_2024.pdf). Descrição do problema de criação do produto de perdas de vegetação: dados de referência, dados de satélite, algoritmos (CCD, étapas de processamento), estimativa de recursos computacionais
+- (4 de julho de 2024) [Reunião DGT/INCD/LIP](reuniao_DGT_4_julho_2024.pdf). Descrição do problema de criação do produto de perdas de vegetação: dados de referência, dados de satélite, algoritmos (CCD, etapas de processamento), estimativa de recursos computacionais
 - (18 de junho de 2025) Reunião com DGT/CNCA:
   
   1. Tópicos:
