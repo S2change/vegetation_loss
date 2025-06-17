@@ -15,7 +15,7 @@
     ![image](https://github.com/user-attachments/assets/902356a0-bcb9-403f-95d8-2aacd3424379)
     ![image](https://github.com/user-attachments/assets/8be68233-9168-42fe-b86c-91d99266a37c)
 
-    **Nota**: No INCD, a paralelização dos batches dentro de cada rank (usando ProcessPoolExecutor) não trouxe ganhos significativos de desempenho, ao passo que no MACC, este método resultou numa melhoria notável no tempo de execução devido à maior capacidade de CPU por nó.
+    **Nota**: No INCD, a paralelização dos batches dentro de cada rank (usando ProcessPoolExecutor) não trouxe ganhos significativos de desempenho (testou-se com 5 nodes, 24 ntasks per node e 4 cpus per task e ficou + lento), ao passo que no MACC, este método resultou numa melhoria notável no tempo de execução devido à maior capacidade de CPU por node.
 
   - Recursos computacionais (INCD) para a componente de deteção de alterações com pyCCD. Sentinel-2 tile processing status: see [status per Sentinel-2 tile](https://ulisboa-my.sharepoint.com/my?csf=1&web=1&e=vp9h5C&FolderCTID=0x012000C2AFBA48F7C2154CB26FDFA64A376290&id=%2Fpersonal%2Fmlc%5Foffice365%5Fulisboa%5Fpt%2FDocuments%2FDocuments%2Finvestigacao%2Dprojectos%2Dreviews%2Dalunos%2Djuris%2Fprojetos%2FDGT%2DS2CHANGE%5F2023%2Fpartilhado%2Flog%5Fincd%5Fmacc) incluiding size (# pixels), memory, core-minutes in INCD, output parquet file size.
 
