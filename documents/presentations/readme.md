@@ -22,4 +22,4 @@
 
   2. Questões:
   - acesso a recursos no CNCA
-  - deep learning para classificação: recuros em GPU
+  - deep learning para classificação: recursos em GPU
