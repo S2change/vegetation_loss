@@ -4,33 +4,37 @@ This script processes parquet files containing change detection results from sat
 It filters and aggregates pixel-level change detection data, converts it to raster format, and creates
 visualization files for use in GIS software like QGIS.
 
+UPDATED FUNCTIONALITY:
+- Reads parquet files ONCE and creates a master dataset
+- Generates multiple TIF files for 2-month periods between start and end dates
+- Each TIF covers a 2-calendar-month period (e.g., Jan-Feb, Mar-Apr, etc.)
+
 MAIN FUNCTIONALITY:
 - Reads multiple parquet files containing change detection break points (tBreak values)
-- Filters data by date range (optional)
+- Filters data by date range and splits into 2-month periods
 - Filters data by shapefile boundary (optional)
-- For each pixel location, only the most recent break point is returned
-    - If there are no breaks for the pixel, nothing is returned
-- Converts filtered point data to a georeferenced raster (GeoTIFF)
+- For each pixel location, only the most recent break point within each period is returned
+- Converts filtered point data to georeferenced rasters (GeoTIFF) for each period
 - Creates QGIS style files for visualization
-- Optionally saves filtered points as a vector file
+- Optionally saves filtered points as vector files
 
 INPUTS:
 - input_directory: Directory containing parquet files with columns:
   * x_coord, y_coord: UTM coordinates (EPSG:32629 assumed)
   * tBreak: Break date as milliseconds since Unix epoch (UTC)
   * Other columns are preserved but not used for filtering
-- search_start: Optional start date for filtering (format: 'YYYY-MM-DD' or datetime object)
-- search_end: Optional end date for filtering (format: 'YYYY-MM-DD' or datetime object)
+- search_start: Start date for filtering (format: 'YYYY-MM-DD' or datetime object)
+- search_end: End date for filtering (format: 'YYYY-MM-DD' or datetime object)
 - boundary_shapefile: Optional shapefile path for spatial filtering
 
 OUTPUTS:
-- GeoTIFF raster file (.tif): 
+- Multiple GeoTIFF raster files (.tif): One for each 2-month period
   * Pixel values represent break dates in YYYYMMDD format (integer)
   * NoData value: -9999
   * Resolution: 10m x 10m pixels
   * Coordinate system: UTM (EPSG:32629) or optionally reprojected
-- QGIS style file (.qml): Color-coded visualization by year and day-of-year
-- Optional vector file (.gpkg): Point locations with break dates for verification
+- QGIS style files (.qml): Color-coded visualization by year and day-of-year
+- Optional vector files (.gpkg): Point locations with break dates for verification
 """
 
 import pandas as pd
@@ -43,13 +47,15 @@ from rasterio.transform import from_origin
 from rasterio.warp import calculate_default_transform, reproject, Resampling
 import numpy as np
 import matplotlib.pyplot as plt
-from datetime import datetime
+from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 import colorsys
 
 def filter_pixel_group(group, search_start=None, search_end=None):
     """
     Filter a group of rows for a single pixel according to the rules:
-    - Only return the row with the highest tBreak value
+    - If only one row exists, keep it
+    - If multiple rows exist, keep the row with the second highest tBreak
     - Only consider rows within the date range if specified
     """
     # Filter by date range if specified
@@ -175,37 +181,10 @@ def read_parquet_identify_breaks(filepath):
 
     return df 
 
-def process_parquet_file(file_path, search_start=None, search_end=None, boundary_gdf=None, source_crs="EPSG:32629"):
+def load_all_data_from_directory(input_dir, boundary_shapefile=None, source_crs="EPSG:32629"):
     """
-    Process a single parquet file and return filtered rows
-    """
-    try:
-        df = read_parquet_identify_breaks(file_path)
-
-        df = df[df['is_break'] == 1]
-        
-        # Apply boundary filtering first if specified
-        if boundary_gdf is not None:
-            df = filter_points_by_boundary(df, boundary_gdf, source_crs)
-            if len(df) == 0:
-                return []
-        
-        grouped = df.groupby(['x_coord', 'y_coord'])
-        filtered_rows = []
-        
-        for (x, y), group in grouped:
-            filtered_row = filter_pixel_group(group, search_start, search_end)
-            if filtered_row is not None:
-                filtered_rows.append(filtered_row)
-        
-        return filtered_rows
-    except Exception as e:
-        print(f"Error processing {file_path}: {str(e)}")
-        return []
-
-def collect_data_from_directory(input_dir, search_start=None, search_end=None, boundary_shapefile=None, source_crs="EPSG:32629"):
-    """
-    Collect and process data from all parquet files in a directory
+    Load and process ALL data from parquet files in directory ONCE
+    Returns the master DataFrame with all breaks identified and filtered
     """
     parquet_files = glob.glob(os.path.join(input_dir, "*.parquet"))
     
@@ -220,39 +199,109 @@ def collect_data_from_directory(input_dir, search_start=None, search_end=None, b
     if boundary_shapefile is not None:
         boundary_gdf = load_boundary_shapefile(boundary_shapefile, source_crs)
     
-    # Print filtering information
-    filter_info = []
-    if search_start is not None or search_end is not None:
-        date_info = "Date filtering: "
-        if search_start is not None:
-            date_info += f"from {search_start} "
-        if search_end is not None:
-            date_info += f"to {search_end}"
-        filter_info.append(date_info)
+    all_data = []
     
-    if boundary_shapefile is not None:
-        filter_info.append(f"Spatial filtering: using boundary from {boundary_shapefile}")
-    
-    if filter_info:
-        print("Filters applied:")
-        for info in filter_info:
-            print(f"  - {info}")
-    else:
-        print("No filters applied")
-    
-    all_filtered_rows = []
-    
+    # Process each file and collect ALL break data
     for i, file_path in enumerate(parquet_files, 1):
-        print(f"Processing file {i}/{len(parquet_files)}: {os.path.basename(file_path)}")
-        filtered_rows = process_parquet_file(file_path, search_start, search_end, boundary_gdf, source_crs)
-        all_filtered_rows.extend(filtered_rows)
+        print(f"Loading file {i}/{len(parquet_files)}: {os.path.basename(file_path)}")
+        try:
+            df = read_parquet_identify_breaks(file_path)
+            # Only keep breaks (not terminal segments)
+            df = df[df['is_break'] == 1]
+            
+            # Apply boundary filtering if specified
+            if boundary_gdf is not None:
+                df = filter_points_by_boundary(df, boundary_gdf, source_crs)
+            
+            if len(df) > 0:
+                all_data.append(df)
+        except Exception as e:
+            print(f"Error processing {file_path}: {str(e)}")
+            continue
     
-    if not all_filtered_rows:
-        print("No valid data found in any files (possibly due to filtering)")
+    if not all_data:
+        print("No valid data found in any files")
         return None
     
-    print(f"Total points after all filtering: {len(all_filtered_rows)}")
-    return pd.DataFrame(all_filtered_rows)
+    # Combine all data
+    master_df = pd.concat(all_data, ignore_index=True)
+    print(f"Total break points loaded: {len(master_df)}")
+    
+    return master_df
+
+def generate_2month_periods(search_start, search_end):
+    """
+    Generate list of 2-month periods between start and end dates
+    Each period covers exactly 2 calendar months
+    
+    Returns:
+    --------
+    list of tuples: (period_start, period_end, period_name)
+    """
+    if isinstance(search_start, str):
+        start_date = pd.to_datetime(search_start)
+    else:
+        start_date = search_start
+    
+    if isinstance(search_end, str):
+        end_date = pd.to_datetime(search_end)
+    else:
+        end_date = search_end
+    
+    periods = []
+    current_date = start_date.replace(day=1)  # Start at beginning of month
+    
+    while current_date <= end_date:
+        # Calculate 2-month period
+        period_start = current_date
+        period_end = current_date + relativedelta(months=2) - timedelta(days=1)
+        
+        # Don't exceed the overall end date
+        if period_end > end_date:
+            period_end = end_date
+        
+        # Create period name
+        period_name = f"{period_start.strftime('%Y%m')}-{period_end.strftime('%Y%m')}"
+        
+        periods.append((period_start, period_end, period_name))
+        
+        # Move to next 2-month period
+        current_date = current_date + relativedelta(months=2)
+        
+        # Break if we've passed the end date
+        if current_date > end_date:
+            break
+    
+    return periods
+
+def filter_data_for_period(master_df, period_start, period_end):
+    """
+    Filter the master DataFrame for a specific time period
+    Returns filtered DataFrame with most recent break per pixel within the period
+    """
+    # Convert period dates to milliseconds
+    period_start_ms = int(period_start.timestamp() * 1000)
+    period_end_ms = int(period_end.timestamp() * 1000)
+    
+    # Filter by time period
+    period_df = master_df[
+        (master_df['tBreak'] >= period_start_ms) & 
+        (master_df['tBreak'] <= period_end_ms)
+    ].copy()
+    
+    if len(period_df) == 0:
+        return None
+    
+    # For each pixel, keep only the most recent break within this period
+    filtered_rows = []
+    grouped = period_df.groupby(['x_coord', 'y_coord'])
+    
+    for (x, y), group in grouped:
+        # Get the most recent break for this pixel in this period
+        most_recent = group.loc[group['tBreak'].idxmax()]
+        filtered_rows.append(most_recent)
+    
+    return pd.DataFrame(filtered_rows)
 
 def create_geodataframe(df, source_crs="EPSG:32629"):
     """
@@ -321,7 +370,6 @@ def create_raster_array_utm(gdf, raster_params):
                 date_obj = date_obj.tz_localize(None)
                 yyyymmdd = int(date_obj.strftime('%Y%m%d'))
                 tbreak_array[y_idx, x_idx] = yyyymmdd
-            # tbreak_array[y_idx, x_idx] = row['tBreak']
     
     return tbreak_array
 
@@ -331,7 +379,6 @@ def save_geotiff(array, output_file, raster_params, source_crs='EPSG:32629', tar
     """
     
     nodata_value = -9999
-    # array = array.astype(np.int32)
 
     # If target CRS is different from source, reproject directly
     if source_crs != target_crs:
@@ -411,7 +458,6 @@ def save_vector_points(gdf, output_file, target_crs="EPSG:32629"):
     valid_points_gdf.to_file(output_file, driver='GPKG')
     
     return len(valid_points_gdf)
-
 
 def create_qgis_style_file(gdf, output_style_file):
     """
@@ -498,93 +544,135 @@ def create_qgis_style_file(gdf, output_style_file):
     print(f"QGIS style file saved to: {output_style_file}")
     print(f"Years in data: {years}")
 
-def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_file, target_crs="EPSG:32629", 
-                                search_start=None, search_end=None, boundary_shapefile=None, qgis_style_file=False):
+def process_directory_to_multiple_geotiffs(input_dir, output_base_path, target_crs="EPSG:32629", 
+                                         search_start=None, search_end=None, boundary_shapefile=None, 
+                                         qgis_style_file=False, save_vector_files=False):
     """
-    Main function to process all parquet files in a directory and save as a single GeoTIFF
-    and a vector file of used points.
-    Uses UTM coordinates throughout and only reprojects at the end if needed.
+    Main function to process all parquet files in a directory and save as multiple GeoTIFF files
+    for 2-month periods between start and end dates.
     
     Parameters:
     -----------
     input_dir : str
         Directory containing parquet files
-    output_raster_file : str
-        Path for output GeoTIFF file
-    output_vector_file : str or None
-        Path for output vector file (None to skip)
+    output_base_path : str
+        Base path for output files (period names will be appended)
     target_crs : str
         Target coordinate reference system
-    search_start : str or datetime, optional
+    search_start : str or datetime
         Start date for filtering (e.g., '2020-01-01')
-    search_end : str or datetime, optional
+    search_end : str or datetime
         End date for filtering (e.g., '2023-12-31')
     boundary_shapefile : str, optional
         Path to shapefile for spatial boundary filtering
+    qgis_style_file : bool
+        Whether to create .qml style files
+    save_vector_files : bool
+        Whether to save vector point files
     """
-    # Create output directories if they don't exist
-    for output_file in [output_raster_file, output_vector_file]:
-        if output_file is None:
-            continue
-        output_dir = os.path.dirname(output_file)
-        if output_dir:
-            Path(output_dir).mkdir(parents=True, exist_ok=True)
+    if search_start is None or search_end is None:
+        raise ValueError("Both search_start and search_end must be provided for multi-period processing")
     
-    # Collect data from all parquet files
-    df = collect_data_from_directory(input_dir, search_start, search_end, boundary_shapefile)
-    if df is None:
-        print("No data")
+    # Create output directory if it doesn't exist
+    output_dir = os.path.dirname(output_base_path)
+    if output_dir:
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+    
+    print("="*60)
+    print("LOADING ALL DATA")
+    print("="*60)
+    
+    # Load ALL data once
+    master_df = load_all_data_from_directory(input_dir, boundary_shapefile)
+    if master_df is None:
+        print("No data loaded. Exiting.")
         return
     
-    # Create GeoDataFrame
-    gdf = create_geodataframe(df)
-
-    if qgis_style_file == True:
-        style_file = output_raster_file.replace('.tif', '_year_colors.qml')
-        create_qgis_style_file(gdf, style_file)
+    # Generate 2-month periods
+    periods = generate_2month_periods(search_start, search_end)
+    print(f"\nGenerated {len(periods)} 2-month periods:")
+    for period_start, period_end, period_name in periods:
+        print(f"  {period_name}: {period_start.strftime('%Y-%m-%d')} to {period_end.strftime('%Y-%m-%d')}")
     
-    # Calculate raster parameters
-    raster_params = calculate_raster_parameters_utm(gdf)
+    successful_periods = 0
     
-    print(f"Creating raster with dimensions: {raster_params['width']} x {raster_params['height']}")
-    print(f"Resolution: {raster_params['resolution'][0]} x {raster_params['resolution'][1]} meters")
+    # Process each period
+    for i, (period_start, period_end, period_name) in enumerate(periods, 1):
+        print(f"\n{'='*60}")
+        print(f"PROCESSING PERIOD {i}/{len(periods)}: {period_name}")
+        print(f"Date range: {period_start.strftime('%Y-%m-%d')} to {period_end.strftime('%Y-%m-%d')}")
+        print(f"{'='*60}")
+        
+        # Filter data for this period
+        period_df = filter_data_for_period(master_df, period_start, period_end)
+        
+        if period_df is None or len(period_df) == 0:
+            print(f"No data found for period {period_name}")
+            continue
+        
+        print(f"Found {len(period_df)} break points for this period")
+        
+        # Create GeoDataFrame
+        gdf = create_geodataframe(period_df)
+        
+        period_raster_file = f"{output_base_path}/{period_name}.tif"
+        
+        # Create QGIS style file if requested
+        if qgis_style_file:
+            style_file = period_raster_file.replace('.tif', '_style.qml')
+            create_qgis_style_file(gdf, style_file)
+        
+        # Calculate raster parameters
+        raster_params = calculate_raster_parameters_utm(gdf)
+        
+        print(f"Creating raster with dimensions: {raster_params['width']} x {raster_params['height']}")
+        print(f"Resolution: {raster_params['resolution'][0]} x {raster_params['resolution'][1]} meters")
+        
+        # Create raster array
+        tbreak_array = create_raster_array_utm(gdf, raster_params)
+        
+        # Save to GeoTIFF
+        save_geotiff(tbreak_array, period_raster_file, raster_params, 
+                    source_crs='EPSG:32629', target_crs=target_crs)
+        
+        print(f"GeoTIFF saved to: {period_raster_file}")
+        
+        # Save vector file if requested
+        if save_vector_files:
+            vector_file = period_raster_file.replace('.tif', '_points.gpkg')
+            num_points = save_vector_points(gdf, vector_file, target_crs)
+            print(f"Vector file saved to: {vector_file} ({num_points} points)")
+        
+        successful_periods += 1
     
-    # Create raster array
-    tbreak_array = create_raster_array_utm(gdf, raster_params)
-    
-    # Save to GeoTIFF (with optional reprojection)
-    save_geotiff(tbreak_array, output_raster_file, raster_params, source_crs='EPSG:32629', target_crs=target_crs)
-    
-    # Save vector points
-    if output_vector_file is not None:
-        num_points_saved = save_vector_points(gdf, output_vector_file, target_crs)
-        print(f"Vector points saved to: {output_vector_file}")
-        print(f"Points saved to vector file: {num_points_saved}")
-    
-    print(f"Combined GeoTIFF saved to: {output_raster_file}")
-    print(f"Total pixels processed: {len(df)}")
+    print(f"\n{'='*60}")
+    print(f"PROCESSING COMPLETE")
+    print(f"Successfully processed {successful_periods}/{len(periods)} periods")
+    print(f"{'='*60}")
 
 if __name__ == "__main__":
     # Set input directory and output files
-    input_directory = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo" # UPDATE
-    output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/testing_new_parquet_processing.tif" # UPDATE
-    output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
+    input_directory = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo"  # UPDATE
+    output_base_path = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/multiple_outputs_test"  # UPDATE
     
-    # String date range filtering (set both to None to disable filtering)
-    search_start = None  # Start date for filtering break dates ("YYYY-MM-DD" format)
-    search_end = None    # End date for filtering break dates ("YYYY-MM-DD" format)
+    # Date range - BOTH must be provided for multi-period processing
+    search_start = "2023-01-01"  # Start date for filtering break dates ("YYYY-MM-DD" format)
+    search_end = "2024-12-31"    # End date for filtering break dates ("YYYY-MM-DD" format)
     
     # Boundary shapefile filtering (set to None to disable)
     boundary_shapefile = None  # Path to shapefile for spatial boundary filtering
-
-    qgis_style_file = False  # Set to True if a .qml style file should be created
     
-    process_directory_to_geotiff(
+    # Additional options
+    qgis_style_file = False   # Set to True if .qml style files should be created
+    save_vector_files = False  # Set to True if you want vector point files for verification
+    
+    process_directory_to_multiple_geotiffs(
         input_directory, 
-        output_raster_file, 
-        output_vector_file, 
+        output_base_path, 
+        target_crs='EPSG:32629',  # or 'EPSG:4326' if you want lat/lon
         search_start=search_start, 
         search_end=search_end,
         boundary_shapefile=boundary_shapefile,
-        qgis_style_file=qgis_style_file
-    ) # target_crs='EPSG:4326'
+        qgis_style_file=qgis_style_file,
+        save_vector_files=save_vector_files
+    )
