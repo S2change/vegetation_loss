@@ -24,4 +24,4 @@ echo "CPUs utilizados: $(taskset -pc $$)"
 export OMPI_MCA_btl=self,tcp
 export OMPI_MCA_orte_base_help_aggregate=0
 
-mpiexec -n $SLURM_NTASKS python /users1/cpca070342024/scaetano/S2CHANGE/scripts/pyccd/hpc/main_mpi2.py
+mpiexec -n $SLURM_NTASKS python /users1/cpca070342024/scaetano/S2CHANGE/scripts/pyccd/hpc/main_mpi.py
