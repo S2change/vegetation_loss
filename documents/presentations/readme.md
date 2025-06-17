@@ -11,6 +11,12 @@
   - Descrição do problema: deteção de alterações, classificação, validação. Ver [diagrama](https://ulisboa-my.sharepoint.com/:p:/r/personal/mlc_office365_ulisboa_pt/_layouts/15/Doc.aspx?sourcedoc=%7B8D41864A-55FD-482B-AC2B-518CFB2E24A6%7D&file=overview_s2change.pptx&action=edit&mobileredirect=true)
   - (nov 2024) [Relatório sobre Processamento do PyCCD em plataforma de computação avançada (INCD)](../reports_sub_contracts/Entregavel_2.3.pdf)
   - (fev 2025) [Relatório sobre Processamento do PyCCD em plataforma de computação avançada (MACC Deucalion)](../reports_sub_contracts/Entregavel_3.1.pdf)
+  - Teste comparativo entre MACC e INCD com as configurações de desempenho ideais para cada plataforma (p/ 1 milhão de pixels):
+    ![image](https://github.com/user-attachments/assets/902356a0-bcb9-403f-95d8-2aacd3424379)
+    ![image](https://github.com/user-attachments/assets/8be68233-9168-42fe-b86c-91d99266a37c)
+
+
+
   - Recursos computacionais (INCD) para a componente de deteção de alterações com pyCCD. Sentinel-2 tile processing status: see [status per Sentinel-2 tile](https://ulisboa-my.sharepoint.com/my?csf=1&web=1&e=vp9h5C&FolderCTID=0x012000C2AFBA48F7C2154CB26FDFA64A376290&id=%2Fpersonal%2Fmlc%5Foffice365%5Fulisboa%5Fpt%2FDocuments%2FDocuments%2Finvestigacao%2Dprojectos%2Dreviews%2Dalunos%2Djuris%2Fprojetos%2FDGT%2DS2CHANGE%5F2023%2Fpartilhado%2Flog%5Fincd%5Fmacc) incluiding size (# pixels), memory, core-minutes in INCD, output parquet file size.
 
 
