@@ -8,9 +8,8 @@ MAIN FUNCTIONALITY:
 - Reads multiple parquet files containing change detection break points (tBreak values)
 - Filters data by date range (optional)
 - Filters data by shapefile boundary (optional)
-- For each pixel location, selects the most relevant break point using these rules:
-  * If only one break exists: keep it
-  * If multiple breaks exist: keep the one with the second-highest tBreak value
+- For each pixel location, only the most recent break point is returned
+    - If there are no breaks for the pixel, nothing is returned
 - Converts filtered point data to a georeferenced raster (GeoTIFF)
 - Creates QGIS style files for visualization
 - Optionally saves filtered points as a vector file
@@ -501,7 +500,7 @@ def create_qgis_style_file(gdf, output_style_file):
     print(f"Years in data: {years}")
 
 def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_file, target_crs="EPSG:32629", 
-                                search_start=None, search_end=None, boundary_shapefile=None):
+                                search_start=None, search_end=None, boundary_shapefile=None, qgis_style_file=False):
     """
     Main function to process all parquet files in a directory and save as a single GeoTIFF
     and a vector file of used points.
@@ -541,8 +540,9 @@ def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_fi
     # Create GeoDataFrame
     gdf = create_geodataframe(df)
 
-    style_file = output_raster_file.replace('.tif', '_year_colors.qml')
-    create_qgis_style_file(gdf, style_file)
+    if qgis_style_file == True:
+        style_file = output_raster_file.replace('.tif', '_year_colors.qml')
+        create_qgis_style_file(gdf, style_file)
     
     # Calculate raster parameters
     raster_params = calculate_raster_parameters_utm(gdf)
@@ -577,6 +577,8 @@ if __name__ == "__main__":
     
     # Boundary shapefile filtering (set to None to disable)
     boundary_shapefile = None  # Path to shapefile for spatial boundary filtering
+
+    qgis_style_file = False  # Set to True if a .qml style file should be created
     
     process_directory_to_geotiff(
         input_directory, 
@@ -584,5 +586,6 @@ if __name__ == "__main__":
         output_vector_file, 
         search_start=search_start, 
         search_end=search_end,
-        boundary_shapefile=boundary_shapefile
+        boundary_shapefile=boundary_shapefile,
+        qgis_style_file=qgis_style_file
     ) # target_crs='EPSG:4326'
