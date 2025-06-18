@@ -57,7 +57,7 @@ def setup_output_directories(base_dir):
         tuple: (raster_dir, polygon_dir)
     """
     raster_dir = os.path.join(base_dir, "rasters")
-    polygon_dir = os.path.join(base_dir, "polygons")
+    polygon_dir = os.path.join(base_dir, f"polygons_tolerance{DATE_RANGE_DAYS}_minhectares{MIN_AREA_HECTARES}")
     
     # Create directories if they don't exist
     Path(raster_dir).mkdir(parents=True, exist_ok=True)
