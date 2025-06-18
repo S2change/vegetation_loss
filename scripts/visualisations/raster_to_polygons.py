@@ -207,9 +207,9 @@ def raster_to_polygons(input_raster, output_vector, date_range_days=0,
 
 
 def main(): 
-    input_raster = "input_path.tif"  # Path to input raster TIFF file
-    output_vector = "output_path.shp"  # Path to output vector file
-    date_range_days = 0  # Number of days to group adjacent pixels (default: 0)
+    input_raster = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/testing_new_parquet_processing.tif"  # Path to input raster TIFF file
+    output_vector = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/07_30day_tol.gpkg"  # Path to output vector file
+    date_range_days = 30  # Number of days to group adjacent pixels (default: 0)
     min_area_ha = 0.5  # Minimum polygon area in hectares (default: 0.5)
     nodata_value = -9999  # Nodata value to exclude (default: -9999)
     

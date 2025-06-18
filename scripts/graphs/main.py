@@ -53,7 +53,7 @@ else:
 
 # communities
 if DO_COMPUTE_COMMUNITIES:
-    L=nx.community.louvain_communities(G, seed=123)
+    L=nx.community.louvain_communities(G, seed=123) # replace with connected compontents grouping instead of louvain_communities when running on full tile, due to processing speeds. connected components is quicker and dirtier
     if SAVE_COMMUNITIES:
         with open(COMM_PICKLE_OUTPUT, 'wb') as f:
             pickle.dump(L, f)
