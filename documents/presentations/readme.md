@@ -6,6 +6,8 @@
 - (23 de maio de 2024) [Melhoramento da BDR NVG usando informação espetral](Apresentacao_DatasCorte_DGT_23maio2024.pdf)  Implementação de técnicas baseadas nas quedas médias de NVDI em cada sub-talhão (posteriormente, o trabalho evoluiu para análise ao nível do pixel).
 - (4 de julho de 2024) [Reunião DGT/INCD/LIP](reuniao_DGT_4_julho_2024.pdf). Descrição do problema de criação do produto de perdas de vegetação: dados de referência, dados de satélite, algoritmos (CCD, etapas de processamento), estimativa de recursos computacionais
 - (18 de junho de 2025) Reunião com DGT/CNCA:
+
+  [Presentation (pdf)](Reuniao_DGT_CNCA_ISA_18_junho_2025.pdf)
   
   1. Tópicos:
   - Descrição do problema: deteção de alterações, classificação, validação. Ver [diagrama](https://ulisboa-my.sharepoint.com/:p:/r/personal/mlc_office365_ulisboa_pt/_layouts/15/Doc.aspx?sourcedoc=%7B8D41864A-55FD-482B-AC2B-518CFB2E24A6%7D&file=overview_s2change.pptx&action=edit&mobileredirect=true)
