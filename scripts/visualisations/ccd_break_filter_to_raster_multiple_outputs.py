@@ -573,6 +573,9 @@ def process_directory_to_multiple_geotiffs(input_dir, output_base_path, target_c
     if search_start is None or search_end is None:
         raise ValueError("Both search_start and search_end must be provided for multi-period processing")
     
+    # Tile name, used for file names
+    tile_name = input_dir.split("/")[-1]
+    
     # Create output directory if it doesn't exist
     output_dir = os.path.dirname(output_base_path)
     if output_dir:
@@ -615,7 +618,8 @@ def process_directory_to_multiple_geotiffs(input_dir, output_base_path, target_c
         # Create GeoDataFrame
         gdf = create_geodataframe(period_df)
         
-        period_raster_file = f"{output_base_path}/{period_name}.tif"
+        # Create raster file name
+        period_raster_file = f"{output_base_path}/{tile_name}_{period_name}.tif"
         
         # Create QGIS style file if requested
         if qgis_style_file:

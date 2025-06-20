@@ -10,8 +10,6 @@ This script processes parquet files containing change detection results:
 import os
 import glob
 from pathlib import Path
-
-# Import functions from the other scripts
 from ccd_break_filter_to_raster_multiple_outputs import process_directory_to_multiple_geotiffs
 from raster_to_polygons import raster_to_polygons
 
@@ -20,10 +18,10 @@ from raster_to_polygons import raster_to_polygons
 # ============================================================================
 
 # Input directory containing parquet files
-INPUT_DIRECTORY = "/Users/domwelsh/green_ds/Thesis/T29SMD_0999"
+INPUT_DIRECTORY = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo"
 
 # Base output directory (raster and polygon subdirectories will be created here)
-OUTPUT_BASE_DIR = "/Users/domwelsh/green_ds/Thesis/T29SMD_0999/processed_outputs"
+OUTPUT_BASE_DIR = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/processed_outputs"
 
 # Date range for processing (BOTH must be provided)
 SEARCH_START = "2023-01-01"  # Start date for filtering break dates ("YYYY-MM-DD" format)
@@ -45,6 +43,10 @@ MIN_AREA_HECTARES = 0.5     # Minimum polygon area in hectares
 NODATA_VALUE = -9999        # Nodata value to exclude from polygons
 POLYGON_FORMAT = "shp"     # Output format: "shp", "gpkg", or "geojson"
 
+# Formatted variables for output names
+TILE_NAME = INPUT_DIRECTORY.split("/")[-1]
+MIN_AREA_HECTARES_STR = str(MIN_AREA_HECTARES).replace(".", "")
+
 # ============================================================================
 # MAIN PROCESSING FUNCTIONS
 # ============================================================================
@@ -56,8 +58,9 @@ def setup_output_directories(base_dir):
     Returns:
         tuple: (raster_dir, polygon_dir)
     """
-    raster_dir = os.path.join(base_dir, "rasters")
-    polygon_dir = os.path.join(base_dir, f"polygons_tolerance{DATE_RANGE_DAYS}_minhectares{MIN_AREA_HECTARES}")
+
+    raster_dir = os.path.join(base_dir, f"{TILE_NAME}_tol{DATE_RANGE_DAYS}_{MIN_AREA_HECTARES_STR}ha_rasters")
+    polygon_dir = os.path.join(base_dir, f"{TILE_NAME}_tol{DATE_RANGE_DAYS}_{MIN_AREA_HECTARES_STR}ha_polygons")
     
     # Create directories if they don't exist
     Path(raster_dir).mkdir(parents=True, exist_ok=True)
@@ -109,7 +112,7 @@ def process_rasters_to_polygons(raster_dir, polygon_dir, date_range_days,
             base_name = os.path.splitext(os.path.basename(tiff_file))[0]
             
             # Create output polygon file path
-            polygon_file = os.path.join(polygon_dir, f"{base_name}_polygons{file_extension}")
+            polygon_file = os.path.join(polygon_dir, f"{base_name}_tol{DATE_RANGE_DAYS}_{MIN_AREA_HECTARES_STR}ha_polygons{file_extension}")
             
             print(f"\n{'='*60}")
             print(f"CONVERTING RASTER {i}/{len(tiff_files)}: {base_name}")
