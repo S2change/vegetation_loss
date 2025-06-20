@@ -54,8 +54,7 @@ import colorsys
 def filter_pixel_group(group, search_start=None, search_end=None):
     """
     Filter a group of rows for a single pixel according to the rules:
-    - If only one row exists, keep it
-    - If multiple rows exist, keep the row with the second highest tBreak
+    - Only return one row, which has the highest break value
     - Only consider rows within the date range if specified
     """
     # Filter by date range if specified
