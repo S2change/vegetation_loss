@@ -1,10 +1,12 @@
 """
 
-This script is intended to extract the spectral values of bands B2 and B11 (Blue and SWIR1) before and after the
-most recent break date identified by pyccd. It uses the end date of the second to last segment and the start date
-of the last segment to look up for the B2 and B11 values.
+This script is intended to extract the spectral values before and after the most recent break date identified by pyccd.
+It uses the end date of the second to last segment and the start date of the last segment to look up for the bands values.
 
-Note: the script should be an improvised fix to acquire the band values; a more definitive solution should include
+Currently, the script collects band data at two stages: first from the B2 and B11 bands (Blue and SWIR1) and then from the 
+original 4 bands with which pyccd was executed.
+
+Note: this script should be an improvised fix to acquire the band values; a more definitive solution should include
 acquiring B2 and B11 data as part of the pyccd processing.
 
 """
@@ -33,7 +35,8 @@ from pyccd.shared.read_files import read_tif_files_gee
 tile = "T29TNE"
 parquet_folder = "C:/Users/Public/Documents/outputs_ROI/tabular/"
 
-s2_images_folder = "C:/Users/Public/Documents/s2_images_B2_B11/"
+s2_images_folder_B2_B11 = "C:/Users/Public/Documents/s2_images_B2_B11/"
+s2_images_folder_4_bands = "D:/s2_images/"
 
 max_date = datetime(2024, 12, 31) #limit date to collect images
 
@@ -143,10 +146,10 @@ def get_indices(df, geotiffs_da):
 
 def save_to_hdf5(result, selected_values, output_h5_path):
     """
-    Saves the selection of B2 and B11 values to a hdf5 file.
+    Saves the selection of band values to a hdf5 file.
 
     Args:
-        result (np.ndarray) : array with selection of B2 and B11 values.
+        result (np.ndarray) : array with selection of band values.
         selected_values (xarray.DataArray) : DataArray object of selected values.
         output_h5_path (str) : path to directory where the file should be saved.
     """
@@ -178,50 +181,67 @@ def main():
     combined_df['tstart_ordinal'] = combined_df['max_tstart_group'].apply(lambda x: datetime.utcfromtimestamp(x/1000).toordinal())
     combined_df['tend_ordinal'] = combined_df['max_tend_group'].apply(lambda x: datetime.utcfromtimestamp(x/1000).toordinal())
 
-    #get tif dates
-    tif_names, tif_dates = read_tif_files_gee(tile, os.path.join(s2_images_folder, tile), max_date)
-    tif_dates_ord = [d.toordinal() for d in tif_dates]
+    stages = {'Bands B2 and B11': s2_images_folder_B2_B11, 'Original 4 bands':s2_images_folder_4_bands}
 
-    #crate xarray time variable
-    time_var = xr.Variable('time',tif_dates_ord)
+    #initialize empty array of shape (2, n_points, 6) -> where 2 corresponds to data from pre and post break
+    result = np.empty((2, len(combined_df), 6), dtype=np.float32)
 
-    # Load in and concatenate all individual GeoTIFFs
-    tifs_xr = [rioxarray.open_rasterio(os.path.join(s2_images_folder, tile, i), chunks={'x':-1, 'y':100, 'band':2}) for i in tif_names]
-    geotiffs_da = xr.concat(tifs_xr, dim=time_var)
+    for k,v in stages.items(): #order matters - it goes in alphabetical order of keys (does B2B11 first)
 
-    #get indices to perform the selection of data
-    x_inds, y_inds, time_end_inds, time_start_inds = get_indices(combined_df, geotiffs_da)
+        print("Collecting spectral info from {}".format(k))
 
-    #initialize empty array
-    result = np.empty((2, len(combined_df), 2), dtype=np.float32)
+        s2_images_folder = v
 
-    #initialize Dask progress bar
-    ProgressBar().register()
+        #get tif dates
+        tif_names, tif_dates = read_tif_files_gee(tile, os.path.join(s2_images_folder, tile), max_date)
+        tif_dates_ord = [d.toordinal() for d in tif_dates]
 
-    #perform value selection based on coordinates and dates
-    #step 1.2: get values of tend (can be done directly, since we already have access to the indices)
-    print('Collecting values pre break')
-    #select values
-    selected_values = geotiffs_da.isel(
-        x=xr.DataArray(x_inds, dims='z'),
-        y=xr.DataArray(y_inds, dims='z'),
-        time=xr.DataArray(time_end_inds, dims='z')
-    )
-    #fill result array
-    result[0,:] = selected_values.values
+        #crate xarray time variable
+        time_var = xr.Variable('time',tif_dates_ord)
 
-    #step 2: get values of tstart (can be done directly, since we already have access to the indices)
-    print('Collecting values post break')
-    #select values
-    selected_values = geotiffs_da.isel(
-        x=xr.DataArray(x_inds, dims='z'),
-        y=xr.DataArray(y_inds, dims='z'),
-        time=xr.DataArray(time_start_inds, dims='z')
-    )
-    #fill result array
-    result[1,:] = selected_values.values
+        # Load in and concatenate all individual GeoTIFFs
+        tifs_xr = [rioxarray.open_rasterio(os.path.join(s2_images_folder, tile, i), chunks={'x':-1, 'y':100, 'band':-1}) for i in tif_names]
+        geotiffs_da = xr.concat(tifs_xr, dim=time_var)
 
-    
+        #get indices to perform the selection of data
+        x_inds, y_inds, time_end_inds, time_start_inds = get_indices(combined_df, geotiffs_da)
+
+        #initialize Dask progress bar
+        ProgressBar().register()
+
+        #perform value selection based on coordinates and dates
+        #step 1.2: get values of tend (can be done directly, since we already have access to the indices)
+        print('---- Collecting values pre break')
+        #select values
+        selected_values = geotiffs_da.isel(
+            x=xr.DataArray(x_inds, dims='z'),
+            y=xr.DataArray(y_inds, dims='z'),
+            time=xr.DataArray(time_end_inds, dims='z')
+        )
+        #fill result array
+        if k == 'Bands B2 and B11':
+            result[0,:,:2] = selected_values.values
+        elif k == 'Original 4 bands':
+            result[0,:,2:] = selected_values.values
+
+        #step 2: get values of tstart (can be done directly, since we already have access to the indices)
+        print('---- Collecting values post break')
+        #select values
+        selected_values = geotiffs_da.isel(
+            x=xr.DataArray(x_inds, dims='z'),
+            y=xr.DataArray(y_inds, dims='z'),
+            time=xr.DataArray(time_start_inds, dims='z')
+        )
+         #fill result array
+        if k == 'Bands B2 and B11':
+            result[1,:,:2] = selected_values.values
+        elif k == 'Original 4 bands':
+            result[1,:,2:] = selected_values.values
+
+    #reorder result to have bands in natural order (B2, B3, B4, B8, B11, B12)
+    idx_order = [0,2,3,4,1,5]
+    result = result[:,:,idx_order]
+
     #save result to hdf5 file
     output_path_with_filename = os.path.join(output_h5_folder, tile, h5_filename)
     save_to_hdf5(result, selected_values, output_path_with_filename)
@@ -229,9 +249,15 @@ def main():
     
     
 if __name__ == '__main__':
-    t1 = time.time()
-    print("Started execution for tile {}.".format(tile))
+    for t in ['T29TME']:#['T29SMC','T29SNB','T29SNC','T29SPB','T29SPC','T29TME','T29TNF','T29TNG','T29TPE','T29TQG']:
+        tile = t
+        t1 = time.time()
+        print("Started execution for tile {}.".format(tile))
 
-    main()
+        main()
 
-    print("Execution finished - HDF5 file created for tile {}. Execution took {} minutes".format(tile, round((time.time()-t1)/60,2)))
+        print("Execution finished - HDF5 file created for tile {}. Execution took {} minutes".format(tile, round((time.time()-t1)/60,2)))
+
+# TODO
+#separar os hdf5 do pre e pos break dos outros hdf5 (pasta separada) e.g. pre-post
+#nomear o hdf5 com as datas limites que foram usadas
