@@ -3,7 +3,7 @@ Script that conducts accuracy assessment of change detection results from raster
 
 Inputs:
     RASTER_FILE: path to raster file containing change detection dates in YYYYMMDD format
-    BDR_DGT: path to the shapefile/geopackage of the reference dataset used for validation 
+    REFERENCE_FILE: path to the shapefile/geopackage of the reference dataset used for validation 
 
 Outputs:
     - Creates CSV files with accuracy assessment results in a new folder
@@ -20,7 +20,12 @@ theta = 60 # +/- theta days of tolerance
 bandFilter = None #not implemented yet - do not touch
 
 RASTER_FILE = r'/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/processed_outputs/BDR_300_artigo_tol30_05ha_rasters/BDR_300_artigo_202301-202302.tif'
-BDR_DGT = r'/Users/domwelsh/green_ds/Thesis/BDR_TNE_300/BDR_CCDC_TNE_Adjusted.shp'
+REFERENCE_FILE = r'/Users/domwelsh/green_ds/Thesis/BDR_TNE_300/BDR_CCDC_TNE_Adjusted.shp'
+# Add polygon file path to create and use mask raster file with the polygons
+# Add output path for where masked raster file should be kept
+# Code will also check for existing mask file, and use that if it exists
+POLYGON_FILE = r'/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/processed_outputs/BDR_300_artigo_tol30_05ha_polygons/BDR_300_artigo_202301-202302_tol30_05ha_polygons.shp'
+MASK_OUTPUT_PATH = r'/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/processed_outputs/masked_rasters/mask_test.tif'
 
 import os
 from datetime import datetime
@@ -29,6 +34,7 @@ import numpy as np
 import geopandas as gpd
 import rasterio
 import rasterio.transform
+from rasterio.mask import mask
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -52,6 +58,117 @@ def yyyymmdd_to_datetime(date_int):
       return datetime(year, month, day)
   else:
       return pd.NaT  # Return NaT for invalid dates
+  
+
+def mask_raster_with_polygons(raster_file, polygon_file, output_file=None, 
+                             crop=True, filled=True, invert=False):
+  """
+  Create a new masked raster file using polygon boundaries.
+  
+  This function reads a raster file and a polygon file, then creates a new
+  raster where pixels outside the polygon boundaries are set to NoData.
+  
+  Args:
+    raster_file (str): Path to input raster file
+    polygon_file (str): Path to polygon shapefile/geopackage for masking
+    output_file (str, optional): Path for output masked raster. If None,
+                                creates filename based on input raster name
+    crop (bool): If True, crop the raster to the extent of the polygons.
+                If False, keep original raster extent. Default: True
+    filled (bool): If True, pixels outside polygons become NoData.
+                  If False, pixels inside polygons become NoData. Default: True
+    invert (bool): If True, invert the mask (mask becomes the area to keep).
+                  Default: False
+  
+  Returns:
+    str: Path to the created masked raster file
+      
+  Raises:
+    FileNotFoundError: If input files don't exist
+    ValueError: If CRS reprojection fails or geometries are invalid
+  """
+  
+  # Validate input files exist
+  if not os.path.exists(raster_file):
+    raise FileNotFoundError(f"Raster file not found: {raster_file}")
+  if not os.path.exists(polygon_file):
+    raise FileNotFoundError(f"Polygon file not found: {polygon_file}")
+  
+  # Generate output filename if not provided
+  if output_file is None:
+    raster_dir = os.path.dirname(raster_file)
+    raster_name = os.path.splitext(os.path.basename(raster_file))[0]
+    polygon_name = os.path.splitext(os.path.basename(polygon_file))[0]
+    output_file = os.path.join(raster_dir, f"{raster_name}_masked_by_{polygon_name}.tif")
+  
+  # Ensure output directory exists
+  output_dir = os.path.dirname(output_file)
+  if output_dir and not os.path.exists(output_dir):
+    os.makedirs(output_dir)
+  
+  print(f"Reading polygon file: {polygon_file}")
+  # Read polygon file
+  polygons_gdf = gpd.read_file(polygon_file)
+  
+  # Check if polygons have valid geometries
+  if polygons_gdf.empty:
+    raise ValueError("Polygon file contains no features")
+  
+  # Remove any invalid geometries
+  valid_geoms = polygons_gdf.geometry.is_valid
+  if not valid_geoms.all():
+    print(f"Warning: Found {(~valid_geoms).sum()} invalid geometries. Removing them.")
+    polygons_gdf = polygons_gdf[valid_geoms]
+  
+  if polygons_gdf.empty:
+    raise ValueError("No valid geometries found in polygon file")
+  
+  print(f"Reading raster file: {raster_file}")
+  # Open raster and get its CRS
+  with rasterio.open(raster_file) as src:
+    raster_crs = src.crs
+    
+    # Reproject polygons to match raster CRS if needed
+    if polygons_gdf.crs != raster_crs:
+      print(f"Reprojecting polygons from {polygons_gdf.crs} to {raster_crs}")
+      try:
+        polygons_gdf = polygons_gdf.to_crs(raster_crs)
+      except Exception as e:
+        raise ValueError(f"Failed to reproject polygons to raster CRS: {e}")
+    
+    # Extract geometries for masking
+    geometries = polygons_gdf.geometry.values
+    
+    print("Applying mask to raster...")
+    # Apply mask
+    try:
+      masked_image, masked_transform = mask(
+        src, 
+        geometries, 
+        crop=crop, 
+        filled=filled,
+        invert=invert
+      )
+    except Exception as e:
+      raise ValueError(f"Failed to apply mask: {e}")
+    
+    # Prepare metadata for output file
+    masked_meta = src.meta.copy()
+    masked_meta.update({
+      "driver": "GTiff",
+      "height": masked_image.shape[1],
+      "width": masked_image.shape[2],
+      "transform": masked_transform,
+      "compress": "lzw"  # Add compression to reduce file size
+    })
+  
+  print(f"Writing masked raster to: {output_file}")
+  # Write masked raster to new file
+  with rasterio.open(output_file, "w", **masked_meta) as dest:
+    dest.write(masked_image)
+  
+  print(f"Successfully created masked raster: {output_file}")
+  return output_file
 
 
 def spatialJoin(pathPoligonosDGT, dfCCDC):
@@ -59,13 +176,13 @@ def spatialJoin(pathPoligonosDGT, dfCCDC):
   Perform spatial join between change detection results and reference polygons.
 
   Args:
-      pathPoligonosDGT: Path to reference polygons shapefile/geopackage from validation dataset
-      dfCCDC: DataFrame containing change detection results with coordinates and dates
-      
+    pathPoligonosDGT: Path to reference polygons shapefile/geopackage from validation dataset
+    dfCCDC: DataFrame containing change detection results with coordinates and dates
+    
   Returns:
-      tuple: (filtered_subset, full_subset)
-          - filtered_subset: DataFrame with selected columns for analysis
-          - full_subset: Complete DataFrame with all spatial join results
+    tuple: (filtered_subset, full_subset)
+      - filtered_subset: DataFrame with selected columns for analysis
+      - full_subset: Complete DataFrame with all spatial join results
   """
   # 1) ABRIR OS ARQUIVOS
   ## Poligonos DGT
@@ -98,17 +215,17 @@ def spatialJoin(pathPoligonosDGT, dfCCDC):
   
   ## As datas da DGT estao no formato (20200103) e precisam ser convertidas
   for dataCol in ['data_0', 'data_1', 'data_2', 'data_3']:
-      # primeiro converter para datetime
-      maskZero = pd.Series(np.zeros(len(identity),dtype=bool))
-      erro = identity[dataCol].isnull()
-      identity.loc[erro, dataCol] = 0
-      # converter tudo para inteiros e onde for 0 indicar 1970
-      identity[dataCol] = identity[dataCol].astype(int)
-      maskZero = identity.loc[:, dataCol] == 0
-      identity.loc[maskZero, dataCol] = 19700101
-      # converter para datetime
-      identity[dataCol] = pd.to_datetime(identity[dataCol], format = '%Y%m%d')
-      identity.loc[maskZero, dataCol] = np.nan
+    # primeiro converter para datetime
+    maskZero = pd.Series(np.zeros(len(identity),dtype=bool))
+    erro = identity[dataCol].isnull()
+    identity.loc[erro, dataCol] = 0
+    # converter tudo para inteiros e onde for 0 indicar 1970
+    identity[dataCol] = identity[dataCol].astype(int)
+    maskZero = identity.loc[:, dataCol] == 0
+    identity.loc[maskZero, dataCol] = 19700101
+    # converter para datetime
+    identity[dataCol] = pd.to_datetime(identity[dataCol], format = '%Y%m%d')
+    identity.loc[maskZero, dataCol] = np.nan
 
 
   # 4) SPATIAL JOIN ENTRE OS CENTROIDES DO CCDC COM OS BUFFERS DE 200 METROS
@@ -145,7 +262,7 @@ def spatialJoin(pathPoligonosDGT, dfCCDC):
   for row in subset.itertuples():
     # verifica se há duas datas e duplica a linha
     if row.analistas == 2:
-        dfTemp = pd.concat([dfTemp, subset[subset.index==row.Index]],ignore_index=False)#dfTemp.append(subset[subset.index == row.Index], ignore_index=False)
+      dfTemp = pd.concat([dfTemp, subset[subset.index==row.Index]],ignore_index=False)#dfTemp.append(subset[subset.index == row.Index], ignore_index=False)
   dfTemp.data1_z = dfTemp.data_3
   # capturar o valor da data_2
   # defTemp.data0_z = dfTemp.data_2
@@ -189,31 +306,31 @@ def preprocessRaster(raster_path):
   Pixels with nodata values represent locations where no change was detected.
 
   Args:
-      raster_path: Path to raster file containing change detection results
-                  (Band 1 = tBreak dates in YYYYMMDD format)
+    raster_path: Path to raster file containing change detection results
+                (Band 1 = tBreak dates in YYYYMMDD format)
 
   Returns:
-      pandas.DataFrame: Contains columns:
-          - longitude, latitude: Geographic coordinates of change pixels
-          - tBreak: Change detection dates as datetime objects
-          - changeProb: Change probability (set to 1 for all detected changes)
-          - coord_ccdc: Tuple of (latitude, longitude) for indexing
+    pandas.DataFrame: Contains columns:
+      - longitude, latitude: Geographic coordinates of change pixels
+      - tBreak: Change detection dates as datetime objects
+      - changeProb: Change probability (set to 1 for all detected changes)
+      - coord_ccdc: Tuple of (latitude, longitude) for indexing
   """
     
   with rasterio.open(raster_path) as src:
-      # Extract necessary data from raster
-      band_data = src.read(1)
-      transform = src.transform
-      rows, cols = np.where(band_data != src.nodata)
-      xs, ys = rasterio.transform.xy(transform, rows, cols)
-      tbreak_values = band_data[rows, cols]
+    # Extract necessary data from raster
+    band_data = src.read(1)
+    transform = src.transform
+    rows, cols = np.where(band_data != src.nodata)
+    xs, ys = rasterio.transform.xy(transform, rows, cols)
+    tbreak_values = band_data[rows, cols]
   
   # Create the DataFrame
   df = pd.DataFrame({
-      'longitude': xs,
-      'latitude': ys,
-      'tBreak': [yyyymmdd_to_datetime(val) for val in tbreak_values],
-      'changeProb': 1,  # All pixels represent detected changes
+    'longitude': xs,
+    'latitude': ys,
+    'tBreak': [yyyymmdd_to_datetime(val) for val in tbreak_values],
+    'changeProb': 1,  # All pixels represent detected changes
   })
   
   # Create coord_ccdc as tuple of (latitude, longitude)
@@ -233,13 +350,13 @@ def valPol(df, theta):
   a specified tolerance window to classify as True/False Positives/Negatives.
 
   Args:
-      df: DataFrame from spatialJoin containing model results and reference data
-      theta: Tolerance threshold in days for matching model and reference dates
+    df: DataFrame from spatialJoin containing model results and reference data
+    theta: Tolerance threshold in days for matching model and reference dates
 
   Returns:
-      tuple: (summary_df, full_df)
-          - summary_df: DataFrame with key columns for analysis
-          - full_df: Complete DataFrame with all validation metrics (VP, FP, FN, VN)
+    tuple: (summary_df, full_df)
+      - summary_df: DataFrame with key columns for analysis
+      - full_df: Complete DataFrame with all validation metrics (VP, FP, FN, VN)
   """
 
   # transforma a coluna de delta min para valor absoluto e cria uma nova coluna com o mínimo delta min por ponto
@@ -361,10 +478,10 @@ def testeRemove(groupedby):
   by keeping only the row with minimum temporal distance.
 
   Args:
-      groupedby: DataFrame group containing rows for a single buffer_ID
-      
+    groupedby: DataFrame group containing rows for a single buffer_ID
+    
   Returns:
-      DataFrame: Filtered group with duplicate rows removed
+    DataFrame: Filtered group with duplicate rows removed
   """
   min_delta_min = groupedby['Min_delta_min'].min()
   #remove rows only if there is more than 1 row per point, the number of analyst dates is not zero and min_delta_min is greater than zero.
@@ -381,7 +498,7 @@ def testeRemove(groupedby):
   return groupedby
 
 
-def runValidation(RASTER_FILE, BDR_DGT, theta):
+def runValidation(RASTER_FILE, REFERENCE_FILE, POLYGON_FILE, MASK_OUTPUT_PATH, theta):
   """
   Execute complete accuracy assessment workflow for raster-based change detection results.
 
@@ -389,19 +506,19 @@ def runValidation(RASTER_FILE, BDR_DGT, theta):
   performs spatial join with reference data, calculates accuracy metrics, and saves results.
 
   Args:
-      RASTER_FILE: Path to raster file containing change detection dates in YYYYMMDD format
-      BDR_DGT: Path to reference dataset shapefile/geopackage for validation
-      theta: Tolerance margin for validation in days (integer)
+    RASTER_FILE: Path to raster file containing change detection dates in YYYYMMDD format
+    REFERENCE_FILE: Path to reference dataset shapefile/geopackage for validation
+    theta: Tolerance margin for validation in days (integer)
 
   Returns:
-      None - Prints validation metrics to console and saves CSV files:
-          - pre_proc.csv: Preprocessed raster data
-          - VAL_{raster_name}.csv: Complete validation results
+    None - Prints validation metrics to console and saves CSV files:
+      - pre_proc.csv: Preprocessed raster data
+      - VAL_{raster_name}.csv: Complete validation results
           
   Output metrics:
-      - F1-score: Harmonic mean of precision and recall
-      - Omission error: False negative rate  
-      - Commission error: False positive rate
+    - F1-score: Harmonic mean of precision and recall
+    - Omission error: False negative rate  
+    - Commission error: False positive rate
   """
 
   print('A correr validação dos resultados do ccd...')
@@ -412,10 +529,15 @@ def runValidation(RASTER_FILE, BDR_DGT, theta):
 
   results_path = os.path.join(raster_path, f"{raster_name}_accuracy_assessment")
   if not os.path.exists(results_path):
-      os.makedirs(results_path)
+    os.makedirs(results_path)
+
+  if POLYGON_FILE:
+    raster_input = mask_raster_with_polygons(RASTER_FILE, POLYGON_FILE, MASK_OUTPUT_PATH)
+  else:
+    raster_input = RASTER_FILE
   
   #correr pre-processamento
-  csv_s2 = preprocessRaster(RASTER_FILE)
+  csv_s2 = preprocessRaster(raster_input)
   csv_preprocessed_path = os.path.join(results_path, 'pre_proc.csv')
   csv_s2.to_csv(csv_preprocessed_path)
 
@@ -423,7 +545,7 @@ def runValidation(RASTER_FILE, BDR_DGT, theta):
   Faz join dos pontos do csv com a informação de referencia da DGT (300 buffers). É associada aos pontos a informação da validação - data de alteração, tipo, classes, etc.
   """
   #executa o join
-  ccdcVal, ccdcVal_T = spatialJoin(BDR_DGT, csv_s2)
+  ccdcVal, ccdcVal_T = spatialJoin(REFERENCE_FILE, csv_s2)
   """## Validação
   Faz a validação da deteção - compara resultado do modelo (ccd) com dados de referência DGT
   """ 
@@ -450,4 +572,4 @@ def runValidation(RASTER_FILE, BDR_DGT, theta):
 #%%
 
 
-runValidation(RASTER_FILE, BDR_DGT, theta)
+runValidation(RASTER_FILE, REFERENCE_FILE, POLYGON_FILE, MASK_OUTPUT_PATH, theta)
