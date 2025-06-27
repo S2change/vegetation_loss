@@ -18,13 +18,14 @@ Outputs:
 theta = 60 # +/- theta days of tolerance
 # band used for magnitude filtering
 bandFilter = None #not implemented yet - do not touch
+# Reference file is the same whether running single or batch
+REFERENCE_FILE = r'/Users/domwelsh/green_ds/Thesis/BDR_TNE_300/BDR_CCDC_TNE_Adjusted.shp'
 
 # ---------------------------------
 #      RUNNING SINGLE FILE
 # ---------------------------------
 # These variables are only used if RASTER_DIRECTORY = None
 RASTER_FILE = r'/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/processed_outputs/BDR_300_artigo_tol30_05ha_rasters/BDR_300_artigo_202301-202302.tif'
-REFERENCE_FILE = r'/Users/domwelsh/green_ds/Thesis/BDR_TNE_300/BDR_CCDC_TNE_Adjusted.shp'
 # Add polygon file path to create and use mask raster file with the polygons. Set to None if full raster file should be used
 POLYGON_FILE = r'/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/processed_outputs/BDR_300_artigo_tol30_05ha_polygons/BDR_300_artigo_202301-202302_tol30_05ha_polygons.shp'
 # Add output path for where masked raster file should be kept
