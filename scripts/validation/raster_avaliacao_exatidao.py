@@ -21,10 +21,10 @@ bandFilter = None #not implemented yet - do not touch
 
 RASTER_FILE = r'/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/processed_outputs/BDR_300_artigo_tol30_05ha_rasters/BDR_300_artigo_202301-202302.tif'
 REFERENCE_FILE = r'/Users/domwelsh/green_ds/Thesis/BDR_TNE_300/BDR_CCDC_TNE_Adjusted.shp'
-# Add polygon file path to create and use mask raster file with the polygons
+# Add polygon file path to create and use mask raster file with the polygons. Set to None if full raster file should be used
+POLYGON_FILE = r'/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/processed_outputs/BDR_300_artigo_tol30_05ha_polygons/BDR_300_artigo_202301-202302_tol30_05ha_polygons.shp'
 # Add output path for where masked raster file should be kept
 # Code will also check for existing mask file, and use that if it exists
-POLYGON_FILE = r'/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/processed_outputs/BDR_300_artigo_tol30_05ha_polygons/BDR_300_artigo_202301-202302_tol30_05ha_polygons.shp'
 MASK_OUTPUT_PATH = r'/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/processed_outputs/masked_rasters/mask_test.tif'
 
 import os
@@ -100,6 +100,10 @@ def mask_raster_with_polygons(raster_file, polygon_file, output_file=None,
     raster_name = os.path.splitext(os.path.basename(raster_file))[0]
     polygon_name = os.path.splitext(os.path.basename(polygon_file))[0]
     output_file = os.path.join(raster_dir, f"{raster_name}_masked_by_{polygon_name}.tif")
+  
+  if os.path.exists(output_file):
+    print(f"Masked file already exists: {output_file}")
+    return output_file
   
   # Ensure output directory exists
   output_dir = os.path.dirname(output_file)
