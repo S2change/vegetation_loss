@@ -19,6 +19,10 @@ theta = 60 # +/- theta days of tolerance
 # band used for magnitude filtering
 bandFilter = None #not implemented yet - do not touch
 
+# ---------------------------------
+#      RUNNING SINGLE FILE
+# ---------------------------------
+# These variables are only used if RASTER_DIRECTORY = None
 RASTER_FILE = r'/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/processed_outputs/BDR_300_artigo_tol30_05ha_rasters/BDR_300_artigo_202301-202302.tif'
 REFERENCE_FILE = r'/Users/domwelsh/green_ds/Thesis/BDR_TNE_300/BDR_CCDC_TNE_Adjusted.shp'
 # Add polygon file path to create and use mask raster file with the polygons. Set to None if full raster file should be used
@@ -26,6 +30,17 @@ POLYGON_FILE = r'/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/processed_output
 # Add output path for where masked raster file should be kept
 # Code will also check for existing mask file, and use that if it exists
 MASK_OUTPUT_PATH = r'/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/processed_outputs/masked_rasters/mask_test.tif'
+
+# ---------------------------------
+#      RUNNING BATCH
+# ---------------------------------
+# If RASTER_DIRECTORY is not None, then the script will process all raster files in the directory
+# These variables are used instead of the variables in RUNNING SINGLE FILE
+RASTER_DIRECTORY = r'/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/processed_outputs/BDR_300_artigo_tol30_05ha_rasters'  # Path to directory containing multiple raster files
+POLYGON_DIRECTORY = r'/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/processed_outputs/BDR_300_artigo_tol30_05ha_polygons' # Path to directory containing polygon files (optional)
+MASK_OUTPUT_DIRECTORY = r'/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/processed_outputs/BDR_300artigo_tol30_05ha_masked_rasters'  # Path to directory where masked rasters should be saved (required if POLYGON_DIRECTORY is provided)
+# ---------------------------------
+# ---------------------------------
 
 import os
 from datetime import datetime
@@ -58,6 +73,36 @@ def yyyymmdd_to_datetime(date_int):
       return datetime(year, month, day)
   else:
       return pd.NaT  # Return NaT for invalid dates
+  
+
+def find_matching_polygon(raster_filename, polygon_directory):
+    """
+    Find polygon file that matches the raster filename.
+    
+    Args:
+      raster_filename: Name of the raster file (without extension)
+      polygon_directory: Directory containing polygon files
+      
+    Returns:
+      str or None: Full path to matching polygon file, or None if not found
+    """
+    if not polygon_directory or not os.path.exists(polygon_directory):
+      return None
+    
+    # Get all polygon files in directory
+    polygon_extensions = ['.shp', '.gpkg']
+    polygon_files = []
+    for ext in polygon_extensions:
+      polygon_files.extend([f for f in os.listdir(polygon_directory) if f.endswith(ext)])
+    
+    # Find matching polygon file (starts with same name as raster)
+    raster_base = os.path.splitext(raster_filename)[0]
+    for polygon_file in polygon_files:
+      polygon_base = os.path.splitext(polygon_file)[0]
+      if polygon_base.startswith(raster_base):
+        return os.path.join(polygon_directory, polygon_file)
+    
+    return None
   
 
 def mask_raster_with_polygons(raster_file, polygon_file, output_file=None, 
@@ -287,6 +332,10 @@ def spatialJoin(pathPoligonosDGT, dfCCDC):
 
   # Contagem do numero de breaks
   subset['Valid_breaks'] = np.ceil(subset.groupby(['coord_ccdc', 'nome'])['changeProb'].transform('sum'))
+
+  # Updated to handle NaN values
+  subset['data1_z'] = subset['data1_z'].replace('', np.nan)
+  subset['data1_z'] = pd.to_datetime(subset['data1_z'], errors='coerce')
 
   # COLUNA DO DELTA MIN
   subset['delta_min'] = (subset.data1_z - subset.tBreak).dt.days
@@ -573,7 +622,187 @@ def runValidation(RASTER_FILE, REFERENCE_FILE, POLYGON_FILE, MASK_OUTPUT_PATH, t
   print('Commission error = {}%'.format(round(100*cm,2)))
 
   DF_FINAL_T.to_csv(os.path.join(results_path, f'VAL_{raster_name}.csv'), index=False)
-#%%
 
 
-runValidation(RASTER_FILE, REFERENCE_FILE, POLYGON_FILE, MASK_OUTPUT_PATH, theta)
+def runBatchValidation(raster_directory, reference_file, polygon_directory=None, 
+                      mask_output_directory=None, theta=60):
+    """
+    Execute accuracy assessment for all raster files in a directory.
+    
+    Args:
+        raster_directory: Directory containing raster files to process
+        reference_file: Path to reference dataset (same for all files)
+        polygon_directory: Directory containing polygon files for masking (optional)
+        mask_output_directory: Directory for saving masked rasters (required if polygon_directory provided)
+        theta: Tolerance margin for validation in days
+        
+    Returns:
+        pandas.DataFrame: Summary of results for all processed files
+    """
+    
+    if not os.path.exists(raster_directory):
+        raise FileNotFoundError(f"Raster directory not found: {raster_directory}")
+    
+    # Get all raster files
+    raster_files = [f for f in os.listdir(raster_directory) if f.endswith('.tif')]
+    
+    if not raster_files:
+        print(f"No .tif files found in {raster_directory}")
+        return None
+    
+    print(f"Found {len(raster_files)} raster files to process")
+    
+    # Create master results directory
+    master_results_dir = os.path.join(raster_directory, "batch_accuracy_assessment")
+    if not os.path.exists(master_results_dir):
+        os.makedirs(master_results_dir)
+    
+    # Track results
+    batch_results = []
+    failed_files = []
+    
+    for i, raster_file in enumerate(raster_files, 1):
+        print(f"\n{'='*60}")
+        print(f"Processing file {i}/{len(raster_files)}: {raster_file}")
+        print(f"{'='*60}")
+        
+        try:
+            raster_path = os.path.join(raster_directory, raster_file)
+            
+            # Find matching polygon file if polygon directory provided
+            polygon_path = None
+            mask_output_path = None
+            
+            if polygon_directory:
+                polygon_path = find_matching_polygon(raster_file, polygon_directory)
+                if polygon_path:
+                    print(f"Found matching polygon: {os.path.basename(polygon_path)}")
+                    if mask_output_directory:
+                        mask_filename = f"mask_{os.path.splitext(raster_file)[0]}.tif"
+                        mask_output_path = os.path.join(mask_output_directory, mask_filename)
+                    else:
+                        print("Warning: MASK_OUTPUT_DIRECTORY not provided, using default location")
+                        mask_output_path = None
+                else:
+                    print(f"No matching polygon found for {raster_file}")
+            
+            # Run validation for this file
+            success = runSingleValidation(raster_path, reference_file, polygon_path, 
+                                        mask_output_path, theta, batch_results)
+            
+            if not success:
+                failed_files.append(raster_file)
+                
+        except Exception as e:
+            print(f"Error processing {raster_file}: {str(e)}")
+            failed_files.append(raster_file)
+            continue
+    
+    # Save batch summary
+    if batch_results:
+        summary_df = pd.DataFrame(batch_results)
+        summary_path = os.path.join(master_results_dir, "batch_summary.csv")
+        summary_df.to_csv(summary_path, index=False)
+        print(f"\n{'='*60}")
+        print("BATCH PROCESSING COMPLETE")
+        print(f"{'='*60}")
+        print(f"Successfully processed: {len(batch_results)} files")
+        print(f"Failed: {len(failed_files)} files")
+        if failed_files:
+            print(f"Failed files: {', '.join(failed_files)}")
+        print(f"Summary saved to: {summary_path}")
+        return summary_df
+    else:
+        print("No files were successfully processed")
+        return None
+
+
+def runSingleValidation(raster_file, reference_file, polygon_file, mask_output_path, theta, batch_results=None):
+    """
+    Modified version of runValidation that can be called from batch processing.
+    
+    Args:
+        raster_file: Path to single raster file
+        reference_file: Path to reference dataset
+        polygon_file: Path to polygon file (can be None)
+        mask_output_path: Path for masked raster output (can be None)
+        theta: Tolerance margin in days
+        batch_results: List to append results to (for batch processing)
+        
+    Returns:
+        bool: True if successful, False if failed
+    """
+    try:
+        print('Running validation for raster results...')
+        
+        raster_name = os.path.basename(raster_file)
+        raster_path = os.path.dirname(raster_file)
+
+        results_path = os.path.join(raster_path, f"{raster_name}_accuracy_assessment")
+        if not os.path.exists(results_path):
+            os.makedirs(results_path)
+
+        if polygon_file:
+            raster_input = mask_raster_with_polygons(raster_file, polygon_file, mask_output_path)
+        else:
+            raster_input = raster_file
+        
+        # Run preprocessing
+        csv_s2 = preprocessRaster(raster_input)
+        csv_preprocessed_path = os.path.join(results_path, 'pre_proc.csv')
+        csv_s2.to_csv(csv_preprocessed_path)
+
+        # Execute spatial join
+        ccdcVal, ccdcVal_T = spatialJoin(reference_file, csv_s2)
+        
+        # Perform validation
+        DF_FINAL, DF_FINAL_T = valPol(ccdcVal_T, theta)
+        
+        # Calculate metrics
+        df_aux = DF_FINAL_T.copy()
+        df_aux = df_aux.loc[(df_aux.altera=="Sem Alteracao")|((df_aux.altera=="Com Alteracao")&(df_aux.classeAnterior.isin(['Pinheiro bravo','Eucalipto']))&(df_aux.classeAtual.isin(['Superficie sem vegetacao escura','Superficie sem vegetacao clara','Vegetacao herbacea espontanea','Matos'])))]
+        df_aux = df_aux.loc[df_aux.bordadura==0]
+        
+        cm = df_aux.FP.sum()/(df_aux.FP.sum()+df_aux.VP.sum())
+        om = df_aux.FN.sum()/(df_aux.FN.sum()+df_aux.VP.sum())
+        f1 = 2*(1-om)*(1-cm)/(2-om-cm)
+        
+        print("Validation metrics for file:")
+        print(raster_name)
+        print('F1-score = {}%'.format(round(100*f1,2)))
+        print('Omission error = {}%'.format(round(100*om,2)))
+        print('Commission error = {}%'.format(round(100*cm,2)))
+
+        DF_FINAL_T.to_csv(os.path.join(results_path, f'VAL_{raster_name}.csv'), index=False)
+        
+        # Add to batch results if provided
+        if batch_results is not None:
+            batch_results.append({
+                'filename': raster_name,
+                'f1_score': round(100*f1, 2),
+                'omission_error': round(100*om, 2),
+                'commission_error': round(100*cm, 2),
+                'total_VP': int(df_aux.VP.sum()),
+                'total_FP': int(df_aux.FP.sum()),
+                'total_FN': int(df_aux.FN.sum()),
+                'total_VN': int(df_aux.VN.sum()),
+                'had_polygon_mask': polygon_file is not None
+            })
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error in validation: {str(e)}")
+        return False
+
+
+# Execution logic - check if batch processing or single file
+if RASTER_DIRECTORY is not None:
+    # Batch processing mode
+    print("Running in BATCH MODE")
+    runBatchValidation(RASTER_DIRECTORY, REFERENCE_FILE, POLYGON_DIRECTORY, 
+                      MASK_OUTPUT_DIRECTORY, theta)
+else:
+    # Single file mode (original functionality)
+    print("Running in SINGLE FILE MODE")
+    runValidation(RASTER_FILE, REFERENCE_FILE, POLYGON_FILE, MASK_OUTPUT_PATH, theta)
