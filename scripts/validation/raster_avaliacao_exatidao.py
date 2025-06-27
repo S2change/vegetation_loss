@@ -37,9 +37,9 @@ MASK_OUTPUT_PATH = r'/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/processed_ou
 # ---------------------------------
 # If RASTER_DIRECTORY is not None, then the script will process all raster files in the directory
 # These variables are used instead of the variables in RUNNING SINGLE FILE
-RASTER_DIRECTORY = r'/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/processed_outputs/BDR_300_artigo_tol30_05ha_rasters'  # Path to directory containing multiple raster files
-POLYGON_DIRECTORY = r'/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/processed_outputs/BDR_300_artigo_tol30_05ha_polygons' # Path to directory containing polygon files (optional)
-MASK_OUTPUT_DIRECTORY = r'/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/processed_outputs/BDR_300artigo_tol30_05ha_masked_rasters'  # Path to directory where masked rasters should be saved (required if POLYGON_DIRECTORY is provided)
+RASTER_DIRECTORY = r'/Users/domwelsh/green_ds/Thesis/T29TNE_0999/2019_2020_processed_outputs/T29TNE_0999_tol30_05ha_rasters'  # Path to directory containing multiple raster files
+POLYGON_DIRECTORY = r'/Users/domwelsh/green_ds/Thesis/T29TNE_0999/2019_2020_processed_outputs/T29TNE_0999_tol30_05ha_polygons' # Path to directory containing polygon files (optional)
+MASK_OUTPUT_DIRECTORY = r'/Users/domwelsh/green_ds/Thesis/T29TNE_0999/2019_2020_processed_outputs/T29TNE_0999_tol30_05ha_masked_rasters'  # Path to directory where masked rasters should be saved (required if POLYGON_DIRECTORY is provided)
 # ---------------------------------
 # ---------------------------------
 
@@ -702,8 +702,48 @@ def runBatchValidation(raster_directory, reference_file, polygon_directory=None,
     # Save batch summary
     if batch_results:
         summary_df = pd.DataFrame(batch_results)
+        
+        # Calculate grand totals
+        total_VP = summary_df['total_VP'].sum()
+        total_FP = summary_df['total_FP'].sum()
+        total_FN = summary_df['total_FN'].sum()
+        total_VN = summary_df['total_VN'].sum()
+        
+        # Calculate grand total metrics
+        if (total_FP + total_VP) > 0:
+            grand_cm = total_FP / (total_FP + total_VP)
+        else:
+            grand_cm = 0
+            
+        if (total_FN + total_VP) > 0:
+            grand_om = total_FN / (total_FN + total_VP)
+        else:
+            grand_om = 0
+            
+        if (2 - grand_om - grand_cm) > 0:
+            grand_f1 = 2 * (1 - grand_om) * (1 - grand_cm) / (2 - grand_om - grand_cm)
+        else:
+            grand_f1 = 0
+        
+        # Add grand total row
+        grand_total_row = {
+            'filename': 'GRAND_TOTAL',
+            'f1_score': round(100 * grand_f1, 2),
+            'omission_error': round(100 * grand_om, 2),
+            'commission_error': round(100 * grand_cm, 2),
+            'total_VP': total_VP,
+            'total_FP': total_FP,
+            'total_FN': total_FN,
+            'total_VN': total_VN,
+            'had_polygon_mask': 'N/A'
+        }
+        
+        # Add grand total row to dataframe
+        summary_df = pd.concat([summary_df, pd.DataFrame([grand_total_row])], ignore_index=True)
+        
         summary_path = os.path.join(master_results_dir, "batch_summary.csv")
         summary_df.to_csv(summary_path, index=False)
+        
         print(f"\n{'='*60}")
         print("BATCH PROCESSING COMPLETE")
         print(f"{'='*60}")
@@ -711,7 +751,7 @@ def runBatchValidation(raster_directory, reference_file, polygon_directory=None,
         print(f"Failed: {len(failed_files)} files")
         if failed_files:
             print(f"Failed files: {', '.join(failed_files)}")
-        print(f"Summary saved to: {summary_path}")
+        print(f"Results with grand totals saved to: {summary_path}")
         return summary_df
     else:
         print("No files were successfully processed")
