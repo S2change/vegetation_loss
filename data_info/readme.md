@@ -9,7 +9,7 @@
 - dates, bands, for N=10 window around each reference change for BDR-DGT-300,  ICNF 2020--2024 (falta 1 tile), and BDR_NVG (ISA)
 
 ## Reference data (available in oneDrive, folder ref_datasets)
-1. NBR-DGT-300
+1. BDR-DGT-300
 2. BDR-NVG
    - Original NVG data base in polygon format: BRD_NVG_V01_polygons_3763
    - BDR corrected and validated by Inês Silveira in point format: folder BRD_NVG_S2_V02
