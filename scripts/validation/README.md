@@ -1,6 +1,20 @@
 
 ## PyCCD Accuracy Assessment
-- `avaliacao_exatidao_pyccd.py`
+
+### `raster_avaliacao_exatidao.py`
+
+Script that conducts accuracy assessment of change detection results from raster data.
+
+Inputs:
+- RASTER_FILE: path to raster file containing change detection dates in YYYYMMDD format
+- REFERENCE_FILE: path to the shapefile/geopackage of the reference dataset used for validation (e.g. DBR_DGT_300)
+
+Outputs:
+- Creates CSV files with accuracy assessment results in a new folder
+- Prints accuracy metrics (F1-score, omission and commission errors) to console
+- Files saved in the same folder as RASTER_FILE, in new directory /{raster_name}_accuracy_assessment
+
+### `avaliacao_exatidao_pyccd.py`
 
 Conducts accuracy assessment of the pyccd results.
 
