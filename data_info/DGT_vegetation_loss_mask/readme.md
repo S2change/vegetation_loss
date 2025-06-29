@@ -1,1 +1,1 @@
-Data set provided by DGT in january 2025 that delimitates the areas over Continental Portugal where vegetation loss can occur. [link](https://ulisboa-my.sharepoint.com/:f:/g/personal/mlc_office365_ulisboa_pt/Erd83PItZsBOuFV8UZYDJpkBsvnrV8RcY25epqchbmOxJQ?e=H1EmXd)
+Data set provided by DGT in january 2025 that delimitates the areas over Continental Portugal where vegetation loss can occur. [link](https://ulisboa-my.sharepoint.com/:u:/g/personal/mlc_office365_ulisboa_pt/EeKsP-cCJn1Bl2TINIOMYZQBZoRXCXe9r1VX4zJrP5k69w?e=qDI4If)
