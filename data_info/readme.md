@@ -6,7 +6,7 @@
 - hdf5 for B3,B4,B8,B12; ISA (all), INCD (some)
 - hdf5 for B2, B11 (none yet)
 - parquets pyccd with chisq=0.999: ISA (all); INCD (all); oneDrive (some)
-- dates, bands, for N=10 window around each reference change for BDR-DGT-300,  ICNF 2020--2024 (falta 1 tile), and BDR_NVG (ISA)
+- dates, bands, for N=10 window around each reference change for BDR-DGT-300,  ICNF 2020--2024, and BDR_NVG (ISA)
 
 ## Reference data (available in oneDrive, folder ref_datasets)
 1. BDR-DGT-300
