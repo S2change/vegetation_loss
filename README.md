@@ -116,9 +116,9 @@ entregáveis:
 ### Produtos
 
 <details markdown="block">
-<summary> Base de dados de referência </summary>
+<summary> Bases de dados de referência e produtos cartográficos de perdas de vegetação </summary>
 
-* [BRD_NVG](data_info/reference_data/NVG)
+* [Link](data_info)
 
 </details>
 
