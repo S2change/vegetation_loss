@@ -6,6 +6,7 @@
 - hdf5 for B3,B4,B8,B12; ISA (all), INCD (some)
 - hdf5 for B2, B11 (none yet)
 - parquets pyccd with chisq=0.999: ISA (all); INCD (all); oneDrive (some)
+- rasters and polygons generated from PyCCD parquet outputs; tol=30 days, min_area=0.5 ha; bimonthly from 2023-01-01 to 2024-12-31 (ISA); organized per tile
 - dates, bands, for N=10 window around each reference change for BDR-DGT-300,  ICNF 2020--2024, and BDR_NVG (ISA)
 
 ## Reference data (available in oneDrive, folder ref_datasets)
