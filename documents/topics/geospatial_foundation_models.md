@@ -21,4 +21,6 @@ Data sets
 Papers:
 - Transfer learning in environmental remote sensing, RSE, 2024: https://www.sciencedirect.com/science/article/pii/S0034425723004765#s0005 . Review paper; lists some FM for remote sensing
 - TRANSFORMER MODELS FOR MULTI-TEMPORAL LAND COVER CLASSIFICATION USING REMOTE SENSING IMAGES: https://isprs-annals.copernicus.org/articles/X-1-W1-2023/981/2023/isprs-annals-X-1-W1-2023-981-2023.pdf . Uses Swin Transformer
+- Martins, V. S., Roy, D. P., Huang, H., Boschetti, L., Zhang, H. K., & Yan, L. (2022). Deep learning high resolution burned area mapping by transfer learning from Landsat-8 to PlanetScope. Remote Sensing of Environment, 280, 113203. https://doi.org/10.1016/j.rse.2022.113203
+
 
