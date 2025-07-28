@@ -1,3 +1,5 @@
+WARNING JULY 28, 2025: The "BDR_CCDC_TNE_Adjusted" data set that has been used is not complete. Apparently, it derives from some spatial operation with COSc, which clipped polygons from the original reference data set. Therefore, the 200 m buffers around the 300 center points are not all covered. The correct data set is "BDR_CCDC_TNE_V3" in the `\ref__datasets\BDR_TNE_300` subfolder in the shared OneDrive project folder. This complete data set covers totally the area of the 300 buffers for the TNE tile.
+
 This reference data set refers to S2 tile T29TNE and period Septembre 2018 -  September 2021 and is described in the following reference.
 
 - Moraes D., Barbosa B., Costa H., Moreira F.D., Benevides P., Caetano M., Campagnolo M. Continuous forest loss monitoring in a dynamic landscape of Central Portugal with Sentinel-2 data,  (2024), International Journal of Applied Earth Observation and Geoinformation, 130, DOI: 10.1016/j.jag.2024.103913
