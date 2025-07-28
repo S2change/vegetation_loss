@@ -1,4 +1,10 @@
-**WARNING JULY 28, 2025**: The `BDR_CCDC_TNE_Adjusted` shapefile data set that has been used is not complete. Apparently, it derives from some spatial operation with COSc, which clipped polygons from the original reference data set. Therefore, the 200 m buffers around the 300 center points are not all covered. The correct shapefile is `BDR_CCDC_TNE_V3` and is available in the same  `\ref__datasets\BDR_TNE_300` subfolder in the shared OneDrive project folder. This complete data set covers totally the area of the 300 buffers for the TNE tile.
+**WARNING JULY 28, 2025**: The `BDR_CCDC_TNE_Adjusted` shapefile data set that has been used is not complete. Apparently, it derives from some spatial operation with COSc, which clipped polygons from the original reference data set. Therefore, the 200 m buffers around the 300 center points are not all covered. The correct shapefile is `BDR_CCDC_TNE_V3` and is available in the same  `\ref__datasets\BDR_TNE_300` subfolder of the OneDrive project shared folder. This complete data set covers totally the area of the 300 buffers for the TNE tile:
+```
+\ref__datasets\BDR_TNE_300\BDR_CCDC_TNE_V3 # to be used as reference data set
+\ref__datasets\BDR_TNE_300\BDR_CCDC_TNE_Adjusted # not to be used as reference data set (incomplete)
+```
+
+
 
 This reference data set refers to S2 tile T29TNE and period Septembre 2018 -  September 2021 and is described in the following reference.
 
