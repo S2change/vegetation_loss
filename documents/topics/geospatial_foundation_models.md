@@ -11,7 +11,9 @@ Some GFM for EO
    4. [GFM](https://github.com/mmendiet/GFM). Towards Geospatial Foundation Models via Continual Pretraining. *Our approach outperforms previous state-of-the-art geospatial pretraining methods in an extensive evaluation on seven downstream datasets covering various tasks such as change detection, classification, multi-label classification, semantic segmentation, and super-resolution.*
    5. [MSR-BACD](https://zenodo.org/records/15336666). Goal: change detection caused by burned areas. Input: 12 S2 bands (before+after)
    6. IBM-NASA Prithvi Models Family at https://huggingface.co/ibm-nasa-geospatial
-      - Burned scars model: [Prithvi-EO-2.0-300M-BurnScars](https://huggingface.co/ibm-nasa-geospatial/Prithvi-EO-2.0-300M-BurnScars). Input: 6 S2 bands (after)
+      - Burned scars model Huggingface: [Prithvi-EO-2.0-300M-BurnScars](https://huggingface.co/ibm-nasa-geospatial/Prithvi-EO-2.0-300M-BurnScars). Input: 6 S2 bands (after)
+      - Github: TerraTorch library for fine-tuning Prithvi-EO-2.0.  https://github.com/NASA-IMPACT/Prithvi-EO-2.0
+      - Example land cover: https://github.com/NASA-IMPACT/Prithvi-EO-2.0/blob/main/examples/example_multitemporalcrop.ipynb
    7. A global Swin-Unet Sentinel-2 surface reflectance-based cloud and cloud shadow detection algorithm for the NASA Harmonized Landsat Sentinel-2 (HLS) dataset: https://www.sciencedirect.com/science/article/pii/S2666017225000197
    8. [SATLAS](https://allenai.org/blog/satlaspretrain-models-foundation-models-for-satellite-and-aerial-imagery-1679ebe4bbfb) SatlasPretrain Models: foundation models for satellite and aerial imagery
 
