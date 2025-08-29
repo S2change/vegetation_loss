@@ -12,7 +12,7 @@ acquiring B2 and B11 data as part of the pyccd processing.
 Reads B2, B11, and B3,B4,B8,B12 from tiff files
 
 Output:
-One single hfd5 (temporal composite) with 6 bands 
+One single hfd5 (temporal composite) with 6 bands pre-break and 6 bands post-break, with x,y (usual CRS 32629), date still missing
 
 """
 
@@ -37,7 +37,7 @@ from pyccd.shared.read_files import read_tif_files_gee
 
 ## SCRIPT CONFIGS ##
 ##################################
-tile = "T29TNE"
+#tile = "T29TNE" see loop in main()
 parquet_folder = "C:/Users/Public/Documents/outputs_ROI/tabular/"
 
 s2_images_folder_B2_B11 = "C:/Users/Public/Documents/s2_images_B2_B11/"
@@ -72,7 +72,7 @@ def filter_segments(df):
     #remove rows where the tBreak is the final date (end of series)
     df = df.loc[df.tBreak!=df.final_date_group].copy()
     df = df.loc[~df.tStart.isnull()]
-    #remove rows where the tBreak is within a 20 day margin from the final date
+    #remove rows where the tBreak is within a 20 day margin from the final date (pyccd can create artefact breaks at the end of the series)
     df = df.loc[df.final_date_group - df.tBreak > 20*24*60*60*1000].copy()
     #compute most recent tEnd
     df['max_tend_group'] = df.groupby(['x_coord','y_coord'])['tEnd'].transform('max')
@@ -96,7 +96,7 @@ def combine_parquet_files(parquet_folder, tile):
         tile (str) : tile name to access the correct folder.
 
     
-    Returns a merged dataframe.
+    Returns a merged dataframe (all last segments that correspond to a break removes all pixels with no break and select the most recent breaks for the remaining pixels)
 
     """
     
