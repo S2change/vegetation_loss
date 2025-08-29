@@ -54,7 +54,7 @@ h5_filename = "s2_images-B2B11-pre-and-post-break.h5"
 
 def filter_segments(df):
     """
-    Takes the pyccd output dataframe (i.e. parquet files) and extracts only the dates pre and post break for each pixel. 
+    Takes the pyccd output dataframe (i.e. parquet files) and extracts only the dates pre and post break for each pixel, only for pixels with a break 
     Pre break date is the tEnd of the second to last segment; Post break date is the tStart of the last segment.
 
     Args:
