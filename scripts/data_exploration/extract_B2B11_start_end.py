@@ -9,6 +9,11 @@ original 4 bands with which pyccd was executed.
 Note: this script should be an improvised fix to acquire the band values; a more definitive solution should include
 acquiring B2 and B11 data as part of the pyccd processing.
 
+Reads B2, B11, and B3,B4,B8,B12 from tiff files
+
+Output:
+One single hfd5 (temporal composite) with 6 bands 
+
 """
 
 ### Execute it from within the data_exploration folder: python extract_B2B11_start_end.py ###
@@ -27,7 +32,7 @@ import sys
 module_path = os.path.abspath(os.path.join('..'))
 if module_path not in sys.path:
    sys.path.append(module_path)
-from pyccd.shared.read_files import read_tif_files_gee
+from pyccd.shared.read_files import read_tif_files_gee 
 
 
 ## SCRIPT CONFIGS ##
@@ -220,7 +225,7 @@ def main():
         )
         #fill result array
         if k == 'Bands B2 and B11':
-            result[0,:,:2] = selected_values.values
+            result[0,:,:2] = selected_values.values # re-ordered later 
         elif k == 'Original 4 bands':
             result[0,:,2:] = selected_values.values
 
