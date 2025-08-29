@@ -8,10 +8,22 @@
 
 ## Scripts:
 
-### Extraction of 2N observations around the reference data change date (for quality control)
+<details>
+  <summary>Create S2 temporal composite (12 bands + date): extract_B2B11_start_end.py</summary>
+
+Script (scripts/data_exploration/extract_B2B11_start_end.py)  is intended to extract the spectral values before and after the most recent break date identified by pyccd.
+It uses the end date of the second to last segment and the start date of the last segment to look up for the bands values.
+
+Currently, the script collects band data at two stages: first from the B2 and B11 bands (Blue and SWIR1) and then from the 
+original 4 bands with which pyccd was executed.
+
+Note: this script should be an improvised fix to acquire the band values; a more definitive solution should include
+acquiring B2 and B11 data as part of the pyccd processing.
+
+</details>
 
 <details>
-  <summary>(Extraction_S2_2N_observations)</summary>
+  <summary>Extraction of 2N observations around the reference data change date (for quality control)</summary>
 
 #### Inputs
     - Reference data: geopackage; shapefile
