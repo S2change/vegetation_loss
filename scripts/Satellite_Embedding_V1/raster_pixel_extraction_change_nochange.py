@@ -27,13 +27,13 @@ base_dir = r"C:\Users\Public\Documents\Satellite_Embedding_V1"
 path_shp_change = os.path.join(r"C:\Users\Public\Documents\ref_datasets\BDR_CCDC_TNE_v3\BDR_CCDC_TNE_v3.shp")
 path_shp_nochange = os.path.join(r"C:\Users\Public\Documents\ref_datasets\BDR_CCDC_TNE_v3\BDR_CCDC_TNE_Expanded.gpkg")
 random_state = 42
-pixels_total = 5000
+pixels_total = 2500
 
 # Options:
 # "nochange" → only no change
 # "change"   → only change
 # "both"     → no change + change
-mode = "both"
+mode = "change"
 #%%
 def load_shapefiles(path_shp_change, path_shp_nochange, year):
     
@@ -250,7 +250,7 @@ def sample_pixels(gdf, label_value, n_pixels_total, tif_paths, random_state, yea
     # Combine all sampled pixels into a single DataFrame
     return pd.concat(pixel_data, ignore_index=True) if pixel_data else pd.DataFrame()
 #%%
-def save_outputs(result_df, base_dir, tile_name, year, tif_paths, gdf_change):
+def save_outputs(result_df, base_dir, tile_name, year, tif_paths, gdf_change, mode=None):
     """
     Persist results to CSV and Shapefile.
 
@@ -262,17 +262,24 @@ def save_outputs(result_df, base_dir, tile_name, year, tif_paths, gdf_change):
         tile_name (str):
             Tile identifier (e.g., "T29TNE").
         year (int):
-            Processed year; used in output filenames.
+            Processed year; used in output filenames (skipped if mode="nochange").
         tif_paths (list[str]):
             List of rasters; used to derive CRS if available.
         gdf_change (geopandas.GeoDataFrame):
             Fallback source of CRS if no raster is available.
+        mode (str, default="both"):
+            "nochange", "change", or "both" – affects filename.
 
     Outputs:
-        - Writes CSV: embedding_{tile_name}_{year}_sample.csv
-        - Writes Shapefile: embedding_{tile_name}_{year}_sample_points.shp
+        - Writes CSV and Shapefile with adjusted naming.
     """
-    out_csv = os.path.join(base_dir, f"embedding_{tile_name}_{year}_sample.csv")
+    if mode == "nochange":
+        out_csv = os.path.join(base_dir, f"embedding_{tile_name}_sample_nochange.csv")
+        out_shp = os.path.join(base_dir, f"embedding_{tile_name}_sample_points_nochange.shp")
+    else:
+        out_csv = os.path.join(base_dir, f"embedding_{tile_name}_{year}_sample.csv")
+        out_shp = os.path.join(base_dir, f"embedding_{tile_name}_{year}_sample_points.shp")
+
     result_df.to_csv(out_csv, index=False, encoding="utf-8")
     print(f"\nCSV saved to: {out_csv}")
 
@@ -288,11 +295,10 @@ def save_outputs(result_df, base_dir, tile_name, year, tif_paths, gdf_change):
         geometry=gpd.points_from_xy(result_df.x, result_df.y),
         crs=output_crs
     )
-    out_shp = os.path.join(base_dir, f"embedding_{tile_name}_{year}_sample_points.shp")
     gdf_points.to_file(out_shp, driver="ESRI Shapefile", encoding="utf-8")
     print(f"Shapefile saved to: {out_shp}")
 #%%
-def process_tile(year, tile_name, base_dir, path_shp_change, path_shp_nochange, random_state, pixels_total, mode="both"):
+def process_tile(year, tile_name, base_dir, path_shp_change, path_shp_nochange, random_state, pixels_total, mode=None):
     """
     Execute the full processing workflow for a given year and tile.
 
@@ -361,7 +367,7 @@ def process_tile(year, tile_name, base_dir, path_shp_change, path_shp_nochange, 
         result_df = result_df.sample(n=pixels_total, random_state=random_state).reset_index(drop=True)
 
     # 6) Persist outputs
-    save_outputs(result_df, base_dir, tile_name, year, tif_paths, gdf_change)
+    save_outputs(result_df, base_dir, tile_name, year, tif_paths, gdf_change, mode=mode)
     return result_df
 #%%
 def main():
