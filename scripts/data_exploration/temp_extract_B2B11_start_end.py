@@ -71,11 +71,9 @@ def filter_segments(df):
     
     """
     
-    # Identify pixels by coordinate groups
-    pixel_groups = df.groupby(['x_coord','y_coord'])
-    
-    # Create column with segment count per pixel
-    df['segment_count'] = pixel_groups['tStart'].transform('count')
+    # Calculate segment counts efficiently
+    segment_counts = df.groupby(['x_coord','y_coord']).size()
+    df = df.merge(segment_counts.rename('segment_count'), left_on=['x_coord','y_coord'], right_index=True, how='left')
     
     # Separate change pixels (multiple segments) from stable pixels (single segment)
     change_pixels_df = df[df['segment_count'] > 1].copy()
