@@ -42,6 +42,11 @@ s2_images_folder_4_bands = "D:/s2_images/"
 
 max_date = datetime(2024, 12, 31) #limit date to collect images
 
+# Manual dates for stable pixels (pixels with no breaks)
+# If None, uses tStart for pre-break and tEnd for post-break dates
+stable_pixel_start_date = None  # datetime(2018, 1, 1) - example manual start date
+stable_pixel_end_date = None    # datetime(2023, 12, 31) - example manual end date
+
 #TODO - NEW BAND WITH YYYYMMDD (break date)
 
 NODATA = 65535
@@ -55,37 +60,77 @@ h5_filename = "s2_images-bands-pre-and-post-break.h5"
 
 def filter_segments(df):
     """
-    Takes the pyccd output dataframe (i.e. parquet files) and extracts only the dates pre and post break for each pixel. 
-    Pre break date is the tEnd of the second to last segment; Post break date is the tStart of the last segment.
+    Takes the pyccd output dataframe (i.e. parquet files) and extracts dates pre and post break for each pixel.
+    For pixels with breaks: Pre break date is the tEnd of the second to last segment; Post break date is the tStart of the last segment.
+    For stable pixels (no breaks): Uses tStart and tEnd of the single segment, or manual dates if specified.
 
     Args:
         df (pandas.dataframe) : pandas dataframe of pyccd results.
 
-    Returns a filtered dataframe.
+    Returns a filtered dataframe with both change pixels and stable pixels.
     
     """
-
-    #create column with maximum start date of the group
-    df['max_tstart_group'] = df.groupby(['x_coord','y_coord'])['tStart'].transform('max')
     
-    #determine final date of the pixel (gets tEnd with highest value)
-    df['final_date_group'] = df.groupby(['x_coord','y_coord'])['tEnd'].transform('max')
-    #remove rows where the tBreak is the final date (end of series)
-    df = df.loc[df.tBreak!=df.final_date_group].copy()
-    df = df.loc[~df.tStart.isnull()]
-    #remove rows where the tBreak is within a 20 day margin from the final date
-    df = df.loc[df.final_date_group - df.tBreak > 20*24*60*60*1000].copy()
-    #compute most recent tEnd
-    df['max_tend_group'] = df.groupby(['x_coord','y_coord'])['tEnd'].transform('max')
-    #compute max tbreak - just for quality control
-    df['max_tbreak_group'] = df.groupby(['x_coord','y_coord'])['tBreak'].transform('max')
+    # Identify pixels by coordinate groups
+    pixel_groups = df.groupby(['x_coord','y_coord'])
+    
+    # Create column with segment count per pixel
+    df['segment_count'] = pixel_groups['tStart'].transform('count')
+    
+    # Separate change pixels (multiple segments) from stable pixels (single segment)
+    change_pixels_df = df[df['segment_count'] > 1].copy()
+    stable_pixels_df = df[df['segment_count'] == 1].copy()
+    
+    # Process change pixels (existing logic)
+    if len(change_pixels_df) > 0:
+        #create column with maximum start date of the group
+        change_pixels_df['max_tstart_group'] = change_pixels_df.groupby(['x_coord','y_coord'])['tStart'].transform('max')
+        
+        #determine final date of the pixel (gets tEnd with highest value)
+        change_pixels_df['final_date_group'] = change_pixels_df.groupby(['x_coord','y_coord'])['tEnd'].transform('max')
+        #remove rows where the tBreak is the final date (end of series)
+        change_pixels_df = change_pixels_df.loc[change_pixels_df.tBreak!=change_pixels_df.final_date_group].copy()
+        change_pixels_df = change_pixels_df.loc[~change_pixels_df.tStart.isnull()]
+        #remove rows where the tBreak is within a 20 day margin from the final date
+        change_pixels_df = change_pixels_df.loc[change_pixels_df.final_date_group - change_pixels_df.tBreak > 20*24*60*60*1000].copy()
+        #compute most recent tEnd
+        change_pixels_df['max_tend_group'] = change_pixels_df.groupby(['x_coord','y_coord'])['tEnd'].transform('max')
+        #compute max tbreak - just for quality control
+        change_pixels_df['max_tbreak_group'] = change_pixels_df.groupby(['x_coord','y_coord'])['tBreak'].transform('max')
 
-    #get only the coordinates and tBreak
-    df_sub = df[['x_coord','y_coord','max_tstart_group','max_tend_group','max_tbreak_group']].copy()
-    df_sub = df_sub.drop_duplicates()
+        #get only the coordinates and dates for change pixels
+        change_df_sub = change_pixels_df[['x_coord','y_coord','max_tstart_group','max_tend_group','max_tbreak_group']].copy()
+        change_df_sub = change_df_sub.drop_duplicates()
+        change_df_sub['pixel_type'] = 'change'
+    else:
+        change_df_sub = pd.DataFrame(columns=['x_coord','y_coord','max_tstart_group','max_tend_group','max_tbreak_group','pixel_type'])
+    
+    # Process stable pixels (new logic)
+    if len(stable_pixels_df) > 0:
+        # For stable pixels, use manual dates if specified, otherwise use tStart/tEnd
+        if stable_pixel_start_date is not None:
+            stable_pixels_df['max_tend_group'] = stable_pixel_start_date.timestamp() * 1000  # Convert to milliseconds
+        else:
+            stable_pixels_df['max_tend_group'] = stable_pixels_df['tStart']  # Use tStart as "pre-break"
+            
+        if stable_pixel_end_date is not None:
+            stable_pixels_df['max_tstart_group'] = stable_pixel_end_date.timestamp() * 1000  # Convert to milliseconds
+        else:
+            stable_pixels_df['max_tstart_group'] = stable_pixels_df['tEnd']  # Use tEnd as "post-break"
+        
+        stable_pixels_df['max_tbreak_group'] = -1  # No break detected for stable pixels
+        
+        #get only the coordinates and dates for stable pixels
+        stable_df_sub = stable_pixels_df[['x_coord','y_coord','max_tstart_group','max_tend_group','max_tbreak_group']].copy()
+        stable_df_sub = stable_df_sub.drop_duplicates()
+        stable_df_sub['pixel_type'] = 'stable'
+    else:
+        stable_df_sub = pd.DataFrame(columns=['x_coord','y_coord','max_tstart_group','max_tend_group','max_tbreak_group','pixel_type'])
+    
+    # Combine both types of pixels
+    df_combined = pd.concat([change_df_sub, stable_df_sub], ignore_index=True)
 
-
-    return df_sub
+    return df_combined
 
 # concatenate all parquet files of a given tile
 def combine_parquet_files(parquet_folder, tile):
@@ -252,6 +297,12 @@ def main():
 
     #initialize empty array of shape (2, n_points, 6) -> where 2 corresponds to data from pre and post break
     result = np.empty((2, len(combined_df), 6), dtype=np.float32)
+    
+    # Print information about pixel types
+    if 'pixel_type' in combined_df.columns:
+        change_count = len(combined_df[combined_df['pixel_type'] == 'change'])
+        stable_count = len(combined_df[combined_df['pixel_type'] == 'stable'])
+        print(f"Processing {change_count} change pixels and {stable_count} stable pixels")
 
     for k,v in stages.items(): #order matters - it goes in alphabetical order of keys (does B2B11 first)
 
