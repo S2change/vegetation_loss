@@ -237,6 +237,22 @@ def get_transform_crs(xarray_da):
 
     return transform, crs
 
+def convert_to_yyyymmdd(tbreak_ms):
+    """
+    Converts break date from milliseconds to YYYYMMDD format.
+    
+    Args:
+        tbreak_ms (float): Break date in milliseconds since epoch, or -1 for stable pixels.
+        
+    Returns:
+        int: Date in YYYYMMDD format, or 0 for stable pixels.
+    """
+    if tbreak_ms == -1:  # Stable pixels
+        return 0
+    else:
+        date_obj = datetime.utcfromtimestamp(tbreak_ms/1000)
+        return int(date_obj.strftime('%Y%m%d'))
+
 def create_tiff(xarray_da, x_inds, y_inds, result): #(2, n_points, 6)
     """
     
@@ -255,7 +271,7 @@ def create_tiff(xarray_da, x_inds, y_inds, result): #(2, n_points, 6)
         driver="GTiff",
         height=mask.shape[1],
         width=mask.shape[0],
-        count=result.shape[0]*result.shape[-1],
+        count=result.shape[0]*result.shape[-1] - 1,  # -1 to exclude duplicate change date
         dtype='uint16',
         crs=crs,
         transform=transform,
@@ -268,6 +284,10 @@ def create_tiff(xarray_da, x_inds, y_inds, result): #(2, n_points, 6)
         for t in range(result.shape[0]): #time dimension - first is before break, then post break
 
             for b in range(result.shape[-1]): #band dimension
+                
+                # Skip post-break change date (t=1, b=6) to avoid duplicate
+                if t == 1 and b == 6:  # Post-break change date
+                    continue
 
                 #pixels inside mask (analyzed by pyccd) are set to the correct value given by result
                 mask[x_inds, -y_inds] = result[t,:,b] #use -y_inds because y_coord is reversed
@@ -290,11 +310,14 @@ def main():
     #convert dates from ms to ordinal
     combined_df['tstart_ordinal'] = combined_df['max_tstart_group'].apply(lambda x: datetime.utcfromtimestamp(x/1000).toordinal())
     combined_df['tend_ordinal'] = combined_df['max_tend_group'].apply(lambda x: datetime.utcfromtimestamp(x/1000).toordinal())
+    
+    # Convert change dates to YYYYMMDD format (0 for stable pixels)
+    combined_df['change_date_yyyymmdd'] = combined_df['max_tbreak_group'].apply(convert_to_yyyymmdd)
 
     stages = {'Bands B2 and B11': s2_images_folder_B2_B11, 'Original 4 bands':s2_images_folder_4_bands}
 
-    #initialize empty array of shape (2, n_points, 6) -> where 2 corresponds to data from pre and post break
-    result = np.empty((2, len(combined_df), 6), dtype=np.float32)
+    #initialize empty array of shape (2, n_points, 7) -> where 2 corresponds to data from pre and post break, 7th band is change date
+    result = np.empty((2, len(combined_df), 7), dtype=np.float32)
     
     # Print information about pixel types
     if 'pixel_type' in combined_df.columns:
@@ -338,7 +361,7 @@ def main():
         if k == 'Bands B2 and B11':
             result[0,:,:2] = selected_values.values
         elif k == 'Original 4 bands':
-            result[0,:,2:] = selected_values.values
+            result[0,:,2:6] = selected_values.values
 
         #step 2: get values of tstart (can be done directly, since we already have access to the indices)
         print('---- Collecting values post break')
@@ -352,10 +375,14 @@ def main():
         if k == 'Bands B2 and B11':
             result[1,:,:2] = selected_values.values
         elif k == 'Original 4 bands':
-            result[1,:,2:] = selected_values.values
+            result[1,:,2:6] = selected_values.values
 
-    #reorder result to have bands in natural order (B2, B3, B4, B8, B11, B12)
-    idx_order = [0,2,3,4,1,5]
+    # Add change dates only to pre-break period (index 6)
+    result[0,:,6] = combined_df['change_date_yyyymmdd'].to_numpy()  # Pre-break period
+    result[1,:,6] = 0  # Post-break period set to 0 (will be skipped in output)
+    
+    #reorder result to have bands in natural order (B2, B3, B4, B8, B11, B12, change_date)
+    idx_order = [0,2,3,4,1,5,6]
     result = result[:,:,idx_order]
 
     #save result to hdf5 file
