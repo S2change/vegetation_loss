@@ -105,7 +105,7 @@ def main(batch_size=None):
         print(f"[Rank {rank}] Saving results to {parquet_path}", flush=True)
         result_df.to_parquet(parquet_path, index=False, engine='pyarrow')
 #%%
-def process_batch(batch, sel_values_path, tif_dates_ord):
+def process_batch(batch, sel_values_path, tif_dates_ord, rank):
     """
     Processes a batch of data from an HDF5 file, extracting the required slices 
     and passing them for further analysis.
