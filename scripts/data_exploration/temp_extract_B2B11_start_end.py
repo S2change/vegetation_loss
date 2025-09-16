@@ -240,18 +240,29 @@ def get_transform_crs(xarray_da):
 def convert_to_yyyymmdd(tbreak_ms):
     """
     Converts break date from milliseconds to YYYYMMDD format.
-    
+
     Args:
         tbreak_ms (float): Break date in milliseconds since epoch, or -1 for stable pixels.
-        
+
     Returns:
         int: Date in YYYYMMDD format, or 0 for stable pixels.
     """
     if tbreak_ms == -1:  # Stable pixels
         return 0
+    elif pd.isna(tbreak_ms) or tbreak_ms == 0:  # Handle NaN or 0 values
+        return 0
     else:
-        date_obj = datetime.utcfromtimestamp(tbreak_ms/1000)
-        return int(date_obj.strftime('%Y%m%d'))
+        try:
+            date_obj = datetime.utcfromtimestamp(tbreak_ms/1000)
+            yyyymmdd = int(date_obj.strftime('%Y%m%d'))
+            # Validate the result is a reasonable date (between 20150101 and 20251231)
+            if yyyymmdd < 20150101 or yyyymmdd > 20251231:
+                print(f"Warning: Invalid date conversion - input {tbreak_ms} resulted in {yyyymmdd}")
+                return 0
+            return yyyymmdd
+        except (ValueError, OSError) as e:
+            print(f"Error converting timestamp {tbreak_ms}: {e}")
+            return 0
 
 def create_tiff(xarray_da, x_inds, y_inds, result): #(2, n_points, 6)
     """
@@ -312,7 +323,11 @@ def main():
     combined_df['tend_ordinal'] = combined_df['max_tend_group'].apply(lambda x: datetime.fromtimestamp(x/1000, timezone.utc).toordinal() if pd.notna(x) else np.nan)
     
     # Convert change dates to YYYYMMDD format (0 for stable pixels)
+    print(f"Sample tbreak values before conversion: {combined_df['max_tbreak_group'].head(10).tolist()}")
     combined_df['change_date_yyyymmdd'] = combined_df['max_tbreak_group'].apply(convert_to_yyyymmdd)
+    print(f"Sample converted dates: {combined_df['change_date_yyyymmdd'].head(10).tolist()}")
+    print(f"Min/Max change dates: {combined_df['change_date_yyyymmdd'].min()} / {combined_df['change_date_yyyymmdd'].max()}")
+    print(f"Unique change dates count: {combined_df['change_date_yyyymmdd'].nunique()}")
 
     stages = {'Bands B2 and B11': s2_images_folder_B2_B11, 'Original 4 bands':s2_images_folder_4_bands}
 
@@ -378,7 +393,10 @@ def main():
             result[1,:,2:6] = selected_values.values
 
     # Add change dates only to pre-break period (index 6)
-    result[0,:,6] = combined_df['change_date_yyyymmdd'].to_numpy()  # Pre-break period
+    change_dates_array = combined_df['change_date_yyyymmdd'].to_numpy()
+    print(f"Change dates array stats - Min: {change_dates_array.min()}, Max: {change_dates_array.max()}, Shape: {change_dates_array.shape}")
+    print(f"Change dates array sample: {change_dates_array[:10].tolist()}")
+    result[0,:,6] = change_dates_array  # Pre-break period
     result[1,:,6] = 0  # Post-break period set to 0 (will be skipped in output)
     
     #reorder result to have bands in natural order (B2, B3, B4, B8, B11, B12, change_date)
