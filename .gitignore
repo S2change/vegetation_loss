@@ -1,1 +1,4 @@
 **/.DS_Store
+
+scripts/visualisations/raster_identification.py
+scripts/visualisations/raster_polygon_qa.py

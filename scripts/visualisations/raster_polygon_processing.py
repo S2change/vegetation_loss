@@ -26,15 +26,15 @@ INPUT_DIRECTORY = "/Users/domwelsh/green_ds/Thesis/T29TNE_0999"
 # OPTION 2: Process all subdirectories within a parent directory
 # Set this to a parent directory path to process all subdirectories within it
 # Set to None to use INPUT_DIRECTORY instead
-PARENT_DIRECTORY = "/Users/domwelsh/green_ds/Thesis/multi_directory_test"
+PARENT_DIRECTORY = None
 
 # Base output directory (raster and polygon subdirectories will be created here)
 # If OUTPUT_BASE_DIR = PARENT_DIRECTORY, results will be saved in each tile's subdirectory
-OUTPUT_BASE_DIR = "/Users/domwelsh/green_ds/Thesis/multi_directory_test/all_processed_results"
+OUTPUT_BASE_DIR = "/Users/domwelsh/green_ds/Thesis/T29TNE_0999/2019_2020_processed_outputs"
 
 # Date range for processing (BOTH must be provided)
-SEARCH_START = "2023-01-01"  # Start date for filtering break dates ("YYYY-MM-DD" format)
-SEARCH_END = "2024-12-31"    # End date for filtering break dates ("YYYY-MM-DD" format)
+SEARCH_START = "2019-01-01"  # Start date for filtering break dates ("YYYY-MM-DD" format)
+SEARCH_END = "2020-12-31"    # End date for filtering break dates ("YYYY-MM-DD" format)
 
 # Coordinate Reference System
 TARGET_CRS = "EPSG:32629"  # Use "EPSG:4326" for lat/lon, "EPSG:32629" for UTM Zone 29N

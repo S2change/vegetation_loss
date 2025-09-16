@@ -18,7 +18,7 @@ import xarray as xr
 import rioxarray
 import os
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone
 from dask.diagnostics import ProgressBar
 import h5py
 import time
@@ -308,8 +308,8 @@ def main():
     combined_df = combine_parquet_files(parquet_folder, tile)
 
     #convert dates from ms to ordinal
-    combined_df['tstart_ordinal'] = combined_df['max_tstart_group'].apply(lambda x: datetime.utcfromtimestamp(x/1000).toordinal())
-    combined_df['tend_ordinal'] = combined_df['max_tend_group'].apply(lambda x: datetime.utcfromtimestamp(x/1000).toordinal())
+    combined_df['tstart_ordinal'] = combined_df['max_tstart_group'].apply(lambda x: datetime.fromtimestamp(x/1000, timezone.utc).toordinal() if pd.notna(x) else np.nan)
+    combined_df['tend_ordinal'] = combined_df['max_tend_group'].apply(lambda x: datetime.fromtimestamp(x/1000, timezone.utc).toordinal() if pd.notna(x) else np.nan)
     
     # Convert change dates to YYYYMMDD format (0 for stable pixels)
     combined_df['change_date_yyyymmdd'] = combined_df['max_tbreak_group'].apply(convert_to_yyyymmdd)
