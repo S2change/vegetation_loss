@@ -1,4 +1,6 @@
 **/.DS_Store
+scripts/pyccd/shared/__pycache__/
+.venv/
 
 scripts/visualisations/raster_identification.py
 scripts/visualisations/raster_polygon_qa.py

@@ -52,8 +52,8 @@ stable_pixel_end_date = None    # datetime(2023, 12, 31) - example manual end da
 NODATA = 65535
 
 output_h5_folder = "E:/outputs_ROI/hdf5/"
-
 h5_filename = "s2_images-bands-pre-and-post-break.h5"
+output_tif = r"C:\Users\g20180450\Desktop\test_tif_mask_v2.tif" # output path and name for tif file
 
 
 ##################################
@@ -277,7 +277,7 @@ def create_tiff(xarray_da, x_inds, y_inds, result): #(2, n_points, 6)
     transform, crs = get_transform_crs(xarray_da)
 
     with rasterio.open(
-        r"C:\Users\g20180450\Desktop\test_tif_mask_v2.tif",  #TODO - CHANGE NAME
+        output_tif,
         "w",
         driver="GTiff",
         height=mask.shape[1],
