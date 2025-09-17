@@ -34,7 +34,7 @@ from pyccd.shared.read_files import read_tif_files_gee
 
 ## SCRIPT CONFIGS ##
 ##################################
-tile = "T29TNE"
+# tile = "T29TNE" Gets overwritten when the script starts
 parquet_folder = "C:/Users/Public/Documents/outputs_ROI/tabular/"
 
 s2_images_folder_B2_B11 = "C:/Users/Public/Documents/s2_images_B2_B11/"
@@ -53,7 +53,7 @@ NODATA = 65535
 
 output_h5_folder = "E:/outputs_ROI/hdf5/"
 h5_filename = "s2_images-bands-pre-and-post-break.h5"
-output_tif = r"C:\Users\g20180450\Desktop\test_tif_mask_v2.tif" # output path and name for tif file
+output_tif = r"C:\Users\isa127909\Desktop\B2B11_tests\02_testing_new_dates.tif" # output path and name for tif file
 
 
 ##################################
