@@ -53,7 +53,7 @@ NODATA = 65535
 
 output_h5_folder = "E:/outputs_ROI/hdf5/"
 h5_filename = "s2_images-bands-pre-and-post-break.h5"
-output_tif = r"C:\Users\isa127909\Desktop\B2B11_tests\02_testing_new_dates.tif" # output path and name for tif file
+output_tif = r"C:\Users\isa127909\Desktop\B2B11_tests\03_uint32_test.tif" # output path and name for tif file
 
 
 ##################################
@@ -270,7 +270,7 @@ def create_tiff(xarray_da, x_inds, y_inds, result): #(2, n_points, 6)
     """
 
     #create mask
-    mask = np.zeros((xarray_da.sizes['x'], xarray_da.sizes['y']), dtype='uint16')
+    mask = np.zeros((xarray_da.sizes['x'], xarray_da.sizes['y']), dtype='uint32')
     mask[:] = NODATA #sets all elements to NODATA
 
     #get transform and crs
@@ -283,7 +283,7 @@ def create_tiff(xarray_da, x_inds, y_inds, result): #(2, n_points, 6)
         height=mask.shape[1],
         width=mask.shape[0],
         count=result.shape[0]*result.shape[-1] - 1,  # -1 to exclude duplicate change date
-        dtype='uint16',
+        dtype='uint32',
         crs=crs,
         transform=transform,
         nodata=NODATA,
