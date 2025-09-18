@@ -47,6 +47,25 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import colorsys
 
+## SCRIPT CONFIGS ##
+##################################
+
+# Set input directory and output files
+input_directory = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo" # UPDATE
+output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/testing_config_move.tif" # UPDATE
+output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
+
+# String date range filtering (set both to None to disable filtering)
+search_start = "2018-01-01"  # Start date for filtering break dates ("YYYY-MM-DD" format)
+search_end = "2021-12-31"    # End date for filtering break dates ("YYYY-MM-DD" format)
+
+# Boundary shapefile filtering (set to None to disable)
+boundary_shapefile = None  # Path to shapefile for spatial boundary filtering
+
+qgis_style_file = False  # Set to True if a .qml style file should be created
+
+##################################
+
 def filter_pixel_group(group, search_start=None, search_end=None):
     """
     Filter a group of rows for a single pixel according to the rules:
@@ -661,20 +680,6 @@ def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_fi
     print(f"  - Pixels not in parquet files will show as NoData")
 
 if __name__ == "__main__":
-    # Set input directory and output files
-    input_directory = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo" # UPDATE
-    output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/testing_0_change_dates_without_qml.tif" # UPDATE
-    output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
-    
-    # String date range filtering (set both to None to disable filtering)
-    search_start = "2018-01-01"  # Start date for filtering break dates ("YYYY-MM-DD" format)
-    search_end = "2021-12-31"    # End date for filtering break dates ("YYYY-MM-DD" format)
-    
-    # Boundary shapefile filtering (set to None to disable)
-    boundary_shapefile = None  # Path to shapefile for spatial boundary filtering
-
-    qgis_style_file = False  # Set to True if a .qml style file should be created
-    
     process_directory_to_geotiff(
         input_directory, 
         output_raster_file, 
