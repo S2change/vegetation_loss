@@ -9,7 +9,7 @@ MAIN FUNCTIONALITY:
 - Filters data by date range (optional)
 - Filters data by shapefile boundary (optional)
 - For each pixel location, only the most recent break point is returned
-    - If there are no breaks for the pixel, nothing is returned
+    - If there are no breaks for the pixel, 0 is returned (to seperate between pixels with no breaks and pixels with no data)
 - Converts filtered point data to a georeferenced raster (GeoTIFF)
 - Creates QGIS style files for visualization
 - Optionally saves filtered points as a vector file
@@ -26,7 +26,8 @@ INPUTS:
 OUTPUTS:
 - GeoTIFF raster file (.tif): 
   * Pixel values represent break dates in YYYYMMDD format (integer)
-  * NoData value: -9999
+    * Pixels without a break date have the value 0
+    * Pixels with no data have the NoData value: -9999
   * Resolution: 10m x 10m pixels
   * Coordinate system: UTM (EPSG:32629) or optionally reprojected
 - QGIS style file (.qml): Color-coded visualization by year and day-of-year
@@ -51,11 +52,16 @@ def filter_pixel_group(group, search_start=None, search_end=None):
     Filter a group of rows for a single pixel according to the rules:
     - Only return the row with the highest tBreak value
     - Only consider rows within the date range if specified
+    - Returns a tuple: (result_row, was_filtered_out)
+      where was_filtered_out is True if pixel had data but was filtered out by date
     """
+    # Get the most recent break regardless of filtering
+    most_recent_row = group.loc[group['tBreak'].idxmax()]
+
     # Filter by date range if specified
     if search_start is not None or search_end is not None:
         filtered_group = group.copy()
-        
+
         if search_start is not None:
             # Convert search_start to milliseconds timestamp
             if isinstance(search_start, str):
@@ -64,7 +70,7 @@ def filter_pixel_group(group, search_start=None, search_end=None):
                 search_start_dt = search_start
             search_start_ms = int(search_start_dt.timestamp() * 1000)
             filtered_group = filtered_group[filtered_group['tBreak'] >= search_start_ms]
-        
+
         if search_end is not None:
             # Convert search_end to milliseconds timestamp
             if isinstance(search_end, str):
@@ -73,14 +79,14 @@ def filter_pixel_group(group, search_start=None, search_end=None):
                 search_end_dt = search_end
             search_end_ms = int(search_end_dt.timestamp() * 1000)
             filtered_group = filtered_group[filtered_group['tBreak'] <= search_end_ms]
-        
-        # If no rows remain after filtering, return None
+
+        # If no rows remain after filtering, return the most recent row but marked as filtered out
         if len(filtered_group) == 0:
-            return None
-            
+            return (most_recent_row, True)
+
         group = filtered_group
-    
-    return group.loc[group['tBreak'].idxmax()]
+
+    return (group.loc[group['tBreak'].idxmax()], False)
 
 def load_boundary_shapefile(shapefile_path, source_crs="EPSG:32629"):
     """
@@ -120,8 +126,8 @@ def load_boundary_shapefile(shapefile_path, source_crs="EPSG:32629"):
 
 def filter_points_by_boundary(df, boundary_gdf, source_crs="EPSG:32629"):
     """
-    Filter points to only include those within the boundary
-    
+    Separate points into those within and outside the boundary
+
     Parameters:
     -----------
     df : pandas.DataFrame
@@ -130,11 +136,11 @@ def filter_points_by_boundary(df, boundary_gdf, source_crs="EPSG:32629"):
         Boundary geometry
     source_crs : str
         CRS of the coordinates
-        
+
     Returns:
     --------
-    pandas.DataFrame
-        Filtered DataFrame with only points inside boundary
+    tuple: (points_within_df, points_outside_df)
+        Two DataFrames - points inside and outside the boundary
     """
     # Create GeoDataFrame from points
     points_gdf = gpd.GeoDataFrame(
@@ -142,17 +148,25 @@ def filter_points_by_boundary(df, boundary_gdf, source_crs="EPSG:32629"):
         geometry=gpd.points_from_xy(df.x_coord, df.y_coord),
         crs=source_crs
     )
-    
+
     # Perform spatial join to find points within boundary
     points_within = gpd.sjoin(points_gdf, boundary_gdf, predicate='within')
-    
-    # Remove the extra columns from the spatial join and return as DataFrame
-    result_df = points_within.drop(columns=['geometry', 'index_right']).reset_index(drop=True)
-    
-    print(f"Points before boundary filtering: {len(df)}")
-    print(f"Points after boundary filtering: {len(result_df)}")
-    
-    return result_df
+
+    # Get points that are within boundary
+    within_df = points_within.drop(columns=['geometry', 'index_right']).reset_index(drop=True)
+
+    # Get points that are outside boundary (those not in the spatial join result)
+    within_indices = set(points_within.index)
+    all_indices = set(points_gdf.index)
+    outside_indices = all_indices - within_indices
+
+    outside_df = df.loc[list(outside_indices)].reset_index(drop=True) if outside_indices else pd.DataFrame()
+
+    print(f"Total points: {len(df)}")
+    print(f"Points within boundary: {len(within_df)}")
+    print(f"Points outside boundary: {len(outside_df)}")
+
+    return within_df, outside_df
 
 def read_parquet_identify_breaks(filepath):
     """
@@ -178,48 +192,81 @@ def read_parquet_identify_breaks(filepath):
 def process_parquet_file(file_path, search_start=None, search_end=None, boundary_gdf=None, source_crs="EPSG:32629"):
     """
     Process a single parquet file and return filtered rows
+    Returns a tuple: (valid_rows, filtered_out_rows)
     """
     try:
         df = read_parquet_identify_breaks(file_path)
 
         df = df[df['is_break'] == 1]
-        
-        # Apply boundary filtering first if specified
+
+        valid_rows = []
+        filtered_out_rows = []
+
+        # Apply boundary filtering if specified
         if boundary_gdf is not None:
-            df = filter_points_by_boundary(df, boundary_gdf, source_crs)
-            if len(df) == 0:
-                return []
-        
-        grouped = df.groupby(['x_coord', 'y_coord'])
-        filtered_rows = []
-        
-        for (x, y), group in grouped:
-            filtered_row = filter_pixel_group(group, search_start, search_end)
-            if filtered_row is not None:
-                filtered_rows.append(filtered_row)
-        
-        return filtered_rows
+            df_within_boundary, df_outside_boundary = filter_points_by_boundary(df, boundary_gdf, source_crs)
+
+            # Process points within boundary (apply date filtering)
+            if not df_within_boundary.empty:
+                grouped = df_within_boundary.groupby(['x_coord', 'y_coord'])
+                for (x_coord, y_coord), group in grouped:
+                    filtered_row, was_filtered_out = filter_pixel_group(group, search_start, search_end)
+
+                    if was_filtered_out:
+                        # Create a copy of the row with tBreak set to 0 to indicate filtered out by date
+                        filtered_out_row = filtered_row.copy()
+                        filtered_out_row['tBreak'] = 0
+                        filtered_out_rows.append(filtered_out_row)
+                    else:
+                        valid_rows.append(filtered_row)
+
+            # Process points outside boundary (all become filtered out with value 0)
+            if not df_outside_boundary.empty:
+                grouped_outside = df_outside_boundary.groupby(['x_coord', 'y_coord'])
+                for (x_coord, y_coord), group in grouped_outside:
+                    # Get most recent break for this pixel but mark as filtered out
+                    most_recent_row = group.loc[group['tBreak'].idxmax()]
+                    filtered_out_row = most_recent_row.copy()
+                    filtered_out_row['tBreak'] = 0
+                    filtered_out_rows.append(filtered_out_row)
+
+        else:
+            # No boundary filtering - only apply date filtering
+            grouped = df.groupby(['x_coord', 'y_coord'])
+            for (x_coord, y_coord), group in grouped:
+                filtered_row, was_filtered_out = filter_pixel_group(group, search_start, search_end)
+
+                if was_filtered_out:
+                    # Create a copy of the row with tBreak set to 0 to indicate filtered out by date
+                    filtered_out_row = filtered_row.copy()
+                    filtered_out_row['tBreak'] = 0
+                    filtered_out_rows.append(filtered_out_row)
+                else:
+                    valid_rows.append(filtered_row)
+
+        return valid_rows, filtered_out_rows
     except Exception as e:
         print(f"Error processing {file_path}: {str(e)}")
-        return []
+        return [], []
 
 def collect_data_from_directory(input_dir, search_start=None, search_end=None, boundary_shapefile=None, source_crs="EPSG:32629"):
     """
     Collect and process data from all parquet files in a directory
+    Returns a tuple: (valid_df, filtered_out_df)
     """
     parquet_files = glob.glob(os.path.join(input_dir, "*.parquet"))
-    
+
     if not parquet_files:
         print(f"No parquet files found in {input_dir}")
-        return None
-    
+        return None, None
+
     print(f"Found {len(parquet_files)} parquet files to process")
-    
+
     # Load boundary shapefile if specified
     boundary_gdf = None
     if boundary_shapefile is not None:
         boundary_gdf = load_boundary_shapefile(boundary_shapefile, source_crs)
-    
+
     # Print filtering information
     filter_info = []
     if search_start is not None or search_end is not None:
@@ -229,30 +276,33 @@ def collect_data_from_directory(input_dir, search_start=None, search_end=None, b
         if search_end is not None:
             date_info += f"to {search_end}"
         filter_info.append(date_info)
-    
+
     if boundary_shapefile is not None:
         filter_info.append(f"Spatial filtering: using boundary from {boundary_shapefile}")
-    
+
     if filter_info:
         print("Filters applied:")
         for info in filter_info:
             print(f"  - {info}")
     else:
         print("No filters applied")
-    
-    all_filtered_rows = []
-    
+
+    all_valid_rows = []
+    all_filtered_out_rows = []
+
     for i, file_path in enumerate(parquet_files, 1):
         print(f"Processing file {i}/{len(parquet_files)}: {os.path.basename(file_path)}")
-        filtered_rows = process_parquet_file(file_path, search_start, search_end, boundary_gdf, source_crs)
-        all_filtered_rows.extend(filtered_rows)
-    
-    if not all_filtered_rows:
-        print("No valid data found in any files (possibly due to filtering)")
-        return None
-    
-    print(f"Total points after all filtering: {len(all_filtered_rows)}")
-    return pd.DataFrame(all_filtered_rows)
+        valid_rows, filtered_out_rows = process_parquet_file(file_path, search_start, search_end, boundary_gdf, source_crs)
+        all_valid_rows.extend(valid_rows)
+        all_filtered_out_rows.extend(filtered_out_rows)
+
+    print(f"Total valid points (passing filters): {len(all_valid_rows)}")
+    print(f"Total filtered out points (in data but not passing filters): {len(all_filtered_out_rows)}")
+
+    valid_df = pd.DataFrame(all_valid_rows) if all_valid_rows else None
+    filtered_out_df = pd.DataFrame(all_filtered_out_rows) if all_filtered_out_rows else None
+
+    return valid_df, filtered_out_df
 
 def create_geodataframe(df, source_crs="EPSG:32629"):
     """
@@ -265,32 +315,46 @@ def create_geodataframe(df, source_crs="EPSG:32629"):
     )
     return gdf
 
-def calculate_raster_parameters_utm(gdf):
+def calculate_raster_parameters_utm(valid_gdf, filtered_out_gdf):
     """
-    Calculate raster dimensions and resolution from GeoDataFrame in UTM
+    Calculate raster dimensions and resolution from GeoDataFrames in UTM
     with fixed 10x10 meter resolution. Assumes coordinates are pixel centers.
+    Considers both valid and filtered out pixels to determine the full extent.
     """
-    # Assuming gdf is in UTM (EPSG:32629)
-    min_x, min_y = gdf['x_coord'].min(), gdf['y_coord'].min()
-    max_x, max_y = gdf['x_coord'].max(), gdf['y_coord'].max()
-    
+    all_x_coords = []
+    all_y_coords = []
+
+    if valid_gdf is not None:
+        all_x_coords.extend(valid_gdf['x_coord'].tolist())
+        all_y_coords.extend(valid_gdf['y_coord'].tolist())
+
+    if filtered_out_gdf is not None:
+        all_x_coords.extend(filtered_out_gdf['x_coord'].tolist())
+        all_y_coords.extend(filtered_out_gdf['y_coord'].tolist())
+
+    if not all_x_coords or not all_y_coords:
+        raise ValueError("No coordinate data found in either valid or filtered out datasets")
+
+    min_x, max_x = min(all_x_coords), max(all_x_coords)
+    min_y, max_y = min(all_y_coords), max(all_y_coords)
+
     # Fixed 10 meter resolution
     res_x = 10.0
     res_y = 10.0
-    
+
     # Adjust bounds to account for pixel centers (extend by half pixel in each direction)
     min_x_corner = min_x - res_x / 2
     min_y_corner = min_y - res_y / 2
     max_x_corner = max_x + res_x / 2
     max_y_corner = max_y + res_y / 2
-    
+
     # Calculate dimensions
     width = int(np.ceil((max_x_corner - min_x_corner) / res_x))
     height = int(np.ceil((max_y_corner - min_y_corner) / res_y))
-    
+
     # Create transform (origin at top-left corner)
     transform = from_origin(min_x_corner, max_y_corner, res_x, res_y)
-    
+
     return {
         'width': width,
         'height': height,
@@ -299,30 +363,50 @@ def calculate_raster_parameters_utm(gdf):
         'bounds': (min_x_corner, min_y_corner, max_x_corner, max_y_corner)
     }
 
-def create_raster_array_utm(gdf, raster_params):
+def create_raster_array_utm(valid_gdf, filtered_out_gdf, raster_params):
     """
     Create a raster array from GeoDataFrame with fixed 10m resolution in UTM.
     Assumes coordinates are pixel centers.
+
+    Parameters:
+    -----------
+    valid_gdf : GeoDataFrame
+        Points that passed all filters (get actual break dates)
+    filtered_out_gdf : GeoDataFrame
+        Points that had data but were filtered out (get 0 values)
+    raster_params : dict
+        Raster parameters from calculate_raster_parameters_utm
     """
     width = raster_params['width']
     height = raster_params['height']
     min_x, min_y, max_x, max_y = raster_params['bounds']
     res_x, res_y = raster_params['resolution']
-    
+
+    # Initialize with NoData values
     tbreak_array = np.full((height, width), -9999, dtype=np.int32)
-    for idx, row in gdf.iterrows():
-        # Calculate indices from pixel center coordinates
-        x_idx = int(np.round((row['x_coord'] - min_x) / res_x - 0.5))
-        y_idx = int(np.round((max_y - row['y_coord']) / res_y - 0.5))
-        
-        if 0 <= x_idx < width and 0 <= y_idx < height:
-            if not pd.isna(row['tBreak']):
-                date_obj = pd.to_datetime(row['tBreak'], unit='ms', utc=True)
-                date_obj = date_obj.tz_localize(None)
-                yyyymmdd = int(date_obj.strftime('%Y%m%d'))
-                tbreak_array[y_idx, x_idx] = yyyymmdd
-            # tbreak_array[y_idx, x_idx] = row['tBreak']
-    
+
+    # Process filtered out pixels first (set to 0)
+    if filtered_out_gdf is not None:
+        for idx, row in filtered_out_gdf.iterrows():
+            x_idx = int(np.round((row['x_coord'] - min_x) / res_x - 0.5))
+            y_idx = int(np.round((max_y - row['y_coord']) / res_y - 0.5))
+
+            if 0 <= x_idx < width and 0 <= y_idx < height:
+                tbreak_array[y_idx, x_idx] = 0
+
+    # Process valid pixels (set to actual break dates)
+    if valid_gdf is not None:
+        for idx, row in valid_gdf.iterrows():
+            x_idx = int(np.round((row['x_coord'] - min_x) / res_x - 0.5))
+            y_idx = int(np.round((max_y - row['y_coord']) / res_y - 0.5))
+
+            if 0 <= x_idx < width and 0 <= y_idx < height:
+                if not pd.isna(row['tBreak']) and row['tBreak'] != 0:
+                    date_obj = pd.to_datetime(row['tBreak'], unit='ms', utc=True)
+                    date_obj = date_obj.tz_localize(None)
+                    yyyymmdd = int(date_obj.strftime('%Y%m%d'))
+                    tbreak_array[y_idx, x_idx] = yyyymmdd
+
     return tbreak_array
 
 def save_geotiff(array, output_file, raster_params, source_crs='EPSG:32629', target_crs='EPSG:32629'):
@@ -484,8 +568,9 @@ def create_qgis_style_file(gdf, output_style_file):
             label = date_obj.strftime('%Y-%m-%d')
             qml_content += f'        <paletteEntry value="{date_value}" color="{color_hex}" label="{label}"/>\n'
     
-    # Add nodata value
-    qml_content += '''        <paletteEntry value="-9999" color="#000000" label="No Data" alpha="0"/>
+    # Add entries for filtered out pixels (value = 0) and nodata
+    qml_content += '''        <paletteEntry value="0" color="#808080" label="Filtered Out (Data present but outside filter criteria)"/>
+        <paletteEntry value="-9999" color="#000000" label="No Data" alpha="0"/>
       </colorPalette>
     </rasterrenderer>
   </pipe>
@@ -498,13 +583,13 @@ def create_qgis_style_file(gdf, output_style_file):
     print(f"QGIS style file saved to: {output_style_file}")
     print(f"Years in data: {years}")
 
-def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_file, target_crs="EPSG:32629", 
+def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_file, target_crs="EPSG:32629",
                                 search_start=None, search_end=None, boundary_shapefile=None, qgis_style_file=False):
     """
     Main function to process all parquet files in a directory and save as a single GeoTIFF
     and a vector file of used points.
     Uses UTM coordinates throughout and only reprojects at the end if needed.
-    
+
     Parameters:
     -----------
     input_dir : str
@@ -529,50 +614,61 @@ def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_fi
         output_dir = os.path.dirname(output_file)
         if output_dir:
             Path(output_dir).mkdir(parents=True, exist_ok=True)
-    
-    # Collect data from all parquet files
-    df = collect_data_from_directory(input_dir, search_start, search_end, boundary_shapefile)
-    if df is None:
-        print("No data")
-        return
-    
-    # Create GeoDataFrame
-    gdf = create_geodataframe(df)
 
-    if qgis_style_file == True:
+    # Collect data from all parquet files
+    valid_df, filtered_out_df = collect_data_from_directory(input_dir, search_start, search_end, boundary_shapefile)
+    if valid_df is None and filtered_out_df is None:
+        print("No data found")
+        return
+
+    # Create GeoDataFrames
+    valid_gdf = create_geodataframe(valid_df) if valid_df is not None else None
+    filtered_out_gdf = create_geodataframe(filtered_out_df) if filtered_out_df is not None else None
+
+    # Create QGIS style file based on valid data only
+    if qgis_style_file == True and valid_gdf is not None:
         style_file = output_raster_file.replace('.tif', '_year_colors.qml')
-        create_qgis_style_file(gdf, style_file)
-    
-    # Calculate raster parameters
-    raster_params = calculate_raster_parameters_utm(gdf)
-    
+        create_qgis_style_file(valid_gdf, style_file)
+
+    # Calculate raster parameters considering both datasets
+    raster_params = calculate_raster_parameters_utm(valid_gdf, filtered_out_gdf)
+
     print(f"Creating raster with dimensions: {raster_params['width']} x {raster_params['height']}")
     print(f"Resolution: {raster_params['resolution'][0]} x {raster_params['resolution'][1]} meters")
-    
+
     # Create raster array
-    tbreak_array = create_raster_array_utm(gdf, raster_params)
-    
+    tbreak_array = create_raster_array_utm(valid_gdf, filtered_out_gdf, raster_params)
+
     # Save to GeoTIFF (with optional reprojection)
     save_geotiff(tbreak_array, output_raster_file, raster_params, source_crs='EPSG:32629', target_crs=target_crs)
-    
-    # Save vector points
-    if output_vector_file is not None:
-        num_points_saved = save_vector_points(gdf, output_vector_file, target_crs)
+
+    # Save vector points (only valid points for vector output)
+    if output_vector_file is not None and valid_gdf is not None:
+        num_points_saved = save_vector_points(valid_gdf, output_vector_file, target_crs)
         print(f"Vector points saved to: {output_vector_file}")
         print(f"Points saved to vector file: {num_points_saved}")
-    
+
     print(f"Combined GeoTIFF saved to: {output_raster_file}")
-    print(f"Total pixels processed: {len(df)}")
+
+    # Summary statistics
+    total_valid = len(valid_df) if valid_df is not None else 0
+    total_filtered_out = len(filtered_out_df) if filtered_out_df is not None else 0
+    total_processed = total_valid + total_filtered_out
+
+    print(f"Total pixels processed: {total_processed}")
+    print(f"  - Pixels with valid break dates (passing filters): {total_valid}")
+    print(f"  - Pixels filtered out but present in data (set to 0): {total_filtered_out}")
+    print(f"  - Pixels not in parquet files will show as NoData")
 
 if __name__ == "__main__":
     # Set input directory and output files
     input_directory = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo" # UPDATE
-    output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/testing_new_parquet_processing.tif" # UPDATE
+    output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/testing_0_change_dates_without_qml.tif" # UPDATE
     output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
     
     # String date range filtering (set both to None to disable filtering)
-    search_start = None  # Start date for filtering break dates ("YYYY-MM-DD" format)
-    search_end = None    # End date for filtering break dates ("YYYY-MM-DD" format)
+    search_start = "2018-01-01"  # Start date for filtering break dates ("YYYY-MM-DD" format)
+    search_end = "2021-12-31"    # End date for filtering break dates ("YYYY-MM-DD" format)
     
     # Boundary shapefile filtering (set to None to disable)
     boundary_shapefile = None  # Path to shapefile for spatial boundary filtering
