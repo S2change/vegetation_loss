@@ -46,6 +46,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
 import colorsys
+import time
 
 ## SCRIPT CONFIGS ##
 ##################################
@@ -708,12 +709,23 @@ def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_fi
     print(f"  - Pixels not in parquet files will show as NoData")
 
 if __name__ == "__main__":
+    start_time = time.time()
+
     process_directory_to_geotiff(
-        input_directory, 
-        output_raster_file, 
-        output_vector_file, 
-        search_start=search_start, 
+        input_directory,
+        output_raster_file,
+        output_vector_file,
+        search_start=search_start,
         search_end=search_end,
         boundary_shapefile=boundary_shapefile,
         qgis_style_file=qgis_style_file
     ) # target_crs='EPSG:4326'
+
+    end_time = time.time()
+    execution_time = end_time - start_time
+
+    hours = int(execution_time // 3600)
+    minutes = int((execution_time % 3600) // 60)
+    seconds = execution_time % 60
+
+    print(f"\nScript completed in {hours:02d}:{minutes:02d}:{seconds:.2f} (HH:MM:SS.SS)")
