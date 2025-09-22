@@ -52,7 +52,7 @@ import colorsys
 
 # Set input directory and output files
 input_directory = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo" # UPDATE
-output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/testing_config_move.tif" # UPDATE
+output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/testing_memory_script_01.tif" # UPDATE
 output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
 
 # String date range filtering (set both to None to disable filtering)
@@ -62,7 +62,7 @@ search_end = "2021-12-31"    # End date for filtering break dates ("YYYY-MM-DD" 
 # Boundary shapefile filtering (set to None to disable)
 boundary_shapefile = None  # Path to shapefile for spatial boundary filtering
 
-qgis_style_file = False  # Set to True if a .qml style file should be created
+qgis_style_file = True  # Set to True if a .qml style file should be created
 
 ##################################
 
@@ -268,16 +268,16 @@ def process_parquet_file(file_path, search_start=None, search_end=None, boundary
         print(f"Error processing {file_path}: {str(e)}")
         return [], []
 
-def collect_data_from_directory(input_dir, search_start=None, search_end=None, boundary_shapefile=None, source_crs="EPSG:32629"):
+def process_files_chunked(input_dir, search_start=None, search_end=None, boundary_shapefile=None, source_crs="EPSG:32629"):
     """
-    Collect and process data from all parquet files in a directory
-    Returns a tuple: (valid_df, filtered_out_df)
+    Generator that yields processed data from parquet files one at a time to avoid memory issues
+    Yields tuples: (valid_rows, filtered_out_rows) for each file
     """
     parquet_files = glob.glob(os.path.join(input_dir, "*.parquet"))
 
     if not parquet_files:
         print(f"No parquet files found in {input_dir}")
-        return None, None
+        return
 
     print(f"Found {len(parquet_files)} parquet files to process")
 
@@ -306,27 +306,60 @@ def collect_data_from_directory(input_dir, search_start=None, search_end=None, b
     else:
         print("No filters applied")
 
-    all_valid_rows = []
-    all_filtered_out_rows = []
-
     for i, file_path in enumerate(parquet_files, 1):
         print(f"Processing file {i}/{len(parquet_files)}: {os.path.basename(file_path)}")
         valid_rows, filtered_out_rows = process_parquet_file(file_path, search_start, search_end, boundary_gdf, source_crs)
-        all_valid_rows.extend(valid_rows)
-        all_filtered_out_rows.extend(filtered_out_rows)
+        yield valid_rows, filtered_out_rows
 
-    print(f"Total valid points (passing filters): {len(all_valid_rows)}")
-    print(f"Total filtered out points (in data but not passing filters): {len(all_filtered_out_rows)}")
-
-    valid_df = pd.DataFrame(all_valid_rows) if all_valid_rows else None
-    filtered_out_df = pd.DataFrame(all_filtered_out_rows) if all_filtered_out_rows else None
-
-    return valid_df, filtered_out_df
-
-def create_geodataframe(df, source_crs="EPSG:32629"):
+def collect_pixel_data_chunked(input_dir, search_start=None, search_end=None, boundary_shapefile=None, source_crs="EPSG:32629"):
     """
-    Create a GeoDataFrame from the DataFrame keeping it in UTM
+    Process all parquet files using pixel-level tracking to handle cross-file duplicates
+    Returns pixel trackers for valid and filtered pixels
     """
+    # Dictionaries to track the most recent date for each pixel
+    valid_pixels = {}  # {(x_coord, y_coord): row_data}
+    filtered_pixels = {}  # {(x_coord, y_coord): row_data}
+
+    total_valid_count = 0
+    total_filtered_count = 0
+
+    for valid_rows, filtered_out_rows in process_files_chunked(input_dir, search_start, search_end, boundary_shapefile, source_crs):
+        # Process valid rows - keep only most recent per pixel
+        for row in valid_rows:
+            pixel_key = (row['x_coord'], row['y_coord'])
+
+            # If we haven't seen this pixel or found more recent data
+            if pixel_key not in valid_pixels or row['tBreak'] > valid_pixels[pixel_key]['tBreak']:
+                valid_pixels[pixel_key] = row
+
+        # Process filtered out rows - keep only most recent per pixel
+        for row in filtered_out_rows:
+            pixel_key = (row['x_coord'], row['y_coord'])
+
+            # Only add to filtered if not in valid pixels (valid takes priority)
+            if pixel_key not in valid_pixels:
+                if pixel_key not in filtered_pixels or row['tBreak'] > filtered_pixels[pixel_key]['tBreak']:
+                    filtered_pixels[pixel_key] = row
+
+        total_valid_count += len(valid_rows)
+        total_filtered_count += len(filtered_out_rows)
+
+    print(f"Total valid points processed: {total_valid_count} (unique pixels: {len(valid_pixels)})")
+    print(f"Total filtered out points processed: {total_filtered_count} (unique pixels: {len(filtered_pixels)})")
+
+    return valid_pixels, filtered_pixels
+
+def create_geodataframe_from_pixels(pixel_dict, source_crs="EPSG:32629"):
+    """
+    Create a GeoDataFrame from pixel dictionary keeping it in UTM
+    """
+    if not pixel_dict:
+        return None
+
+    # Convert pixel dictionary to DataFrame
+    rows = list(pixel_dict.values())
+    df = pd.DataFrame(rows)
+
     gdf = gpd.GeoDataFrame(
         df,
         geometry=gpd.points_from_xy(df.x_coord, df.y_coord),
@@ -334,22 +367,23 @@ def create_geodataframe(df, source_crs="EPSG:32629"):
     )
     return gdf
 
-def calculate_raster_parameters_utm(valid_gdf, filtered_out_gdf):
+def calculate_raster_parameters_from_pixels(valid_pixels, filtered_pixels):
     """
-    Calculate raster dimensions and resolution from GeoDataFrames in UTM
+    Calculate raster dimensions and resolution from pixel dictionaries
     with fixed 10x10 meter resolution. Assumes coordinates are pixel centers.
     Considers both valid and filtered out pixels to determine the full extent.
     """
     all_x_coords = []
     all_y_coords = []
 
-    if valid_gdf is not None:
-        all_x_coords.extend(valid_gdf['x_coord'].tolist())
-        all_y_coords.extend(valid_gdf['y_coord'].tolist())
+    # Extract coordinates from pixel dictionaries
+    for (x_coord, y_coord) in valid_pixels.keys():
+        all_x_coords.append(x_coord)
+        all_y_coords.append(y_coord)
 
-    if filtered_out_gdf is not None:
-        all_x_coords.extend(filtered_out_gdf['x_coord'].tolist())
-        all_y_coords.extend(filtered_out_gdf['y_coord'].tolist())
+    for (x_coord, y_coord) in filtered_pixels.keys():
+        all_x_coords.append(x_coord)
+        all_y_coords.append(y_coord)
 
     if not all_x_coords or not all_y_coords:
         raise ValueError("No coordinate data found in either valid or filtered out datasets")
@@ -382,19 +416,19 @@ def calculate_raster_parameters_utm(valid_gdf, filtered_out_gdf):
         'bounds': (min_x_corner, min_y_corner, max_x_corner, max_y_corner)
     }
 
-def create_raster_array_utm(valid_gdf, filtered_out_gdf, raster_params):
+def create_raster_array_from_pixels(valid_pixels, filtered_pixels, raster_params):
     """
-    Create a raster array from GeoDataFrame with fixed 10m resolution in UTM.
+    Create a raster array from pixel dictionaries with fixed 10m resolution in UTM.
     Assumes coordinates are pixel centers.
 
     Parameters:
     -----------
-    valid_gdf : GeoDataFrame
-        Points that passed all filters (get actual break dates)
-    filtered_out_gdf : GeoDataFrame
-        Points that had data but were filtered out (get 0 values)
+    valid_pixels : dict
+        {(x_coord, y_coord): row_data} for points that passed all filters
+    filtered_pixels : dict
+        {(x_coord, y_coord): row_data} for points filtered out but present in data
     raster_params : dict
-        Raster parameters from calculate_raster_parameters_utm
+        Raster parameters from calculate_raster_parameters_from_pixels
     """
     width = raster_params['width']
     height = raster_params['height']
@@ -405,26 +439,24 @@ def create_raster_array_utm(valid_gdf, filtered_out_gdf, raster_params):
     tbreak_array = np.full((height, width), -9999, dtype=np.int32)
 
     # Process filtered out pixels first (set to 0)
-    if filtered_out_gdf is not None:
-        for idx, row in filtered_out_gdf.iterrows():
-            x_idx = int(np.round((row['x_coord'] - min_x) / res_x - 0.5))
-            y_idx = int(np.round((max_y - row['y_coord']) / res_y - 0.5))
+    for (x_coord, y_coord), row in filtered_pixels.items():
+        x_idx = int(np.round((x_coord - min_x) / res_x - 0.5))
+        y_idx = int(np.round((max_y - y_coord) / res_y - 0.5))
 
-            if 0 <= x_idx < width and 0 <= y_idx < height:
-                tbreak_array[y_idx, x_idx] = 0
+        if 0 <= x_idx < width and 0 <= y_idx < height:
+            tbreak_array[y_idx, x_idx] = 0
 
     # Process valid pixels (set to actual break dates)
-    if valid_gdf is not None:
-        for idx, row in valid_gdf.iterrows():
-            x_idx = int(np.round((row['x_coord'] - min_x) / res_x - 0.5))
-            y_idx = int(np.round((max_y - row['y_coord']) / res_y - 0.5))
+    for (x_coord, y_coord), row in valid_pixels.items():
+        x_idx = int(np.round((x_coord - min_x) / res_x - 0.5))
+        y_idx = int(np.round((max_y - y_coord) / res_y - 0.5))
 
-            if 0 <= x_idx < width and 0 <= y_idx < height:
-                if not pd.isna(row['tBreak']) and row['tBreak'] != 0:
-                    date_obj = pd.to_datetime(row['tBreak'], unit='ms', utc=True)
-                    date_obj = date_obj.tz_localize(None)
-                    yyyymmdd = int(date_obj.strftime('%Y%m%d'))
-                    tbreak_array[y_idx, x_idx] = yyyymmdd
+        if 0 <= x_idx < width and 0 <= y_idx < height:
+            if not pd.isna(row['tBreak']) and row['tBreak'] != 0:
+                date_obj = pd.to_datetime(row['tBreak'], unit='ms', utc=True)
+                date_obj = date_obj.tz_localize(None)
+                yyyymmdd = int(date_obj.strftime('%Y%m%d'))
+                tbreak_array[y_idx, x_idx] = yyyymmdd
 
     return tbreak_array
 
@@ -516,15 +548,14 @@ def save_vector_points(gdf, output_file, target_crs="EPSG:32629"):
     return len(valid_points_gdf)
 
 
-def create_qgis_style_file(gdf, output_style_file):
+def create_qgis_style_file_from_pixels(valid_pixels, output_style_file):
     """
     Create a QGIS .qml style file that colors pixels by year with gradient shading by day of year
     """
-    
+
     # Get all unique dates and extract years - use UTC consistently
-    valid_dates = gdf[~pd.isna(gdf['tBreak'])]['tBreak'].apply(
-        lambda x: pd.to_datetime(x, unit='ms', utc=True).tz_localize(None)
-    )
+    valid_dates = [pd.to_datetime(row['tBreak'], unit='ms', utc=True).tz_localize(None)
+                   for row in valid_pixels.values() if not pd.isna(row['tBreak'])]
     
     # Group dates by year
     dates_by_year = {}
@@ -634,35 +665,32 @@ def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_fi
         if output_dir:
             Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    # Collect data from all parquet files
-    valid_df, filtered_out_df = collect_data_from_directory(input_dir, search_start, search_end, boundary_shapefile)
-    if valid_df is None and filtered_out_df is None:
+    # Collect pixel data using chunked processing
+    valid_pixels, filtered_pixels = collect_pixel_data_chunked(input_dir, search_start, search_end, boundary_shapefile)
+    if not valid_pixels and not filtered_pixels:
         print("No data found")
         return
 
-    # Create GeoDataFrames
-    valid_gdf = create_geodataframe(valid_df) if valid_df is not None else None
-    filtered_out_gdf = create_geodataframe(filtered_out_df) if filtered_out_df is not None else None
-
     # Create QGIS style file based on valid data only
-    if qgis_style_file == True and valid_gdf is not None:
+    if qgis_style_file == True and valid_pixels:
         style_file = output_raster_file.replace('.tif', '_year_colors.qml')
-        create_qgis_style_file(valid_gdf, style_file)
+        create_qgis_style_file_from_pixels(valid_pixels, style_file)
 
     # Calculate raster parameters considering both datasets
-    raster_params = calculate_raster_parameters_utm(valid_gdf, filtered_out_gdf)
+    raster_params = calculate_raster_parameters_from_pixels(valid_pixels, filtered_pixels)
 
     print(f"Creating raster with dimensions: {raster_params['width']} x {raster_params['height']}")
     print(f"Resolution: {raster_params['resolution'][0]} x {raster_params['resolution'][1]} meters")
 
     # Create raster array
-    tbreak_array = create_raster_array_utm(valid_gdf, filtered_out_gdf, raster_params)
+    tbreak_array = create_raster_array_from_pixels(valid_pixels, filtered_pixels, raster_params)
 
     # Save to GeoTIFF (with optional reprojection)
     save_geotiff(tbreak_array, output_raster_file, raster_params, source_crs='EPSG:32629', target_crs=target_crs)
 
     # Save vector points (only valid points for vector output)
-    if output_vector_file is not None and valid_gdf is not None:
+    if output_vector_file is not None and valid_pixels:
+        valid_gdf = create_geodataframe_from_pixels(valid_pixels, source_crs='EPSG:32629')
         num_points_saved = save_vector_points(valid_gdf, output_vector_file, target_crs)
         print(f"Vector points saved to: {output_vector_file}")
         print(f"Points saved to vector file: {num_points_saved}")
@@ -670,8 +698,8 @@ def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_fi
     print(f"Combined GeoTIFF saved to: {output_raster_file}")
 
     # Summary statistics
-    total_valid = len(valid_df) if valid_df is not None else 0
-    total_filtered_out = len(filtered_out_df) if filtered_out_df is not None else 0
+    total_valid = len(valid_pixels)
+    total_filtered_out = len(filtered_pixels)
     total_processed = total_valid + total_filtered_out
 
     print(f"Total pixels processed: {total_processed}")
