@@ -34,7 +34,9 @@ from pyccd.shared.read_files import read_tif_files_gee
 
 ## SCRIPT CONFIGS ##
 ##################################
-# tile = "T29TNE" Gets overwritten when the script starts
+# This parameter gets overwritten when the script starts, leaving as a reminder in case decide to change later
+# tile = "T29TNE" 
+
 parquet_folder = "C:/Users/Public/Documents/outputs_ROI/tabular/"
 
 s2_images_folder_B2_B11 = "C:/Users/Public/Documents/s2_images_B2_B11/"

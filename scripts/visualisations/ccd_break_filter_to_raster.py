@@ -46,14 +46,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
 import colorsys
-import time
 
 ## SCRIPT CONFIGS ##
 ##################################
 
 # Set input directory and output files
 input_directory = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo" # UPDATE
-output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/testing_memory_script_01.tif" # UPDATE
+output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/01_10_25_fixed_test.tif" # UPDATE
 output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
 
 # String date range filtering (set both to None to disable filtering)
@@ -217,14 +216,14 @@ def process_parquet_file(file_path, search_start=None, search_end=None, boundary
     try:
         df = read_parquet_identify_breaks(file_path)
 
-        df = df[df['is_break'] == 1]
+        df_breaks = df[df['is_break'] == 1]
 
         valid_rows = []
         filtered_out_rows = []
 
         # Apply boundary filtering if specified
         if boundary_gdf is not None:
-            df_within_boundary, df_outside_boundary = filter_points_by_boundary(df, boundary_gdf, source_crs)
+            df_within_boundary, df_outside_boundary = filter_points_by_boundary(df_breaks, boundary_gdf, source_crs)
 
             # Process points within boundary (apply date filtering)
             if not df_within_boundary.empty:
@@ -252,7 +251,7 @@ def process_parquet_file(file_path, search_start=None, search_end=None, boundary
 
         else:
             # No boundary filtering - only apply date filtering
-            grouped = df.groupby(['x_coord', 'y_coord'])
+            grouped = df_breaks.groupby(['x_coord', 'y_coord'])
             for (x_coord, y_coord), group in grouped:
                 filtered_row, was_filtered_out = filter_pixel_group(group, search_start, search_end)
 
@@ -263,6 +262,14 @@ def process_parquet_file(file_path, search_start=None, search_end=None, boundary
                     filtered_out_rows.append(filtered_out_row)
                 else:
                     valid_rows.append(filtered_row)
+
+        # Process terminal segments (pixels with no breaks) - set tBreak = 0
+        df_terminal = df[df['is_break'] == 0]
+        if not df_terminal.empty:
+            for _, row in df_terminal.iterrows():
+                terminal_row = row.copy()
+                terminal_row['tBreak'] = 0
+                filtered_out_rows.append(terminal_row)
 
         return valid_rows, filtered_out_rows
     except Exception as e:
@@ -709,7 +716,6 @@ def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_fi
     print(f"  - Pixels not in parquet files will show as NoData")
 
 if __name__ == "__main__":
-    start_time = time.time()
 
     process_directory_to_geotiff(
         input_directory,
@@ -720,12 +726,3 @@ if __name__ == "__main__":
         boundary_shapefile=boundary_shapefile,
         qgis_style_file=qgis_style_file
     ) # target_crs='EPSG:4326'
-
-    end_time = time.time()
-    execution_time = end_time - start_time
-
-    hours = int(execution_time // 3600)
-    minutes = int((execution_time % 3600) // 60)
-    seconds = execution_time % 60
-
-    print(f"\nScript completed in {hours:02d}:{minutes:02d}:{seconds:.2f} (HH:MM:SS.SS)")
