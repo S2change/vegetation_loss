@@ -46,13 +46,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
 import colorsys
+import time
 
 ## SCRIPT CONFIGS ##
 ##################################
 
 # Set input directory and output files
 input_directory = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo" # UPDATE
-output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/01_10_25_fixed_test.tif" # UPDATE
+output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/01_10_25_optimize_test_01.tif" # UPDATE
 output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
 
 # String date range filtering (set both to None to disable filtering)
@@ -210,12 +211,12 @@ def read_parquet_identify_breaks(filepath):
     
     Note: 'is_break' is 0 for a terminal segment (not a break) and 'is_break' is 1 otherwise 
     """
-    df=pd.read_parquet(filepath)
-    df['is_break']=0 #is_break==0 terminal segment; is_break==1 for segment with break
+    df = pd.read_parquet(filepath)
 
     # create mask and new binary column 'is_break'
-    mask = (df['x_coord'] == df['x_coord'].shift(-1)) & (df['y_coord'] == df['y_coord'].shift(-1))
-    df.loc[mask, 'is_break'] = 1
+    # Using .values avoids pandas index alignment overhead
+    mask = (df['x_coord'].values == df['x_coord'].shift(-1).values) & (df['y_coord'].values == df['y_coord'].shift(-1).values)
+    df['is_break'] = mask.astype(int)
 
     return df 
 
@@ -723,6 +724,9 @@ def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_fi
     print(f"  - Pixels not in parquet files will show as NoData")
 
 if __name__ == "__main__":
+    start_time = time.time()
+    print(f"Script started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("="*70)
 
     process_directory_to_geotiff(
         input_directory,
@@ -731,3 +735,13 @@ if __name__ == "__main__":
         boundary_shapefile=boundary_shapefile,
         qgis_style_file=qgis_style_file
     ) # target_crs='EPSG:4326'
+
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    hours, remainder = divmod(elapsed_time, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    print("="*70)
+    print(f"Script completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Total execution time: {int(hours):02d}:{int(minutes):02d}:{seconds:05.2f}")
+    print(f"Total execution time: {elapsed_time:.2f} seconds")
