@@ -66,13 +66,36 @@ qgis_style_file = True  # Set to True if a .qml style file should be created
 
 ##################################
 
-def filter_pixel_group(group, search_start=None, search_end=None):
+
+## CONVERTING SEARCH DATES TO TIMESTAMP ##
+#################################################
+
+# Start and End Dates only used in filter_pixel_group()
+if search_start is not None:
+    if isinstance(search_start, str):
+        search_start_dt = pd.to_datetime(search_start)
+    else:
+        search_start_dt = search_start
+    search_start_ms = int(search_start_dt.timestamp() * 1000)
+
+if search_end is not None:
+    if isinstance(search_end, str):
+        search_end_dt = pd.to_datetime(search_end)
+    else:
+        search_end_dt = search_end
+    search_end_ms = int(search_end_dt.timestamp() * 1000)
+
+#################################################
+
+def filter_pixel_group(group):
     """
     Filter a group of rows for a single pixel according to the rules:
     - Only return the row with the highest tBreak value
     - Only consider rows within the date range if specified
     - Returns a tuple: (result_row, was_filtered_out)
       where was_filtered_out is True if pixel had data but was filtered out by date
+    
+    Uses the global search_start_ms and search_end_ms variables
     """
     # Get the most recent break regardless of filtering
     most_recent_row = group.loc[group['tBreak'].idxmax()]
@@ -82,21 +105,9 @@ def filter_pixel_group(group, search_start=None, search_end=None):
         filtered_group = group.copy()
 
         if search_start is not None:
-            # Convert search_start to milliseconds timestamp
-            if isinstance(search_start, str):
-                search_start_dt = pd.to_datetime(search_start)
-            else:
-                search_start_dt = search_start
-            search_start_ms = int(search_start_dt.timestamp() * 1000)
             filtered_group = filtered_group[filtered_group['tBreak'] >= search_start_ms]
 
         if search_end is not None:
-            # Convert search_end to milliseconds timestamp
-            if isinstance(search_end, str):
-                search_end_dt = pd.to_datetime(search_end)
-            else:
-                search_end_dt = search_end
-            search_end_ms = int(search_end_dt.timestamp() * 1000)
             filtered_group = filtered_group[filtered_group['tBreak'] <= search_end_ms]
 
         # If no rows remain after filtering, return the most recent row but marked as filtered out
@@ -208,7 +219,7 @@ def read_parquet_identify_breaks(filepath):
 
     return df 
 
-def process_parquet_file(file_path, search_start=None, search_end=None, boundary_gdf=None, source_crs="EPSG:32629"):
+def process_parquet_file(file_path, boundary_gdf=None, source_crs="EPSG:32629"):
     """
     Process a single parquet file and return filtered rows
     Returns a tuple: (valid_rows, filtered_out_rows)
@@ -229,7 +240,7 @@ def process_parquet_file(file_path, search_start=None, search_end=None, boundary
             if not df_within_boundary.empty:
                 grouped = df_within_boundary.groupby(['x_coord', 'y_coord'])
                 for (x_coord, y_coord), group in grouped:
-                    filtered_row, was_filtered_out = filter_pixel_group(group, search_start, search_end)
+                    filtered_row, was_filtered_out = filter_pixel_group(group)
 
                     if was_filtered_out:
                         # Create a copy of the row with tBreak set to 0 to indicate filtered out by date
@@ -253,7 +264,7 @@ def process_parquet_file(file_path, search_start=None, search_end=None, boundary
             # No boundary filtering - only apply date filtering
             grouped = df_breaks.groupby(['x_coord', 'y_coord'])
             for (x_coord, y_coord), group in grouped:
-                filtered_row, was_filtered_out = filter_pixel_group(group, search_start, search_end)
+                filtered_row, was_filtered_out = filter_pixel_group(group)
 
                 if was_filtered_out:
                     # Create a copy of the row with tBreak set to 0 to indicate filtered out by date
@@ -266,17 +277,17 @@ def process_parquet_file(file_path, search_start=None, search_end=None, boundary
         # Process terminal segments (pixels with no breaks) - set tBreak = 0
         df_terminal = df[df['is_break'] == 0]
         if not df_terminal.empty:
-            for _, row in df_terminal.iterrows():
-                terminal_row = row.copy()
-                terminal_row['tBreak'] = 0
-                filtered_out_rows.append(terminal_row)
+            df_terminal_copy = df_terminal.copy()
+            df_terminal_copy['tBreak'] = 0
+            for _, row in df_terminal_copy.iterrows():
+                filtered_out_rows.append(row)
 
         return valid_rows, filtered_out_rows
     except Exception as e:
         print(f"Error processing {file_path}: {str(e)}")
         return [], []
 
-def process_files_chunked(input_dir, search_start=None, search_end=None, boundary_shapefile=None, source_crs="EPSG:32629"):
+def process_files_chunked(input_dir, boundary_shapefile=None, source_crs="EPSG:32629"):
     """
     Generator that yields processed data from parquet files one at a time to avoid memory issues
     Yields tuples: (valid_rows, filtered_out_rows) for each file
@@ -316,10 +327,10 @@ def process_files_chunked(input_dir, search_start=None, search_end=None, boundar
 
     for i, file_path in enumerate(parquet_files, 1):
         print(f"Processing file {i}/{len(parquet_files)}: {os.path.basename(file_path)}")
-        valid_rows, filtered_out_rows = process_parquet_file(file_path, search_start, search_end, boundary_gdf, source_crs)
+        valid_rows, filtered_out_rows = process_parquet_file(file_path, boundary_gdf, source_crs)
         yield valid_rows, filtered_out_rows
 
-def collect_pixel_data_chunked(input_dir, search_start=None, search_end=None, boundary_shapefile=None, source_crs="EPSG:32629"):
+def collect_pixel_data_chunked(input_dir, boundary_shapefile=None, source_crs="EPSG:32629"):
     """
     Process all parquet files using pixel-level tracking to handle cross-file duplicates
     Returns pixel trackers for valid and filtered pixels
@@ -331,7 +342,7 @@ def collect_pixel_data_chunked(input_dir, search_start=None, search_end=None, bo
     total_valid_count = 0
     total_filtered_count = 0
 
-    for valid_rows, filtered_out_rows in process_files_chunked(input_dir, search_start, search_end, boundary_shapefile, source_crs):
+    for valid_rows, filtered_out_rows in process_files_chunked(input_dir, boundary_shapefile, source_crs):
         # Process valid rows - keep only most recent per pixel
         for row in valid_rows:
             pixel_key = (row['x_coord'], row['y_coord'])
@@ -642,7 +653,7 @@ def create_qgis_style_file_from_pixels(valid_pixels, output_style_file):
     print(f"Years in data: {years}")
 
 def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_file, target_crs="EPSG:32629",
-                                search_start=None, search_end=None, boundary_shapefile=None, qgis_style_file=False):
+                                boundary_shapefile=None, qgis_style_file=False):
     """
     Main function to process all parquet files in a directory and save as a single GeoTIFF
     and a vector file of used points.
@@ -658,10 +669,6 @@ def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_fi
         Path for output vector file (None to skip)
     target_crs : str
         Target coordinate reference system
-    search_start : str or datetime, optional
-        Start date for filtering (e.g., '2020-01-01')
-    search_end : str or datetime, optional
-        End date for filtering (e.g., '2023-12-31')
     boundary_shapefile : str, optional
         Path to shapefile for spatial boundary filtering
     """
@@ -674,7 +681,7 @@ def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_fi
             Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     # Collect pixel data using chunked processing
-    valid_pixels, filtered_pixels = collect_pixel_data_chunked(input_dir, search_start, search_end, boundary_shapefile)
+    valid_pixels, filtered_pixels = collect_pixel_data_chunked(input_dir, boundary_shapefile)
     if not valid_pixels and not filtered_pixels:
         print("No data found")
         return
@@ -721,8 +728,6 @@ if __name__ == "__main__":
         input_directory,
         output_raster_file,
         output_vector_file,
-        search_start=search_start,
-        search_end=search_end,
         boundary_shapefile=boundary_shapefile,
         qgis_style_file=qgis_style_file
     ) # target_crs='EPSG:4326'
