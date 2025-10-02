@@ -335,10 +335,12 @@ def collect_pixel_data_chunked(input_dir, boundary_shapefile=None, source_crs="E
     """
     Process all parquet files using pixel-level tracking to handle cross-file duplicates
     Returns pixel trackers for valid and filtered pixels
+
+    Memory optimized: stores only tBreak values instead of full row objects
     """
     # Dictionaries to track the most recent date for each pixel
-    valid_pixels = {}  # {(x_coord, y_coord): row_data}
-    filtered_pixels = {}  # {(x_coord, y_coord): row_data}
+    valid_pixels = {}  # {(x_coord, y_coord): tBreak_value}
+    filtered_pixels = {}  # {(x_coord, y_coord): tBreak_value}
 
     total_valid_count = 0
     total_filtered_count = 0
@@ -347,19 +349,21 @@ def collect_pixel_data_chunked(input_dir, boundary_shapefile=None, source_crs="E
         # Process valid rows - keep only most recent per pixel
         for row in valid_rows:
             pixel_key = (row['x_coord'], row['y_coord'])
+            tBreak = row['tBreak']
 
             # If we haven't seen this pixel or found more recent data
-            if pixel_key not in valid_pixels or row['tBreak'] > valid_pixels[pixel_key]['tBreak']:
-                valid_pixels[pixel_key] = row
+            if pixel_key not in valid_pixels or tBreak > valid_pixels[pixel_key]:
+                valid_pixels[pixel_key] = tBreak
 
         # Process filtered out rows - keep only most recent per pixel
         for row in filtered_out_rows:
             pixel_key = (row['x_coord'], row['y_coord'])
+            tBreak = row['tBreak']
 
             # Only add to filtered if not in valid pixels (valid takes priority)
             if pixel_key not in valid_pixels:
-                if pixel_key not in filtered_pixels or row['tBreak'] > filtered_pixels[pixel_key]['tBreak']:
-                    filtered_pixels[pixel_key] = row
+                if pixel_key not in filtered_pixels or tBreak > filtered_pixels[pixel_key]:
+                    filtered_pixels[pixel_key] = tBreak
 
         total_valid_count += len(valid_rows)
         total_filtered_count += len(filtered_out_rows)
@@ -372,13 +376,22 @@ def collect_pixel_data_chunked(input_dir, boundary_shapefile=None, source_crs="E
 def create_geodataframe_from_pixels(pixel_dict, source_crs="EPSG:32629"):
     """
     Create a GeoDataFrame from pixel dictionary keeping it in UTM
+
+    pixel_dict format: {(x_coord, y_coord): tBreak_value}
     """
     if not pixel_dict:
         return None
 
     # Convert pixel dictionary to DataFrame
-    rows = list(pixel_dict.values())
-    df = pd.DataFrame(rows)
+    # Single iteration through dict ensures alignment of coordinates and tBreak values
+    coords_and_breaks = [(key[0], key[1], value) for key, value in pixel_dict.items()]
+    x_coords, y_coords, tBreaks = zip(*coords_and_breaks)
+
+    df = pd.DataFrame({
+        'x_coord': x_coords,
+        'y_coord': y_coords,
+        'tBreak': tBreaks
+    })
 
     gdf = gpd.GeoDataFrame(
         df,
@@ -444,9 +457,9 @@ def create_raster_array_from_pixels(valid_pixels, filtered_pixels, raster_params
     Parameters:
     -----------
     valid_pixels : dict
-        {(x_coord, y_coord): row_data} for points that passed all filters
+        {(x_coord, y_coord): tBreak_value} for points that passed all filters
     filtered_pixels : dict
-        {(x_coord, y_coord): row_data} for points filtered out but present in data
+        {(x_coord, y_coord): tBreak_value} for points filtered out but present in data
     raster_params : dict
         Raster parameters from calculate_raster_parameters_from_pixels
     """
@@ -459,7 +472,7 @@ def create_raster_array_from_pixels(valid_pixels, filtered_pixels, raster_params
     tbreak_array = np.full((height, width), -9999, dtype=np.int32)
 
     # Process filtered out pixels first (set to 0)
-    for (x_coord, y_coord), row in filtered_pixels.items():
+    for (x_coord, y_coord), tBreak in filtered_pixels.items():
         x_idx = int(np.round((x_coord - min_x) / res_x - 0.5))
         y_idx = int(np.round((max_y - y_coord) / res_y - 0.5))
 
@@ -467,13 +480,13 @@ def create_raster_array_from_pixels(valid_pixels, filtered_pixels, raster_params
             tbreak_array[y_idx, x_idx] = 0
 
     # Process valid pixels (set to actual break dates)
-    for (x_coord, y_coord), row in valid_pixels.items():
+    for (x_coord, y_coord), tBreak in valid_pixels.items():
         x_idx = int(np.round((x_coord - min_x) / res_x - 0.5))
         y_idx = int(np.round((max_y - y_coord) / res_y - 0.5))
 
         if 0 <= x_idx < width and 0 <= y_idx < height:
-            if not pd.isna(row['tBreak']) and row['tBreak'] != 0:
-                date_obj = pd.to_datetime(row['tBreak'], unit='ms', utc=True)
+            if not pd.isna(tBreak) and tBreak != 0:
+                date_obj = pd.to_datetime(tBreak, unit='ms', utc=True)
                 date_obj = date_obj.tz_localize(None)
                 yyyymmdd = int(date_obj.strftime('%Y%m%d'))
                 tbreak_array[y_idx, x_idx] = yyyymmdd
@@ -571,11 +584,13 @@ def save_vector_points(gdf, output_file, target_crs="EPSG:32629"):
 def create_qgis_style_file_from_pixels(valid_pixels, output_style_file):
     """
     Create a QGIS .qml style file that colors pixels by year with gradient shading by day of year
+
+    valid_pixels format: {(x_coord, y_coord): tBreak_value}
     """
 
     # Get all unique dates and extract years - use UTC consistently
-    valid_dates = [pd.to_datetime(row['tBreak'], unit='ms', utc=True).tz_localize(None)
-                   for row in valid_pixels.values() if not pd.isna(row['tBreak'])]
+    valid_dates = [pd.to_datetime(tBreak, unit='ms', utc=True).tz_localize(None)
+                   for tBreak in valid_pixels.values() if not pd.isna(tBreak)]
     
     # Group dates by year
     dates_by_year = {}

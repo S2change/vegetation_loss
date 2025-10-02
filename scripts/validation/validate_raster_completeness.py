@@ -33,7 +33,7 @@ from collections import defaultdict
 
 # Set paths to match your ccd_break_filter_to_raster.py run
 input_directory = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo"  # UPDATE - same as script input
-output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/01_10_25_fixed_test.tif"  # UPDATE - output raster to validate
+output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/01_10_25_optimize_test_02.tif"  # UPDATE - output raster to validate
 
 ##################################
 
