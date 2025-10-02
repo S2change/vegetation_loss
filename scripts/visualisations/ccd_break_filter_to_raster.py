@@ -53,7 +53,7 @@ import time
 
 # Set input directory and output files
 input_directory = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo" # UPDATE
-output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/01_10_25_optimize_test_01.tif" # UPDATE
+output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/01_10_25_optimize_test_02.tif" # UPDATE
 output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
 
 # String date range filtering (set both to None to disable filtering)
@@ -239,7 +239,7 @@ def process_parquet_file(file_path, boundary_gdf=None, source_crs="EPSG:32629"):
 
             # Process points within boundary (apply date filtering)
             if not df_within_boundary.empty:
-                grouped = df_within_boundary.groupby(['x_coord', 'y_coord'])
+                grouped = df_within_boundary.groupby(['x_coord', 'y_coord'], sort=False)
                 for (x_coord, y_coord), group in grouped:
                     filtered_row, was_filtered_out = filter_pixel_group(group)
 
@@ -253,7 +253,7 @@ def process_parquet_file(file_path, boundary_gdf=None, source_crs="EPSG:32629"):
 
             # Process points outside boundary (all become filtered out with value 0)
             if not df_outside_boundary.empty:
-                grouped_outside = df_outside_boundary.groupby(['x_coord', 'y_coord'])
+                grouped_outside = df_outside_boundary.groupby(['x_coord', 'y_coord'], sort=False)
                 for (x_coord, y_coord), group in grouped_outside:
                     # Get most recent break for this pixel but mark as filtered out
                     most_recent_row = group.loc[group['tBreak'].idxmax()]
@@ -263,7 +263,7 @@ def process_parquet_file(file_path, boundary_gdf=None, source_crs="EPSG:32629"):
 
         else:
             # No boundary filtering - only apply date filtering
-            grouped = df_breaks.groupby(['x_coord', 'y_coord'])
+            grouped = df_breaks.groupby(['x_coord', 'y_coord'], sort=False)
             for (x_coord, y_coord), group in grouped:
                 filtered_row, was_filtered_out = filter_pixel_group(group)
 
@@ -724,9 +724,9 @@ def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_fi
     print(f"  - Pixels not in parquet files will show as NoData")
 
 if __name__ == "__main__":
-    start_time = time.time()
-    print(f"Script started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("="*70)
+    # start_time = time.time()
+    # print(f"Script started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    # print("="*70)
 
     process_directory_to_geotiff(
         input_directory,
@@ -736,12 +736,12 @@ if __name__ == "__main__":
         qgis_style_file=qgis_style_file
     ) # target_crs='EPSG:4326'
 
-    end_time = time.time()
-    elapsed_time = end_time - start_time
-    hours, remainder = divmod(elapsed_time, 3600)
-    minutes, seconds = divmod(remainder, 60)
+    # end_time = time.time()
+    # elapsed_time = end_time - start_time
+    # hours, remainder = divmod(elapsed_time, 3600)
+    # minutes, seconds = divmod(remainder, 60)
 
-    print("="*70)
-    print(f"Script completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"Total execution time: {int(hours):02d}:{int(minutes):02d}:{seconds:05.2f}")
-    print(f"Total execution time: {elapsed_time:.2f} seconds")
+    # print("="*70)
+    # print(f"Script completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    # print(f"Total execution time: {int(hours):02d}:{int(minutes):02d}:{seconds:05.2f}")
+    # print(f"Total execution time: {elapsed_time:.2f} seconds")
