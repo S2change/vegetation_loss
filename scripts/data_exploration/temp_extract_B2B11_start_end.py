@@ -89,18 +89,17 @@ def filter_segments(df):
         #determine final date of the pixel (gets tEnd with highest value)
         change_pixels_df['final_date_group'] = change_pixels_df.groupby(['x_coord','y_coord'])['tEnd'].transform('max')
         #remove rows where the tBreak is the final date (end of series)
-        change_pixels_df = change_pixels_df.loc[change_pixels_df.tBreak!=change_pixels_df.final_date_group].copy()
+        change_pixels_df = change_pixels_df.loc[change_pixels_df.tBreak!=change_pixels_df.final_date_group]
         change_pixels_df = change_pixels_df.loc[~change_pixels_df.tStart.isnull()]
         #remove rows where the tBreak is within a 20 day margin from the final date
-        change_pixels_df = change_pixels_df.loc[change_pixels_df.final_date_group - change_pixels_df.tBreak > 20*24*60*60*1000].copy()
+        change_pixels_df = change_pixels_df.loc[change_pixels_df.final_date_group - change_pixels_df.tBreak > 20*24*60*60*1000]
         #compute most recent tEnd
         change_pixels_df['max_tend_group'] = change_pixels_df.groupby(['x_coord','y_coord'])['tEnd'].transform('max')
         #compute max tbreak - just for quality control
         change_pixels_df['max_tbreak_group'] = change_pixels_df.groupby(['x_coord','y_coord'])['tBreak'].transform('max')
 
         #get only the coordinates and dates for change pixels
-        change_df_sub = change_pixels_df[['x_coord','y_coord','max_tstart_group','max_tend_group','max_tbreak_group']].copy()
-        change_df_sub = change_df_sub.drop_duplicates()
+        change_df_sub = change_pixels_df[['x_coord','y_coord','max_tstart_group','max_tend_group','max_tbreak_group']].drop_duplicates()
         change_df_sub['pixel_type'] = 'change'
     else:
         change_df_sub = pd.DataFrame(columns=['x_coord','y_coord','max_tstart_group','max_tend_group','max_tbreak_group','pixel_type'])
@@ -121,8 +120,7 @@ def filter_segments(df):
         stable_pixels_df['max_tbreak_group'] = -1  # No break detected for stable pixels
         
         #get only the coordinates and dates for stable pixels
-        stable_df_sub = stable_pixels_df[['x_coord','y_coord','max_tstart_group','max_tend_group','max_tbreak_group']].copy()
-        stable_df_sub = stable_df_sub.drop_duplicates()
+        stable_df_sub = stable_pixels_df[['x_coord','y_coord','max_tstart_group','max_tend_group','max_tbreak_group']].drop_duplicates()
         stable_df_sub['pixel_type'] = 'stable'
     else:
         stable_df_sub = pd.DataFrame(columns=['x_coord','y_coord','max_tstart_group','max_tend_group','max_tbreak_group','pixel_type'])

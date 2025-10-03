@@ -53,7 +53,7 @@ import time
 
 # Set input directory and output files
 input_directory = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo" # UPDATE
-output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/01_10_25_optimize_test_02.tif" # UPDATE
+output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/01_10_25_memory_test_01.tif" # UPDATE
 output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
 
 # String date range filtering (set both to None to disable filtering)
