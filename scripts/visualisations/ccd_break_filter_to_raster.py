@@ -218,7 +218,7 @@ def read_parquet_identify_breaks(filepath):
     mask = (df['x_coord'].values == df['x_coord'].shift(-1).values) & (df['y_coord'].values == df['y_coord'].shift(-1).values)
     df['is_break'] = mask.astype(int)
 
-    # special case: pixel with only 1 segment and tBreak != tEnd
+    # special case: pixel with only 1 segment and tBreak != tEnd (sara 6 out 2025)
     single_segment = df.groupby(['x_coord', 'y_coord']).filter(lambda g: len(g) == 1)
     condition = single_segment['tBreak'] != single_segment['tEnd']
     df.loc[condition.index[condition], 'is_break'] = 1
