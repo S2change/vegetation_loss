@@ -123,3 +123,35 @@ def ndvi_loss_calculation(row, df):
         return 1
     else:
         return -1
+    
+def combine_parquet_files(parquet_folder, tile=None):
+    """
+    Combines all Parquet files in a directory into a single dataframe.
+
+    Args:
+        parquet_folder (str) : Path to the directory containing Parquet files (root).
+        tile (str) : tile name to access the correct folder.
+
+    
+    Returns a merged dataframe.
+
+    """
+    if tile is not None:
+        input_dir = os.path.join(parquet_folder, tile)
+    else:
+        input_dir = parquet_folder
+
+    # List all .parquet files in the directory
+    parquet_files = [f for f in os.listdir(input_dir) if f.endswith('.parquet')]
+
+    # Read and concatenate all Parquet files
+    dataframes = []
+    for file in parquet_files:
+        file_path = os.path.join(input_dir, file)
+        df = pd.read_parquet(file_path)
+        dataframes.append(df)
+
+    # Combine all dataframes
+    combined_df = pd.concat(dataframes, ignore_index=True)
+
+    return combined_df
