@@ -1,4 +1,8 @@
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 import pandas as pd
+from scripts.ccd_results_utils.segment_identification import combine_parquet_files
 
 # Show all rows and columns
 pd.set_option('display.max_rows', None)
@@ -8,6 +12,12 @@ pd.set_option('display.max_colwidth', None)
 
 # Parquet file path
 file_path = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/s2_images-NDVI_XX999YM1NOBS6LDA2ITER1000_START20170408_END20241229_ROIDGT_rank_0.parquet"
+
+# Constants for Specific Coordinate Rows
+directory_path = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/"
+x_coord = 512555
+y_coord = 4394445
+
 
 def show_parquet_columns(file_path):
     """Display column headers of a parquet file."""
@@ -40,10 +50,25 @@ def last_row_changeProb_100(file_path):
 
     return result
 
-if __name__ == "__main__":
-    show_parquet_columns(file_path)
+def all_rows_specific_coord(directory_path, x_coord, y_coord):
+    """
+    Identify a specific pixel coordinate in a tile and return all segments
+    """
 
-    print("\n\nRows for x-y pairs where tEnd has changeProb = 100:")
-    print("=" * 50)
-    filtered_df = last_row_changeProb_100(file_path)
-    print(filtered_df)
+    df = combine_parquet_files(directory_path)
+    pixel_df = df[(df['x_coord'] == x_coord) & (df['y_coord'] == y_coord)]
+
+    return pixel_df
+
+
+if __name__ == "__main__":
+    # show_parquet_columns(file_path)
+
+    # print("\n\nRows for x-y pairs where tEnd has changeProb = 100:")
+    # print("=" * 50)
+    # filtered_df = last_row_changeProb_100(file_path)
+    # print(filtered_df)
+
+    print(f"\n\nRows for x-y pair {x_coord}, {y_coord}\n")
+    single_pixel_df = all_rows_specific_coord(directory_path, x_coord, y_coord)
+    print(single_pixel_df)
