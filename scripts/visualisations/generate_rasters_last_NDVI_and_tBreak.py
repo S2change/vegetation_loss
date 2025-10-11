@@ -21,6 +21,8 @@ Execution flow:
 Outputs:
     - GeoTIFF and .qml files saved in the folder defined in config["folder_path"]
 ===============================================================================
+P.S: The rasters are located in the shared folder at: partilhado/tBreaks_t29tnf_2018_2024.
+===============================================================================
 """
 #%%
 import os
@@ -324,3 +326,4 @@ def main(config):
 #%%
 if __name__ == "__main__":
     main(config)
+
