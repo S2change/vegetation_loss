@@ -70,7 +70,7 @@ def filter_pixel_group(group, search_start_ms, search_end_ms):
 
     return (group.loc[group['tBreak'].idxmax()], False)
 
-def ndvi_calculation(nir1, nir2, red1, red2):
+def ndvi_avg_calculation(nir1, nir2, red1, red2):
     """
     Calculate NDVI from two NIR and two Red values.
 
@@ -88,34 +88,24 @@ def ndvi_calculation(nir1, nir2, red1, red2):
 
     return ndvi
 
-def ndvi_loss_calculation(row, df, min_difference=None):
+def ndvi_loss_calculation(current_row, next_row, min_difference=None):
     """
     Calculate whether NDVI loss occurred between current row and next row.
 
     Inputs:
-    * row: Current row from dataframe
-    * df: The full dataframe
+    * current_row: Current row from dataframe
+    * next_row: Row immediately following the current row
     * min_difference: Minimum amount of difference needed to say there was a change
 
     Returns:
     * 1 if next row has same coordinates AND current NDVI > next NDVI (vegetation loss)
-    * -1 if no matching next row or NDVI increased/stayed same
+    * -1 if NDVI increased/stayed same
     * 0 if difference between NDVI's is not greater than min_difference (if it was specified)
     """
-    current_idx = row.name
-
-    # Check if there is a next row with same coordinates
-    if current_idx + 1 >= len(df):
-        return -1
-
-    next_row = df.iloc[current_idx + 1]
-
-    if row['x_coord'] != next_row['x_coord'] or row['y_coord'] != next_row['y_coord']:
-        return -1
 
     # NDVI calculations
-    current_ndvi = ndvi_calculation(row['nirEnd'], row['nirEnd2'], row['redEnd'], row['redEnd2'])
-    next_ndvi = ndvi_calculation(next_row['nirStart'], next_row['nirStart2'], next_row['redStart'], next_row['redStart2'])
+    current_ndvi = ndvi_avg_calculation(current_row['nirEnd'], current_row['nirEnd2'], current_row['redEnd'], current_row['redEnd2'])
+    next_ndvi = ndvi_avg_calculation(next_row['nirStart'], next_row['nirStart2'], next_row['redStart'], next_row['redStart2'])
 
     if min_difference is not None:
         ndvi_difference = current_ndvi - next_ndvi
