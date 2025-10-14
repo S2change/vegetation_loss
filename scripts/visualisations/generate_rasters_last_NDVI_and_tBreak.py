@@ -111,25 +111,26 @@ def process_pixel_segments(pixel_df, time_series_end):
     g = pixel_df.sort_values("tEnd").reset_index(drop=True)
     n_segments = len(g)
 
+    # No segments
     if n_segments == 0:
         return pd.Series({"is_break": 0, "tBreak_used": pd.NaT, "ndvi_last_segment": np.nan})
-
-    if n_segments == 1:
-        tBreak, tEnd = g.loc[0, "tBreak"], g.loc[0, "tEnd"]
-        if pd.isna(tBreak) or pd.isna(tEnd) or tBreak == tEnd:
-            return pd.Series({"is_break": 0, "tBreak_used": pd.NaT, "ndvi_last_segment": np.nan})
-        ndvi = (g.loc[0, "nirEnd"] - g.loc[0, "redEnd"]) / (g.loc[0, "nirEnd"] + g.loc[0, "redEnd"])
-        return pd.Series({"is_break": 1, "tBreak_used": tEnd, "ndvi_last_segment": ndvi})
-
-    next_row = g.iloc[-1]
-    current_row = g.iloc[-2]
-    tBreak, tEnd = next_row["tBreak"], next_row["tEnd"]
-
-    if tBreak != tEnd:
-        ndvi = (next_row["nirEnd"] - next_row["redEnd"]) / (next_row["nirEnd"] + next_row["redEnd"])
-        return pd.Series({"is_break": 1, "tBreak_used": tEnd, "ndvi_last_segment": ndvi})
     
+    # Last segment has tBreak != tEnd
+    last_row = g.iloc[-1]
+    last_tBreak, last_tEnd = last_row["tBreak"], last_row["tEnd"]
+
+    if pd.notna(last_tBreak) and pd.notna(last_tEnd) and last_tBreak != last_tEnd:
+        ndvi = (last_row["nirEnd"] - last_row["redEnd"]) / (last_row["nirEnd"] + last_row["redEnd"])
+        return pd.Series({"is_break": -1, "tBreak_used": last_tEnd, "ndvi_last_segment": ndvi})
+        # or should it return pd.Series({"is_break": -1, "tBreak_used": pd.NaT, "ndvi_last_segment": np.nan})?
+
+    # Only 1 segment, and no value for tBreak or tEnd or tBreak == tEnd (because tBreak != tEnd already filtered out)
+    if n_segments == 1:
+        return pd.Series({"is_break": 0, "tBreak_used": pd.NaT, "ndvi_last_segment": np.nan})
+
+    # 2 or more segments
     # loop through remaining segments until finding a segment where break has NDVI decrease, or return no breaks values
+    current_row = g.iloc[-2]
     offset = 2
     while True:
         ndvi_check = ndvi_loss_calculation(current_row, next_row)
