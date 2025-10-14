@@ -37,6 +37,13 @@ import colorsys
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
+import sys
+module_path = os.path.abspath(os.path.join('..'))
+if module_path not in sys.path:
+   sys.path.append(module_path)
+from ccd_results_utils.segment_identification import ndvi_loss_calculation
+
+
 config = {
     "folder_path": r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TNF",
     "pixel_size": 10,
@@ -114,16 +121,30 @@ def process_pixel_segments(pixel_df, time_series_end):
         ndvi = (g.loc[0, "nirEnd"] - g.loc[0, "redEnd"]) / (g.loc[0, "nirEnd"] + g.loc[0, "redEnd"])
         return pd.Series({"is_break": 1, "tBreak_used": tEnd, "ndvi_last_segment": ndvi})
 
-    last = g.iloc[-1]
-    second_last = g.iloc[-2]
-    tBreak, tEnd = last["tBreak"], last["tEnd"]
+    next_row = g.iloc[-1]
+    current_row = g.iloc[-2]
+    tBreak, tEnd = next_row["tBreak"], next_row["tEnd"]
 
     if tBreak != tEnd:
-        ndvi = (last["nirEnd"] - last["redEnd"]) / (last["nirEnd"] + last["redEnd"])
+        ndvi = (next_row["nirEnd"] - next_row["redEnd"]) / (next_row["nirEnd"] + next_row["redEnd"])
         return pd.Series({"is_break": 1, "tBreak_used": tEnd, "ndvi_last_segment": ndvi})
-    else:
-        ndvi = (second_last["nirEnd"] - second_last["redEnd"]) / (second_last["nirEnd"] + second_last["redEnd"])
-        return pd.Series({"is_break": 1, "tBreak_used": second_last["tEnd"], "ndvi_last_segment": ndvi})
+    
+    # loop through remaining segments until finding a segment where break has NDVI decrease, or return no breaks values
+    offset = 2
+    while True:
+        ndvi_check = ndvi_loss_calculation(current_row, next_row)
+        if ndvi_check == 1:
+            ndvi = (current_row["nirEnd"] - current_row["redEnd"]) / (current_row["nirEnd"] + current_row["redEnd"])
+            return pd.Series({"is_break": 1, "tBreak_used": current_row["tEnd"], "ndvi_last_segment": ndvi})
+        else:
+            next_row = g.iloc[-offset]
+            try:
+                current_row = g.iloc[-(offset + 1)]
+            except IndexError:
+                # if IndexError, means all of the breaks had an increase in NDVI at the break
+                return pd.Series({"is_break": 0, "tBreak_used": pd.NaT, "ndvi_last_segment": np.nan})
+            offset += 1
+
 
 def create_qgis_style_file_from_dataframe(df, value_col, output_style_file):
     """
