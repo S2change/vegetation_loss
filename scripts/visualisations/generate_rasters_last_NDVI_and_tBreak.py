@@ -133,12 +133,12 @@ def process_pixel_segments(pixel_df, time_series_end):
     current_row = g.iloc[-2]
     offset = 2
     while True:
-        ndvi_check = ndvi_loss_calculation(current_row, next_row)
+        ndvi_check = ndvi_loss_calculation(current_row, last_row)
         if ndvi_check == 1:
             ndvi = (current_row["nirEnd"] - current_row["redEnd"]) / (current_row["nirEnd"] + current_row["redEnd"])
             return pd.Series({"is_break": 1, "tBreak_used": current_row["tEnd"], "ndvi_last_segment": ndvi})
         else:
-            next_row = g.iloc[-offset]
+            last_row = g.iloc[-offset]
             try:
                 current_row = g.iloc[-(offset + 1)]
             except IndexError:
