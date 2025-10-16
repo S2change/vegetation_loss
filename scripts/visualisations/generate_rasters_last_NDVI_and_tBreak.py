@@ -53,6 +53,10 @@ config = {
 }
 
 #%% ---------------------- FUNÇÕES AUXILIARES ----------------------
+def calculate_ndvi(input_row):
+    ndvi = (input_row["nirEnd"] - input_row["redEnd"]) / (input_row["nirEnd"] + input_row["redEnd"])
+    return ndvi
+
 def process_pixel_segments(pixel_df, time_series_end):
     """
     Processes all temporal segments of a given pixel and determines whether a
@@ -120,9 +124,8 @@ def process_pixel_segments(pixel_df, time_series_end):
     last_tBreak, last_tEnd = last_row["tBreak"], last_row["tEnd"]
 
     if pd.notna(last_tBreak) and pd.notna(last_tEnd) and last_tBreak != last_tEnd:
-        ndvi = (last_row["nirEnd"] - last_row["redEnd"]) / (last_row["nirEnd"] + last_row["redEnd"])
+        ndvi = calculate_ndvi(last_row)
         return pd.Series({"is_break": -1, "tBreak_used": last_tEnd, "ndvi_last_segment": ndvi})
-        # or should it return pd.Series({"is_break": -1, "tBreak_used": pd.NaT, "ndvi_last_segment": np.nan})?
 
     # Only 1 segment, and no value for tBreak or tEnd or tBreak == tEnd (because tBreak != tEnd already filtered out)
     if n_segments == 1:
@@ -135,7 +138,7 @@ def process_pixel_segments(pixel_df, time_series_end):
     while True:
         ndvi_check = ndvi_loss_calculation(current_row, last_row)
         if ndvi_check == 1:
-            ndvi = (current_row["nirEnd"] - current_row["redEnd"]) / (current_row["nirEnd"] + current_row["redEnd"])
+            ndvi = calculate_ndvi(current_row)
             return pd.Series({"is_break": 1, "tBreak_used": current_row["tEnd"], "ndvi_last_segment": ndvi})
         else:
             last_row = g.iloc[-offset]
@@ -289,6 +292,119 @@ def generate_raster(df, value_col, folder_path, pixel_size, crs_code, nodata_val
 
 
 #%% ---------------------- FUNÇÕES PRINCIPAIS ----------------------
+def process_all_parquets_optimized(config):
+    """
+    Optimized version that processes parquet files in reverse order to avoid groupby.
+
+    Since segments are ordered oldest to newest in the parquet files, iterating in reverse
+    means we encounter the most recent segment first for each pixel. We can then:
+    1. Collect only the segments needed to determine break status
+    2. Skip all remaining older segments for that pixel
+
+    Returns
+    -------
+    pd.DataFrame : DataFrame with one row per unique pixel
+    """
+    parquet_files = glob.glob(os.path.join(config["folder_path"], "*.parquet"))
+    all_results = []
+
+    print(f"[INFO] {len(parquet_files)} files found.")
+
+    for idx, file in enumerate(parquet_files, 1):
+        print(f"[INFO] Processing file [{idx}/{len(parquet_files)}]: {file}")
+        df = pd.read_parquet(file)
+        df["tBreak"] = pd.to_datetime(df["tBreak"], unit="ms", errors="coerce")
+        df["tEnd"] = pd.to_datetime(df["tEnd"], unit="ms", errors="coerce")
+
+        time_series_end = df["tEnd"].max()
+
+        # Track which pixels we've fully processed
+        processed_pixels = set()
+        # Store segments we're currently collecting for a pixel
+        current_pixel = None
+        current_segments = []
+        results = []
+
+        # Iterate in reverse (newest to oldest)
+        for i in range(len(df) - 1, -1, -1):
+            row = df.iloc[i]
+            x, y = row["x_coord"], row["y_coord"]
+            pixel_key = (x, y)
+
+            # Skip if we've already fully processed this pixel
+            if pixel_key in processed_pixels:
+                continue
+
+            # If we've moved to a different pixel, process the previous one
+            if current_pixel is not None and pixel_key != current_pixel:
+                # appended results are the same no matter number of segments
+                res = pd.Series({"is_break": 0, "tBreak_used": pd.NaT, "ndvi_last_segment": np.nan})
+                results.append((current_pixel[0], current_pixel[1], res["is_break"],
+                            res["tBreak_used"], res["ndvi_last_segment"]))
+                processed_pixels.add(current_pixel)
+
+                # Start collecting for new pixel
+                current_pixel = pixel_key
+                current_segments = [row]
+            elif current_pixel is None:
+                # First pixel encountered
+                current_pixel = pixel_key
+                current_segments = [row]
+            else:
+                # Same pixel, add segment
+                current_segments.append(row)
+
+            # Check if we can determine the result early
+            if len(current_segments) == 1:
+                last_seg = current_segments[0]
+                last_tBreak = last_seg["tBreak"]
+                last_tEnd = last_seg["tEnd"]
+
+                # If last segment has tBreak != tEnd, don't need to process more segments
+                if pd.notna(last_tBreak) and pd.notna(last_tEnd) and last_tBreak != last_tEnd:
+                    ndvi = calculate_ndvi(last_seg)
+                    res = pd.Series({"is_break": -1, "tBreak_used": last_tEnd, "ndvi_last_segment": ndvi})
+                    results.append((pixel_key[0], pixel_key[1], res["is_break"],
+                                res["tBreak_used"], res["ndvi_last_segment"]))
+                    processed_pixels.add(pixel_key)
+                    current_pixel = None
+                    current_segments = []
+                    continue
+
+            # We need at least 2 segments to check NDVI change
+            if len(current_segments) >= 2:
+                active_segment = current_segments[-1]
+                newer_segment = current_segments[-2]
+
+                ndvi_check = ndvi_loss_calculation(active_segment, newer_segment)
+                if ndvi_check == 1:
+                    # Valid break
+                    ndvi = calculate_ndvi(active_segment)
+                    res = pd.Series({"is_break": 1, "tBreak_used": active_segment["tEnd"], "ndvi_last_segment": ndvi})
+                    results.append((pixel_key[0], pixel_key[1], res["is_break"],
+                                    res["tBreak_used"], res["ndvi_last_segment"]))
+                    processed_pixels.add(pixel_key)
+                    current_pixel = None
+                    current_segments = []
+
+        # Processing last pixel
+        if current_pixel is not None:
+            pixel_df = pd.DataFrame(current_segments[::-1])
+            res = process_pixel_segments(pixel_df, time_series_end)
+            results.append((current_pixel[0], current_pixel[1], res["is_break"],
+                          res["tBreak_used"], res["ndvi_last_segment"]))
+
+        result_df = pd.DataFrame(results, columns=["x_coord", "y_coord", "is_break",
+                                                     "tBreak_used", "ndvi_last_segment"])
+        all_results.append(result_df)
+
+    df_all = pd.concat(all_results, ignore_index=True)
+    df_all["tBreak_used_yyyymmdd"] = (
+        df_all["tBreak_used"].dt.strftime("%Y%m%d").fillna("0").astype(int)
+    )
+    return df_all
+
+
 def process_all_parquets(config):
     """
     Reads and processes all .parquet files in the specified folder.
@@ -327,8 +443,22 @@ def process_all_parquets(config):
     return df_all
 
 
-def main(config):
-    df_all = process_all_parquets(config)
+def main(config, use_optimized=True):
+    """
+    Main function to process parquet files and generate rasters.
+
+    Parameters
+    ----------
+    config : dict
+        Configuration dictionary with processing parameters.
+    use_optimized : bool, optional
+        If True, uses the reverse-iteration approach (default).
+        If False, uses the original groupby approach.
+    """
+    if use_optimized:
+        df_all = process_all_parquets_optimized(config)
+    else:
+        df_all = process_all_parquets(config)
 
     if config["generate_date_raster"]:
         raster_path = generate_raster(
