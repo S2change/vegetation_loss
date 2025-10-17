@@ -34,6 +34,7 @@ from rasterio.transform import from_origin
 from datetime import datetime
 import matplotlib.pyplot as plt
 import colorsys
+import time
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -50,6 +51,7 @@ config = {
     "crs_code": "EPSG:32629",
     "generate_date_raster": True,
     "generate_ndvi_raster": True,
+    "testing_timer": False,
 }
 
 #%% ---------------------- FUNÇÕES AUXILIARES ----------------------
@@ -455,6 +457,10 @@ def main(config, use_optimized=True):
         If True, uses the reverse-iteration approach (default).
         If False, uses the original groupby approach.
     """
+    if config["testing_timer"]:
+        start_time = time.time()
+        print(f"[INFO] Starting processing at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
     if use_optimized:
         df_all = process_all_parquets_optimized(config)
     else:
@@ -474,7 +480,16 @@ def main(config, use_optimized=True):
             config["folder_path"], config["pixel_size"], config["crs_code"], nodata_value=np.nan
         )
 
-    print("[INFO] Processing successfully completed.")
+    if config["testing_timer"]:
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+
+        hours = int(elapsed_time // 3600)
+        minutes = int((elapsed_time % 3600) // 60)
+        seconds = elapsed_time % 60
+
+        print("[INFO] Processing successfully completed.")
+        print(f"[INFO] Total execution time: {hours:02d}:{minutes:02d}:{seconds:05.2f} (HH:MM:SS)")
 #%%
 if __name__ == "__main__":
     main(config)
