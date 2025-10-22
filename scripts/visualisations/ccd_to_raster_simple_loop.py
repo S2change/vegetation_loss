@@ -73,7 +73,7 @@ input_directory = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo" # UPDATE
 output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/02_loop_test_multiple_dates.tif" # UPDATE
 
 # Vector file is not set up
-# output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
+output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
 
 # List of date ranges to filter for, in format (start_date, end_date)
 # Use "YYYY-MM-DD" for date values
@@ -84,7 +84,7 @@ date_ranges = [("2018-01-01", "2021-12-31"),
 
 # Boundary shapefile filtering (set to None to disable)
 # boundary filtering is not set up yet
-# boundary_shapefile = None  # Path to shapefile for spatial boundary filtering
+boundary_shapefile = None  # Path to shapefile for spatial boundary filtering
 
 qgis_style_file = True  # Set to True if a .qml style file should be created
 
