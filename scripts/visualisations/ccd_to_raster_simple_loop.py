@@ -1,37 +1,49 @@
 """
 PURPOSE:
 This script processes parquet files containing change detection results from satellite imagery analysis.
-It filters and aggregates pixel-level change detection data, converts it to raster format, and creates
-visualization files for use in GIS software like QGIS.
+It filters and aggregates pixel-level change detection data, validates breaks using NDVI loss calculations,
+converts the data to a multi-band raster format, and creates visualization files for use in GIS software like QGIS.
 
 MAIN FUNCTIONALITY:
-- Reads multiple parquet files containing change detection break points (tBreak values)
-- Filters data by date range (optional)
-- Filters data by shapefile boundary (optional)
-- For each pixel location, only the most recent break point is returned
-    - If there are no breaks for the pixel, 0 is returned (to seperate between pixels with no breaks and pixels with no data)
-- Converts filtered point data to a georeferenced raster (GeoTIFF)
-- Creates QGIS style files for visualization
+- Reads multiple parquet files containing change detection segments with break points
+- Filters data by date range (optional) - only breaks within the date range are considered
+- Processes each pixel to identify the most recent valid vegetation loss break:
+    * Iterates through segments in reverse chronological order (newest to oldest)
+    * Validates breaks using NDVI loss calculation between consecutive segments
+    * Classifies each pixel as: valid break (is_break=1), no break (is_break=0), or uncertain break (is_break=-1)
+- Converts filtered point data to a 3-band georeferenced raster (GeoTIFF)
+- Creates QGIS style files for visualization of Band 1 (break dates)
 - Optionally saves filtered points as a vector file
 
 INPUTS:
 - input_directory: Directory containing parquet files with columns:
   * x_coord, y_coord: UTM coordinates (EPSG:32629 assumed)
   * tBreak: Break date as milliseconds since Unix epoch (UTC)
-  * Other columns are preserved but not used for filtering
-- search_start: Optional start date for filtering (format: 'YYYY-MM-DD' or datetime object)
-- search_end: Optional end date for filtering (format: 'YYYY-MM-DD' or datetime object)
-- boundary_shapefile: Optional shapefile path for spatial filtering
+  * tEnd: Segment end date as milliseconds since Unix epoch (UTC)
+  * nirEnd, redEnd: NIR and Red band values at segment end (for NDVI calculation)
+  * Other columns used by ndvi_loss_calculation function
+- date_ranges: List of tuples with (start_date, end_date) for filtering (format: 'YYYY-MM-DD')
+  * A separate raster is created for each date range
+- boundary_shapefile: Optional shapefile path for spatial filtering (not currently implemented)
 
 OUTPUTS:
-- GeoTIFF raster file (.tif): 
-  * Pixel values represent break dates in YYYYMMDD format (integer)
-    * Pixels without a break date have the value 0
-    * Pixels with no data have the NoData value: -9999
+- Multi-band GeoTIFF raster file (.tif):
+  * Band 1: last_tBreak (break dates in YYYYMMDD format)
+    * Valid/uncertain breaks: YYYYMMDD integer value
+    * Pixels with no breaks: 0
+    * Pixels with no data: -9999 (NoData)
+  * Band 2: is_break (break classification)
+    * 1: valid break (confirmed vegetation loss via NDVI)
+    * 0: no break detected
+    * -1: uncertain break (tBreak != tEnd, needs validation)
+    * -99: NoData
+  * Band 3: ndvi_last_segment (NDVI value of last segment)
+    * Float value for pixels with breaks
+    * NaN for pixels without breaks or NoData
   * Resolution: 10m x 10m pixels
   * Coordinate system: UTM (EPSG:32629) or optionally reprojected
-- QGIS style file (.qml): Color-coded visualization by year and day-of-year
-- Optional vector file (.gpkg): Point locations with break dates for verification
+- QGIS style file (.qml): Color-coded visualization of Band 1 by year with gradient by day-of-year
+- Optional vector file (.gpkg): Point locations with break dates and attributes for verification
 """
 
 import pandas as pd
@@ -58,17 +70,21 @@ from ccd_results_utils.segment_identification import ndvi_loss_calculation
 
 # Set input directory and output files
 input_directory = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo" # UPDATE
-output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/01_loop_test.tif" # UPDATE
-output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
+output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/02_loop_test_multiple_dates.tif" # UPDATE
+
+# Vector file is not set up
+# output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
 
 # List of date ranges to filter for, in format (start_date, end_date)
 # Use "YYYY-MM-DD" for date values
 # Raster will be created for each date range pair
 date_ranges = [("2018-01-01", "2021-12-31"),
+               ("2018-01-01", "2018-02-28"),
               ]
 
 # Boundary shapefile filtering (set to None to disable)
-boundary_shapefile = None  # Path to shapefile for spatial boundary filtering
+# boundary filtering is not set up yet
+# boundary_shapefile = None  # Path to shapefile for spatial boundary filtering
 
 qgis_style_file = True  # Set to True if a .qml style file should be created
 
@@ -78,6 +94,18 @@ set_timer = True
 ##################################
 
 def calculate_ndvi(input_row):
+    """
+    Calculate NDVI (Normalized Difference Vegetation Index) from NIR and Red band values.
+
+    Parameters:
+    -----------
+    input_row : pandas.Series or dict-like
+        Row containing 'nirEnd' and 'redEnd' values
+
+    Returns:
+    --------
+    float : NDVI value calculated as (NIR - Red) / (NIR + Red)
+    """
     ndvi = (input_row["nirEnd"] - input_row["redEnd"]) / (input_row["nirEnd"] + input_row["redEnd"])
     return ndvi
 
@@ -162,11 +190,9 @@ def date_filtering(date_value_ms, search_start_ms=None, search_end_ms=None):
     --------
     bool : True if date passes the filter, False otherwise
     """
-    # If no filters are specified, pass all dates
     if search_start_ms is None and search_end_ms is None:
         return True
 
-    # Check if date_value is valid (assuming 0 or negative values are invalid)
     if date_value_ms is None or pd.isna(date_value_ms):
         return False
 
@@ -182,7 +208,18 @@ def date_filtering(date_value_ms, search_start_ms=None, search_end_ms=None):
     
 def process_parquet_file_optimized(file_path, search_start_ms=None, search_end_ms=None, boundary_gdf=None, source_crs="EPSG:32629"):
     """
-    Process a single parquet file and return pixel results.
+    Process a single parquet file and return pixel results by iterating in reverse chronological order.
+    For each pixel, identifies the most recent break that passes date filtering and NDVI loss validation.
+
+    Algorithm:
+    - Iterates through segments in reverse order (newest to oldest)
+    - Groups segments by pixel (x_coord, y_coord)
+    - For each pixel:
+        * If the last segment has tBreak != tEnd, returns is_break=-1 (uncertain break)
+        * Otherwise, compares consecutive segments using NDVI loss calculation
+        * Returns is_break=1 (valid break) if NDVI loss is confirmed
+        * Returns is_break=0 (no break) if no valid break is found
+    - Only processes segments that pass date filtering
 
     Parameters:
     -----------
@@ -193,13 +230,16 @@ def process_parquet_file_optimized(file_path, search_start_ms=None, search_end_m
     search_end_ms : int or None
         End date for filtering (as milliseconds since Unix epoch)
     boundary_gdf : geopandas.GeoDataFrame, optional
-        Boundary geometry for spatial filtering
+        Boundary geometry for spatial filtering (currently not implemented)
     source_crs : str
         CRS of the coordinates
 
     Returns:
     --------
     list : List of tuples (x_coord, y_coord, is_break, tBreak_used, ndvi_last_segment)
+        - is_break: 1 (valid break), 0 (no break), or -1 (uncertain break)
+        - tBreak_used: tEnd value for breaks (ms since Unix epoch), None for no breaks
+        - ndvi_last_segment: NDVI value of the last segment (NaN for no breaks)
     """
     df = pd.read_parquet(file_path)
     # Keep tBreak and tEnd as milliseconds - no conversion needed
@@ -238,7 +278,7 @@ def process_parquet_file_optimized(file_path, search_start_ms=None, search_end_m
             # Same pixel, add segment
             current_segments.append(row)
 
-        # Date filtering - now using milliseconds
+        # Date filtering
         date_check = date_filtering(row["tBreak"], search_start_ms, search_end_ms)
         if date_check == False:
             continue
@@ -361,17 +401,14 @@ def collect_pixel_data_chunked(input_dir, search_start=None, search_end=None, bo
     """
     all_results = []
 
-    # Each results_list from process_files_chunked is a list of tuples
-    # Flatten all results into a single list
     for results_list in process_files_chunked(input_dir, search_start, search_end, boundary_shapefile, source_crs):
         all_results.extend(results_list)
 
     # Create DataFrame from flattened list of tuples
-    # tBreak_used is in milliseconds (or None for no breaks)
     results_df = pd.DataFrame(all_results, columns=["x_coord", "y_coord", "is_break",
                                                     "tBreak_used", "ndvi_last_segment"])
 
-    # Convert tBreak_used from milliseconds to pandas Timestamp (convert once here for all downstream functions)
+    # Convert tBreak_used from milliseconds to pandas Timestamp
     results_df["tBreak_used"] = pd.to_datetime(results_df["tBreak_used"], unit='ms', utc=True, errors='coerce').dt.tz_localize(None)
 
     # Convert to YYYYMMDD integer format
