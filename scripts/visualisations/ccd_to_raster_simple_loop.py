@@ -506,9 +506,9 @@ def create_raster_array_from_pixels(results_df, raster_params):
     tend_array = np.full((height, width), -9999, dtype=np.int32)
     # Band 2: tBreak dates
     tbreak_array = np.full((height, width), -9999, dtype=np.int32) 
-    # Band 2: is_break status (int8 to save memory: 1, 0, -1, or -99 for NoData)
+    # Band 3: is_break status (int8 to save memory: 1, 0, -1, or -99 for NoData)
     is_break_array = np.full((height, width), -99, dtype=np.int8)
-    # Band 3: NDVI values (int32, scaled by 10000, nodata=-9999)
+    # Band 4: NDVI values (int32, scaled by 10000, nodata=-9999)
     ndvi_array = np.full((height, width), -9999, dtype=np.int32)
 
     # Process all pixels from the DataFrame
@@ -533,14 +533,14 @@ def create_raster_array_from_pixels(results_df, raster_params):
                 tend_array[y_idx, x_idx] = tEnd_yyyymmdd
                 tbreak_array[y_idx, x_idx] = tBreak_yyyymmdd
 
-            # Band 2: is_break status
+            # Band 3: is_break status
             is_break_array[y_idx, x_idx] = is_break
 
-            # Band 3: NDVI scaled by 10000 (keep as -9999 if not available)
+            # Band 4: NDVI scaled by 10000 (keep as -9999 if not available)
             if not pd.isna(ndvi):
                 ndvi_array[y_idx, x_idx] = int(np.round(ndvi * 10000))
 
-    # Stack into 3-band array
+    # Stack into 4-band array
     raster_4band = np.stack([tend_array, tbreak_array, is_break_array, ndvi_array])
 
     return raster_4band
