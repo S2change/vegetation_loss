@@ -70,7 +70,7 @@ from ccd_results_utils.segment_identification import ndvi_loss_calculation
 
 # Set input directory and output files
 input_directory = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo" # UPDATE
-output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/05_loop_debugging_style_file.tif" # UPDATE
+output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/07_loop_int32_raster.tif" # UPDATE
 
 # Vector file is not set up
 output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
@@ -404,31 +404,20 @@ def collect_pixel_data_chunked(input_dir, search_start=None, search_end=None, bo
         all_results.extend(results_list)
 
     # data_dict needed to specify data type for each column, so that tBreak_used does not get converted to float64 and lose precision
-    data_dict = {col: [row[i] for row in all_results] for i, col in enumerate(["x_coord", "y_coord", "is_break", 
-                                                                               "tBreak_used", "ndvi_last_segment"])}
+    # data_dict = {col: [row[i] for row in all_results] for i, col in enumerate(["x_coord", "y_coord", "is_break", 
+    #                                                                            "tBreak_used", "ndvi_last_segment"])}
 
     # Create DataFrame from flattened list of tuples
-    # results_df = pd.DataFrame(all_results, columns=["x_coord", "y_coord", "is_break",
-    #                                                 "tBreak_used", "ndvi_last_segment"])
+    results_df = pd.DataFrame(all_results, columns=["x_coord", "y_coord", "is_break",
+                                                    "tBreak_used", "ndvi_last_segment"])
 
-    results_df = pd.DataFrame(data_dict).astype({
-        "x_coord": 'int64',
-        "y_coord": 'int64',
-        "is_break": 'int64',
-        "tBreak_used": 'Int64',
-        "ndvi_last_segment": 'float64'
-    })
-
-    # DEBUG: Check values before datetime conversion
-    print("\n" + "="*70)
-    print("DEBUG [Line 407-416]: Date conversion process")
-    print("="*70)
-    print(f"Total rows in results_df: {len(results_df)}")
-    print(f"Rows with breaks (is_break != 0): {len(results_df[results_df['is_break'] != 0])}")
-    print("\nSample tBreak_used values (ms) before conversion:")
-    print(results_df[results_df['is_break'] != 0]['tBreak_used'].head(10))
-    print(f"\ntBreak_used dtype before conversion: {results_df['tBreak_used'].dtype}")
-    print(results_df.dtypes)
+    # results_df = pd.DataFrame(data_dict).astype({
+    #     "x_coord": 'int64',
+    #     "y_coord": 'int64',
+    #     "is_break": 'int64',
+    #     "tBreak_used": 'Int64',
+    #     "ndvi_last_segment": 'float64'
+    # })
 
     # Convert tBreak_used from milliseconds to pandas Timestamp
     results_df["tBreak_used"] = pd.to_datetime(results_df["tBreak_used"], unit='ms', utc=True, errors='coerce').dt.tz_localize(None)
@@ -514,9 +503,14 @@ def create_raster_array_from_pixels(results_df, raster_params):
     --------
     numpy.ndarray
         3D array with shape (3, height, width) containing:
-        - Band 1: last_tBreak (YYYYMMDD format, 0 for no break)
-        - Band 2: is_break (1, 0, or -1)
-        - Band 3: ndvi_last_segment (float, NaN for no data)
+        - Band 1: last_tBreak (int32, YYYYMMDD format, 0 for no break, -9999 for nodata)
+        - Band 2: is_break (int32, values: 1/0/-1, -99 for nodata)
+        - Band 3: ndvi_last_segment (int32, scaled by 10000, -9999 for nodata)
+
+    Notes:
+    ------
+    Band 3 NDVI values are scaled by 10000 to preserve precision as integers.
+    To get original NDVI values, divide by 10000 (e.g., 5432 -> 0.5432).
     """
     width = raster_params['width']
     height = raster_params['height']
@@ -528,8 +522,8 @@ def create_raster_array_from_pixels(results_df, raster_params):
     tbreak_array = np.full((height, width), -9999, dtype=np.int32)
     # Band 2: is_break status (int8 to save memory: 1, 0, -1, or -99 for NoData)
     is_break_array = np.full((height, width), -99, dtype=np.int8)
-    # Band 3: NDVI values (float32)
-    ndvi_array = np.full((height, width), np.nan, dtype=np.float32)
+    # Band 3: NDVI values (int32, scaled by 10000, nodata=-9999)
+    ndvi_array = np.full((height, width), -9999, dtype=np.int32)
 
     # Process all pixels from the DataFrame
     for _, row in results_df.iterrows():
@@ -553,9 +547,9 @@ def create_raster_array_from_pixels(results_df, raster_params):
             # Band 2: is_break status
             is_break_array[y_idx, x_idx] = is_break
 
-            # Band 3: NDVI (keep as NaN if not available)
+            # Band 3: NDVI scaled by 10000 (keep as -9999 if not available)
             if not pd.isna(ndvi):
-                ndvi_array[y_idx, x_idx] = ndvi
+                ndvi_array[y_idx, x_idx] = int(np.round(ndvi * 1000000))
 
     # Stack into 3-band array
     raster_3band = np.stack([tbreak_array, is_break_array, ndvi_array])
@@ -570,9 +564,9 @@ def save_geotiff(array, output_file, raster_params, source_crs='EPSG:32629', tar
     -----------
     array : numpy.ndarray
         3D array with shape (3, height, width) containing:
-        - Band 1: last_tBreak (int32, NoData=-9999)
-        - Band 2: is_break (int8, NoData=-99)
-        - Band 3: ndvi_last_segment (float32, NoData=NaN)
+        - Band 1: last_tBreak (int32, YYYYMMDD format, NoData=-9999)
+        - Band 2: is_break (int32, values: -1/0/1, NoData=-99)
+        - Band 3: ndvi_last_segment (int32, scaled by 10000, NoData=-9999)
     output_file : str
         Path to output GeoTIFF file
     raster_params : dict
@@ -581,11 +575,16 @@ def save_geotiff(array, output_file, raster_params, source_crs='EPSG:32629', tar
         Source coordinate reference system
     target_crs : str
         Target coordinate reference system
+
+    Notes:
+    ------
+    Band 3 NDVI values are scaled by 10000 to preserve precision as integers.
+    To get original NDVI values, divide by 10000 (e.g., 5432 -> 0.5432).
     """
 
     # Define band-specific properties
-    band_dtypes = [np.int32, np.int8, np.float32]
-    band_nodata = [-9999, -99, np.nan]
+    band_dtypes = [np.int32, np.int32, np.int32]
+    band_nodata = [-9999, -99, -9999]
 
     # If target CRS is different from source, reproject directly
     if source_crs != target_crs:
@@ -598,10 +597,10 @@ def save_geotiff(array, output_file, raster_params, source_crs='EPSG:32629', tar
                 height=raster_params['height'],
                 width=raster_params['width'],
                 count=3,
-                dtype=rasterio.float32,  # Use float32 to accommodate all bands
+                dtype=rasterio.int32,  # Use int32 for all bands (NDVI scaled by 10000)
                 crs=source_crs,
                 transform=raster_params['transform'],
-                nodata=np.nan
+                nodata=-9999
             ) as src:
                 # Write all 3 bands
                 for i in range(3):
@@ -634,7 +633,7 @@ def save_geotiff(array, output_file, raster_params, source_crs='EPSG:32629', tar
                             resampling=Resampling.nearest)
 
     else:
-        # If no reprojection needed, save each band with its appropriate dtype
+        # If no reprojection needed, save with int32 for all bands
         with rasterio.open(
             output_file,
             'w',
@@ -642,14 +641,14 @@ def save_geotiff(array, output_file, raster_params, source_crs='EPSG:32629', tar
             height=raster_params['height'],
             width=raster_params['width'],
             count=3,
-            dtype=rasterio.float32,  # Use float32 to accommodate all bands
+            dtype=rasterio.int32,  # Use int32 for all bands (NDVI scaled by 10000)
             crs=source_crs,
             transform=raster_params['transform'],
-            nodata=np.nan
+            nodata=-9999
         ) as dst:
             # Write all 3 bands
             for i in range(3):
-                dst.write(array[i].astype(np.float32), i + 1)
+                dst.write(array[i].astype(np.int32), i + 1)
                 dst.set_band_description(i + 1, ['last_tBreak', 'is_break', 'ndvi_last_segment'][i])
                 # Set band-specific nodata values in tags
                 dst.update_tags(i + 1, nodata_value=str(band_nodata[i]))
@@ -709,17 +708,6 @@ def create_qgis_style_file_from_pixels(results_df, output_style_file):
         Path to output .qml style file
     """
 
-    print("\n" + "="*70)
-    print("DEBUG: Starting QGIS style file creation")
-    print("="*70)
-
-    # Debug: Check input DataFrame
-    print(f"DEBUG: Total rows in results_df: {len(results_df)}")
-    print(f"DEBUG: Columns in results_df: {results_df.columns.tolist()}")
-    print(f"DEBUG: Sample of results_df:")
-    print(results_df.head())
-    print(results_df.dtypes)
-
     # Get all unique dates from pixels with breaks (is_break == 1 or -1)
     valid_breaks = results_df[results_df['is_break'] != 0]
 
@@ -729,13 +717,8 @@ def create_qgis_style_file_from_pixels(results_df, output_style_file):
 
     # Extract unique dates (already as Timestamps)
     unique_dates = valid_breaks['tBreak_used_yyyymmdd'].dropna().unique()
-    print(f"\nDEBUG: Number of unique dates found: {len(unique_dates)}")
-    print(f"DEBUG: Sample unique dates (first 10): {sorted(unique_dates)[:10]}")
-    print(f"DEBUG: Data type of unique_dates: {type(unique_dates[0]) if len(unique_dates) > 0 else 'N/A'}")
 
     valid_dates = pd.to_datetime(unique_dates, format='%Y%m%d')
-    print(f"DEBUG: Successfully converted {len(valid_dates)} dates to datetime objects")
-    print(f"DEBUG: Date range: {valid_dates.min()} to {valid_dates.max()}")
 
     # Group dates by year
     dates_by_year = {}
@@ -745,10 +728,6 @@ def create_qgis_style_file_from_pixels(results_df, output_style_file):
         if year not in dates_by_year:
             dates_by_year[year] = []
         dates_by_year[year].append(date_int)
-
-    print(f"\nDEBUG: Dates grouped by year:")
-    for year in sorted(dates_by_year.keys()):
-        print(f"  {year}: {len(dates_by_year[year])} dates (range: {min(dates_by_year[year])} to {max(dates_by_year[year])})")
 
     # Sort years and create color map
     years = sorted(dates_by_year.keys())
