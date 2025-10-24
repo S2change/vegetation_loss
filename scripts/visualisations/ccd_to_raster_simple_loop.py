@@ -11,7 +11,7 @@ MAIN FUNCTIONALITY:
     * Iterates through segments in reverse chronological order (newest to oldest)
     * Validates breaks using NDVI loss calculation between consecutive segments
     * Classifies each pixel as: valid break (is_break=1), no break (is_break=0), or uncertain break (is_break=-1)
-- Converts filtered point data to a 3-band georeferenced raster (GeoTIFF)
+- Converts filtered point data to a 4-band georeferenced raster (GeoTIFF)
 - Creates QGIS style files for visualization of Band 1 (break dates)
 - Optionally saves filtered points as a vector file
 
@@ -28,18 +28,22 @@ INPUTS:
 
 OUTPUTS:
 - Multi-band GeoTIFF raster file (.tif):
-  * Band 1: last_tBreak (break dates in YYYYMMDD format)
+  * Band 1: last_tEnd (segment end dates in YYYYMMDD format)
     * Valid/uncertain breaks: YYYYMMDD integer value
     * Pixels with no breaks: 0
     * Pixels with no data: -9999 (NoData)
-  * Band 2: is_break (break classification)
+  * Band 2: last_tBreak (break dates in YYYYMMDD format)
+    * Valid/uncertain breaks: YYYYMMDD integer value
+    * Pixels with no breaks: 0
+    * Pixels with no data: -9999 (NoData)
+  * Band 3: is_break (break classification)
     * 1: valid break (confirmed vegetation loss via NDVI)
     * 0: no break detected
     * -1: uncertain break (tBreak != tEnd, needs validation)
     * -99: NoData
-  * Band 3: ndvi_last_segment (NDVI value of last segment)
-    * Float value for pixels with breaks
-    * NaN for pixels without breaks or NoData
+  * Band 4: ndvi_last_segment (NDVI value of last segment, scaled by 10000)
+    * Integer value for pixels with breaks (divide by 10000 to get original NDVI)
+    * -9999 for pixels without breaks or NoData
   * Resolution: 10m x 10m pixels
   * Coordinate system: UTM (EPSG:32629) or optionally reprojected
 - QGIS style file (.qml): Color-coded visualization of Band 1 by year with gradient by day-of-year
@@ -72,7 +76,7 @@ from ccd_results_utils.segment_identification import ndvi_loss_calculation
 input_directory = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo" # UPDATE
 output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/07_loop_int32_raster.tif" # UPDATE
 
-# Vector file is not set up
+# VECTOR FILE IS NOT SET UP YET, DO NOT USE
 output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
 
 # List of date ranges to filter for, in format (start_date, end_date)
@@ -83,7 +87,7 @@ date_ranges = [("2018-01-01", "2021-12-31"),
               ]
 
 # Boundary shapefile filtering (set to None to disable)
-# boundary filtering is not set up yet
+# BOUNDARY FILTERING IS NOT SET UP YET, DO NOT USE
 boundary_shapefile = None  # Path to shapefile for spatial boundary filtering
 
 qgis_style_file = True  # Set to True if a .qml style file should be created
@@ -403,38 +407,17 @@ def collect_pixel_data_chunked(input_dir, search_start=None, search_end=None, bo
     for results_list in process_files_chunked(input_dir, search_start, search_end, boundary_shapefile, source_crs):
         all_results.extend(results_list)
 
-    # data_dict needed to specify data type for each column, so that tBreak_used does not get converted to float64 and lose precision
-    # data_dict = {col: [row[i] for row in all_results] for i, col in enumerate(["x_coord", "y_coord", "is_break", 
-    #                                                                            "tBreak_used", "ndvi_last_segment"])}
-
     # Create DataFrame from flattened list of tuples
     results_df = pd.DataFrame(all_results, columns=["x_coord", "y_coord", "is_break",
                                                     "tEnd_used","tBreak_used", "ndvi_last_segment"])
 
-    # results_df = pd.DataFrame(data_dict).astype({
-    #     "x_coord": 'int64',
-    #     "y_coord": 'int64',
-    #     "is_break": 'int64',
-    #     "tBreak_used": 'Int64',
-    #     "ndvi_last_segment": 'float64'
-    # })
-
     # Convert tBreak_used from milliseconds to pandas Timestamp
     results_df["tEnd_used"] = pd.to_datetime(results_df["tEnd_used"], unit='ms', utc=True, errors='coerce').dt.tz_localize(None)
     results_df["tBreak_used"] = pd.to_datetime(results_df["tBreak_used"], unit='ms', utc=True, errors='coerce').dt.tz_localize(None)
-    
-    # DEBUG: Check values after datetime conversion
-    print("\nSample tBreak_used values after datetime conversion:")
-    print(results_df[results_df['is_break'] != 0]['tEnd_used'].head(10))
 
     # Convert to YYYYMMDD integer format
     results_df["tEnd_used_yyyymmdd"] = results_df["tEnd_used"].dt.strftime("%Y%m%d").fillna("0").astype(int)
     results_df["tBreak_used_yyyymmdd"] = results_df["tBreak_used"].dt.strftime("%Y%m%d").fillna("0").astype(int)
-    
-    # DEBUG: Check final YYYYMMDD values
-    print("\nSample tEnd_used_yyyymmdd values after YYYYMMDD conversion:")
-    print(results_df[results_df['is_break'] != 0]['tEnd_used_yyyymmdd'].head(10))
-    print("="*70 + "\n")
 
     return results_df
 
@@ -486,13 +469,13 @@ def calculate_raster_parameters_from_pixels(results_df):
 
 def create_raster_array_from_pixels(results_df, raster_params):
     """
-    Create a 3-band raster array from results DataFrame with fixed 10m resolution in UTM.
+    Create a 4-band raster array from results DataFrame with fixed 10m resolution in UTM.
     Assumes coordinates are pixel centers.
 
     Parameters:
     -----------
     results_df : pandas.DataFrame
-        DataFrame with columns: x_coord, y_coord, is_break, tBreak_used, ndvi_last_segment, tBreak_used_yyyymmdd
+        DataFrame with columns: x_coord, y_coord, is_break, tEnd_used, tBreak_used, ndvi_last_segment, tEnd_used_yyyymmdd, tBreak_used_yyyymmdd
         - is_break = 1: valid_break (confirmed vegetation loss)
         - is_break = 0: no_break (no breaks detected)
         - is_break = -1: uncertain_break (potential break but uncertain)
@@ -502,14 +485,15 @@ def create_raster_array_from_pixels(results_df, raster_params):
     Returns:
     --------
     numpy.ndarray
-        3D array with shape (3, height, width) containing:
-        - Band 1: last_tBreak (int32, YYYYMMDD format, 0 for no break, -9999 for nodata)
-        - Band 2: is_break (int32, values: 1/0/-1, -99 for nodata)
-        - Band 3: ndvi_last_segment (int32, scaled by 10000, -9999 for nodata)
+        3D array with shape (4, height, width) containing:
+        - Band 1: last_tEnd (int32, YYYYMMDD format, 0 for no break, -9999 for nodata)
+        - Band 2: last_tBreak (int32, YYYYMMDD format, 0 for no break, -9999 for nodata)
+        - Band 3: is_break (int8, values: 1/0/-1, -99 for nodata)
+        - Band 4: ndvi_last_segment (int32, scaled by 10000, -9999 for nodata)
 
     Notes:
     ------
-    Band 3 NDVI values are scaled by 10000 to preserve precision as integers.
+    Band 4 NDVI values are scaled by 10000 to preserve precision as integers.
     To get original NDVI values, divide by 10000 (e.g., 5432 -> 0.5432).
     """
     width = raster_params['width']
@@ -563,15 +547,16 @@ def create_raster_array_from_pixels(results_df, raster_params):
 
 def save_geotiff(array, output_file, raster_params, source_crs='EPSG:32629', target_crs='EPSG:32629'):
     """
-    Save a 3-band numpy array as a GeoTIFF file, reprojecting to target CRS if needed.
+    Save a 4-band numpy array as a GeoTIFF file, reprojecting to target CRS if needed.
 
     Parameters:
     -----------
     array : numpy.ndarray
-        3D array with shape (3, height, width) containing:
-        - Band 1: last_tBreak (int32, YYYYMMDD format, NoData=-9999)
-        - Band 2: is_break (int32, values: -1/0/1, NoData=-99)
-        - Band 3: ndvi_last_segment (int32, scaled by 10000, NoData=-9999)
+        3D array with shape (4, height, width) containing:
+        - Band 1: last_tEnd (int32, YYYYMMDD format, NoData=-9999)
+        - Band 2: last_tBreak (int32, YYYYMMDD format, NoData=-9999)
+        - Band 3: is_break (int8, values: -1/0/1, NoData=-99)
+        - Band 4: ndvi_last_segment (int32, scaled by 10000, NoData=-9999)
     output_file : str
         Path to output GeoTIFF file
     raster_params : dict
@@ -583,17 +568,14 @@ def save_geotiff(array, output_file, raster_params, source_crs='EPSG:32629', tar
 
     Notes:
     ------
-    Band 3 NDVI values are scaled by 10000 to preserve precision as integers.
+    Band 4 NDVI values are scaled by 10000 to preserve precision as integers.
     To get original NDVI values, divide by 10000 (e.g., 5432 -> 0.5432).
     """
 
-    # Define band-specific properties
-    #band_dtypes = [np.int32, np.int32, np.int32]
     band_nodata = [-9999, -9999, -99, -9999]
 
     # If target CRS is different from source, reproject directly
     if source_crs != target_crs:
-        # Create a temporary in-memory dataset first
         from rasterio.io import MemoryFile
 
         with MemoryFile() as memfile:
@@ -607,7 +589,6 @@ def save_geotiff(array, output_file, raster_params, source_crs='EPSG:32629', tar
                 transform=raster_params['transform'],
                 nodata=-9999
             ) as src:
-                # Write all 3 bands
                 for i in range(4):
                     src.write(array[i], i + 1)
                     src.set_band_description(i + 1, ['last_tEnd', 'last_tBreak', 'is_break', 'ndvi_last_segment'][i])
@@ -803,14 +784,15 @@ def create_qgis_style_file_from_pixels(results_df, output_style_file):
 def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_file, search_start=None, search_end=None,
                                 target_crs="EPSG:32629", boundary_shapefile=None, qgis_style_file=False):
     """
-    Main function to process all parquet files in a directory and save as a 3-band GeoTIFF
+    Main function to process all parquet files in a directory and save as a 4-band GeoTIFF
     and optionally a vector file of points.
     Uses UTM coordinates throughout and only reprojects at the end if needed.
 
-    The output GeoTIFF contains 3 bands:
-    - Band 1: last_tBreak (YYYYMMDD format, 0 for no break, -9999 for NoData)
-    - Band 2: is_break (1=valid_break, 0=no_break, -1=uncertain_break, -99=NoData)
-    - Band 3: ndvi_last_segment (float, NaN for NoData)
+    The output GeoTIFF contains 4 bands:
+    - Band 1: last_tEnd (YYYYMMDD format, 0 for no break, -9999 for NoData)
+    - Band 2: last_tBreak (YYYYMMDD format, 0 for no break, -9999 for NoData)
+    - Band 3: is_break (1=valid_break, 0=no_break, -1=uncertain_break, -99=NoData)
+    - Band 4: ndvi_last_segment (int32 scaled by 10000, -9999 for NoData)
 
     Parameters:
     -----------
@@ -862,7 +844,7 @@ def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_fi
     # Save to GeoTIFF (with optional reprojection)
     save_geotiff(tend_array, output_raster_file, raster_params, source_crs='EPSG:32629', target_crs=target_crs)
 
-    print(f"3-band GeoTIFF saved to: {output_raster_file}")
+    print(f"4-band GeoTIFF saved to: {output_raster_file}")
     print(f"  - Band 1: last_tEnd (YYYYMMDD format)")
     print(f"  - Band 2: last_tBreak (YYYYMMDD format)")
     print(f"  - Band 3: is_break (1=valid, 0=none, -1=uncertain)")
@@ -894,12 +876,9 @@ if __name__ == "__main__":
 
     for start_date, end_date in date_ranges:
         # Create unique filenames for each date range
-        # Convert dates to string format for filename (YYYYMMDD)
         start_str = start_date.replace("-", "") if start_date else "NoStart"
         end_str = end_date.replace("-", "") if end_date else "NoEnd"
         date_suffix = f"_{start_str}_to_{end_str}"
-
-        # Insert date suffix before file extension
         base_raster_file = output_raster_file.replace('.tif', f'{date_suffix}.tif')
 
         # Handle vector file if specified
