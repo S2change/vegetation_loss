@@ -70,7 +70,7 @@ from ccd_results_utils.segment_identification import ndvi_loss_calculation
 
 # Set input directory and output files
 input_directory = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo" # UPDATE
-output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/02_loop_test_multiple_dates.tif" # UPDATE
+output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/05_loop_debugging_style_file.tif" # UPDATE
 
 # Vector file is not set up
 output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
@@ -79,7 +79,7 @@ output_vector_file = None # Add path if vector file is wanted, to check which po
 # Use "YYYY-MM-DD" for date values
 # Raster will be created for each date range pair
 date_ranges = [("2018-01-01", "2021-12-31"),
-               ("2018-01-01", "2018-02-28"),
+            #    ("2018-01-01", "2018-02-28"),
               ]
 
 # Boundary shapefile filtering (set to None to disable)
@@ -242,7 +242,6 @@ def process_parquet_file_optimized(file_path, search_start_ms=None, search_end_m
         - ndvi_last_segment: NDVI value of the last segment (NaN for no breaks)
     """
     df = pd.read_parquet(file_path)
-    # Keep tBreak and tEnd as milliseconds - no conversion needed
 
     # Track which pixels we've fully processed
     processed_pixels = set()
@@ -404,17 +403,49 @@ def collect_pixel_data_chunked(input_dir, search_start=None, search_end=None, bo
     for results_list in process_files_chunked(input_dir, search_start, search_end, boundary_shapefile, source_crs):
         all_results.extend(results_list)
 
+    # data_dict needed to specify data type for each column, so that tBreak_used does not get converted to float64 and lose precision
+    data_dict = {col: [row[i] for row in all_results] for i, col in enumerate(["x_coord", "y_coord", "is_break", 
+                                                                               "tBreak_used", "ndvi_last_segment"])}
+
     # Create DataFrame from flattened list of tuples
-    results_df = pd.DataFrame(all_results, columns=["x_coord", "y_coord", "is_break",
-                                                    "tBreak_used", "ndvi_last_segment"])
+    # results_df = pd.DataFrame(all_results, columns=["x_coord", "y_coord", "is_break",
+    #                                                 "tBreak_used", "ndvi_last_segment"])
+
+    results_df = pd.DataFrame(data_dict).astype({
+        "x_coord": 'int64',
+        "y_coord": 'int64',
+        "is_break": 'int64',
+        "tBreak_used": 'Int64',
+        "ndvi_last_segment": 'float64'
+    })
+
+    # DEBUG: Check values before datetime conversion
+    print("\n" + "="*70)
+    print("DEBUG [Line 407-416]: Date conversion process")
+    print("="*70)
+    print(f"Total rows in results_df: {len(results_df)}")
+    print(f"Rows with breaks (is_break != 0): {len(results_df[results_df['is_break'] != 0])}")
+    print("\nSample tBreak_used values (ms) before conversion:")
+    print(results_df[results_df['is_break'] != 0]['tBreak_used'].head(10))
+    print(f"\ntBreak_used dtype before conversion: {results_df['tBreak_used'].dtype}")
+    print(results_df.dtypes)
 
     # Convert tBreak_used from milliseconds to pandas Timestamp
     results_df["tBreak_used"] = pd.to_datetime(results_df["tBreak_used"], unit='ms', utc=True, errors='coerce').dt.tz_localize(None)
+
+    # DEBUG: Check values after datetime conversion
+    print("\nSample tBreak_used values after datetime conversion:")
+    print(results_df[results_df['is_break'] != 0]['tBreak_used'].head(10))
 
     # Convert to YYYYMMDD integer format
     results_df["tBreak_used_yyyymmdd"] = (
         results_df["tBreak_used"].dt.strftime("%Y%m%d").fillna("0").astype(int)
     )
+
+    # DEBUG: Check final YYYYMMDD values
+    print("\nSample tBreak_used_yyyymmdd values after YYYYMMDD conversion:")
+    print(results_df[results_df['is_break'] != 0]['tBreak_used_yyyymmdd'].head(10))
+    print("="*70 + "\n")
 
     return results_df
 
@@ -678,6 +709,17 @@ def create_qgis_style_file_from_pixels(results_df, output_style_file):
         Path to output .qml style file
     """
 
+    print("\n" + "="*70)
+    print("DEBUG: Starting QGIS style file creation")
+    print("="*70)
+
+    # Debug: Check input DataFrame
+    print(f"DEBUG: Total rows in results_df: {len(results_df)}")
+    print(f"DEBUG: Columns in results_df: {results_df.columns.tolist()}")
+    print(f"DEBUG: Sample of results_df:")
+    print(results_df.head())
+    print(results_df.dtypes)
+
     # Get all unique dates from pixels with breaks (is_break == 1 or -1)
     valid_breaks = results_df[results_df['is_break'] != 0]
 
@@ -686,8 +728,14 @@ def create_qgis_style_file_from_pixels(results_df, output_style_file):
         return
 
     # Extract unique dates (already as Timestamps)
-    unique_dates = valid_breaks['tBreak_used'].dropna().unique()
-    valid_dates = pd.to_datetime(unique_dates)
+    unique_dates = valid_breaks['tBreak_used_yyyymmdd'].dropna().unique()
+    print(f"\nDEBUG: Number of unique dates found: {len(unique_dates)}")
+    print(f"DEBUG: Sample unique dates (first 10): {sorted(unique_dates)[:10]}")
+    print(f"DEBUG: Data type of unique_dates: {type(unique_dates[0]) if len(unique_dates) > 0 else 'N/A'}")
+
+    valid_dates = pd.to_datetime(unique_dates, format='%Y%m%d')
+    print(f"DEBUG: Successfully converted {len(valid_dates)} dates to datetime objects")
+    print(f"DEBUG: Date range: {valid_dates.min()} to {valid_dates.max()}")
 
     # Group dates by year
     dates_by_year = {}
@@ -697,6 +745,10 @@ def create_qgis_style_file_from_pixels(results_df, output_style_file):
         if year not in dates_by_year:
             dates_by_year[year] = []
         dates_by_year[year].append(date_int)
+
+    print(f"\nDEBUG: Dates grouped by year:")
+    for year in sorted(dates_by_year.keys()):
+        print(f"  {year}: {len(dates_by_year[year])} dates (range: {min(dates_by_year[year])} to {max(dates_by_year[year])})")
 
     # Sort years and create color map
     years = sorted(dates_by_year.keys())
@@ -722,7 +774,7 @@ def create_qgis_style_file_from_pixels(results_df, output_style_file):
         # Get unique dates for this year and sort them
         year_dates = sorted(set(dates_by_year[year]))
 
-        for date_value in year_dates:
+        for j, date_value in enumerate(year_dates):
             # Ensure date_value is an integer
             date_value = int(date_value)
 
@@ -757,12 +809,11 @@ def create_qgis_style_file_from_pixels(results_df, output_style_file):
     </rasterrenderer>
   </pipe>
 </qgis>'''
-
     # Save style file
     with open(output_style_file, 'w') as f:
         f.write(qml_content)
 
-    print(f"QGIS style file saved to: {output_style_file}")
+    print(f"\nQGIS style file saved to: {output_style_file}")
     print(f"Years in data: {years}")
 
 def process_directory_to_geotiff(input_dir, output_raster_file, output_vector_file, search_start=None, search_end=None,
