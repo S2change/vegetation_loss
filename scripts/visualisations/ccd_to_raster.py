@@ -74,7 +74,7 @@ from ccd_results_utils.segment_identification import ndvi_loss_calculation
 
 # Set input directory and output files
 input_directory = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo" # UPDATE
-output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/03_efficient_loop_first_test.tif" # UPDATE
+output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/09_optimized_test.tif" # UPDATE
 
 # Vector file is not set up
 output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
@@ -328,11 +328,12 @@ def process_pixel_segments(segments, search_start_ms, search_end_ms):
     filtered_segments = []
 
     for seg in segments:
+        
+        filtered_segments.append(seg)
+
         date_check = date_filtering(seg["tBreak"], search_start_ms, search_end_ms)
         if not date_check:
             continue
-
-        filtered_segments.append(seg)
 
         # Check if we can determine the result early
         if len(filtered_segments) == 1:
