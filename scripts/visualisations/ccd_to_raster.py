@@ -328,7 +328,7 @@ def process_pixel_segments(segments, search_start_ms, search_end_ms):
     filtered_segments = []
 
     for seg in segments:
-        
+
         filtered_segments.append(seg)
 
         date_check = date_filtering(seg["tBreak"], search_start_ms, search_end_ms)
@@ -969,4 +969,3 @@ if __name__ == "__main__":
         print("="*70)
         print(f"Script completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"Total execution time: {int(hours):02d}:{int(minutes):02d}:{seconds:05.2f}")
-        print(f"Total execution time: {elapsed_time:.2f} seconds")
