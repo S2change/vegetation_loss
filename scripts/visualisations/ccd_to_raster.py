@@ -883,7 +883,7 @@ def process_directory_to_geotiff(input_dir, output_raster_files, output_vector_f
 
         # Create QGIS style file based on break data
         if qgis_style_file == True and not results_df.empty:
-            style_file = output_raster_file.replace('.tif', '_year_colors.qml')
+            style_file = output_raster_file.replace('.tif', '.qml')
             create_qgis_style_file_from_pixels(results_df, style_file)
 
         # Calculate raster parameters from all pixels
