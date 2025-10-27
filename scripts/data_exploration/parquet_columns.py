@@ -31,6 +31,9 @@ def show_parquet_columns(file_path):
     print("-" * 50)
     for i, col in enumerate(df.columns, 1):
         print(f"{i}. {col}")
+    print(f"Column headers in {file_path}:")
+    print("-" * 50)
+    print(f"Column data types: {df.dtypes}")
     print("-" * 50)
     print(f"Total columns: {len(df.columns)}")
     print("\nExample rows:")
@@ -67,13 +70,13 @@ def all_rows_specific_coord(directory_path, x_coord, y_coord):
 
 
 if __name__ == "__main__":
-    # show_parquet_columns(file_path)
+    show_parquet_columns(file_path)
 
     # print("\n\nRows for x-y pairs where tEnd has changeProb = 100:")
     # print("=" * 50)
     # filtered_df = last_row_changeProb_100(file_path)
     # print(filtered_df)
 
-    print(f"\n\nRows for x-y pair {x_coord}, {y_coord}\n")
-    single_pixel_df = all_rows_specific_coord(directory_path, x_coord, y_coord)
-    print(single_pixel_df)
+    # print(f"\n\nRows for x-y pair {x_coord}, {y_coord}\n")
+    # single_pixel_df = all_rows_specific_coord(directory_path, x_coord, y_coord)
+    # print(single_pixel_df)
