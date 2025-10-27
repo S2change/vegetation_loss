@@ -74,7 +74,7 @@ from ccd_results_utils.segment_identification import ndvi_loss_calculation
 
 # Set input directory and output files
 input_directory = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo" # UPDATE
-output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/07_loop_int32_raster.tif" # UPDATE
+output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/08_loop_check_with_optimized.tif" # UPDATE
 
 # VECTOR FILE IS NOT SET UP YET, DO NOT USE
 output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
@@ -83,7 +83,7 @@ output_vector_file = None # Add path if vector file is wanted, to check which po
 # Use "YYYY-MM-DD" for date values
 # Raster will be created for each date range pair
 date_ranges = [("2018-01-01", "2021-12-31"),
-            #    ("2018-01-01", "2018-02-28"),
+               ("2018-01-01", "2018-02-28"),
               ]
 
 # Boundary shapefile filtering (set to None to disable)
