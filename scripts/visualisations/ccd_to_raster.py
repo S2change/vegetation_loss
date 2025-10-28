@@ -24,7 +24,8 @@ INPUTS:
   * Other columns used by ndvi_loss_calculation function
 - date_ranges: List of tuples with (start_date, end_date) for filtering (format: 'YYYY-MM-DD')
   * A separate raster is created for each date range
-- boundary_shapefile: Optional shapefile path for spatial filtering (not currently implemented)
+- boundary_shapefile: Optional shapefile path for spatial filtering
+  * Pixels outside boundary are marked as no-break (is_break=0) in the output raster
 
 OUTPUTS:
 - Multi-band GeoTIFF raster file (.tif):
@@ -87,7 +88,6 @@ date_ranges = [("2018-01-01", "2021-12-31"),
               ]
 
 # Boundary shapefile filtering (set to None to disable)
-# boundary filtering is not set up yet
 boundary_shapefile = None  # Path to shapefile for spatial boundary filtering
 
 qgis_style_file = True  # Set to True if a .qml style file should be created
@@ -177,6 +177,54 @@ def load_boundary_shapefile(shapefile_path, source_crs="EPSG:32629"):
     except Exception as e:
         raise Exception(f"Error loading boundary shapefile {shapefile_path}: {str(e)}")
     
+def filter_points_by_boundary(df, boundary_gdf, source_crs="EPSG:32629"):
+    """
+    Separate points into those within and outside the boundary.
+
+    Uses spatial join to efficiently filter points by boundary geometry.
+    Points outside the boundary are identified and can be marked as no-break pixels.
+
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame with x_coord and y_coord columns
+    boundary_gdf : geopandas.GeoDataFrame
+        Boundary geometry for spatial filtering (dissolved to single polygon)
+    source_crs : str
+        CRS of the coordinates (default: EPSG:32629)
+
+    Returns:
+    --------
+    tuple: (points_within_df, unique_pixels_outside)
+        - points_within_df: DataFrame with all rows for points inside boundary
+        - unique_pixels_outside: DataFrame with unique (x_coord, y_coord) pairs outside boundary
+    """
+    points_gdf = gpd.GeoDataFrame(
+        df,
+        geometry=gpd.points_from_xy(df.x_coord, df.y_coord),
+        crs=source_crs
+    )
+
+    # Within points
+    points_within = gpd.sjoin(points_gdf, boundary_gdf, predicate='within', how='inner')
+    within_df = points_within.drop(columns=['geometry', 'index_right']).reset_index(drop=True)
+
+    # Outside points
+    within_indices = set(points_within.index)
+    all_indices = set(points_gdf.index)
+    outside_indices = all_indices - within_indices
+    if outside_indices:
+        outside_df = df.loc[list(outside_indices)]
+        unique_pixels_outside = outside_df[['x_coord', 'y_coord']].drop_duplicates().reset_index(drop=True)
+    else:
+        unique_pixels_outside = pd.DataFrame(columns=['x_coord', 'y_coord'])
+
+    print(f"  Total segments in parquet: {len(df)}")
+    print(f"  Segments within boundary: {len(within_df)}")
+    print(f"  Unique pixels outside boundary: {len(unique_pixels_outside)}")
+
+    return within_df, unique_pixels_outside
+    
 def date_filtering(date_value_ms, search_start_ms=None, search_end_ms=None):
     """
     Check if a date value (in milliseconds) falls within the specified date range.
@@ -233,7 +281,7 @@ def process_parquet_file_optimized(file_path, date_ranges_ms_list, boundary_gdf=
         List of (search_start_ms, search_end_ms, date_range_index) tuples
         Each tuple contains start/end dates in milliseconds since Unix epoch and an index
     boundary_gdf : geopandas.GeoDataFrame, optional
-        Boundary geometry for spatial filtering (currently not implemented)
+        Boundary geometry for spatial filtering. Pixels outside boundary are marked as no-break.
     source_crs : str
         CRS of the coordinates
 
@@ -252,6 +300,21 @@ def process_parquet_file_optimized(file_path, date_ranges_ms_list, boundary_gdf=
 
     # Track which pixels we've fully processed for each date range
     processed_pixels_by_range = {idx: set() for _, _, idx in date_ranges_ms_list}
+
+    # Filter by boundary
+    unique_pixels_outside = pd.DataFrame(columns=['x_coord', 'y_coord'])
+    if boundary_gdf is not None:
+        df, unique_pixels_outside = filter_points_by_boundary(df, boundary_gdf, source_crs)
+
+        # Add unique outside pixels to all date ranges with no-break values
+        # Format: (x_coord, y_coord, is_break=0, tEnd_used=None, tBreak_used=None, ndvi_last_segment=np.nan)
+        for _, pixel_row in unique_pixels_outside.iterrows():
+            x_coord = pixel_row['x_coord']
+            y_coord = pixel_row['y_coord']
+            for _, _, date_range_idx in date_ranges_ms_list:
+                results_by_date_range[date_range_idx].append(
+                    (x_coord, y_coord, 0, None, None, np.nan)
+                )
 
     # Store segments we're currently collecting for a pixel
     current_pixel = None
