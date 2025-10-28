@@ -219,9 +219,9 @@ def filter_points_by_boundary(df, boundary_gdf, source_crs="EPSG:32629"):
     else:
         unique_pixels_outside = pd.DataFrame(columns=['x_coord', 'y_coord'])
 
-    print(f"  Total segments in parquet: {len(df)}")
-    print(f"  Segments within boundary: {len(within_df)}")
-    print(f"  Unique pixels outside boundary: {len(unique_pixels_outside)}")
+    # print(f"  Total segments in parquet: {len(df)}")
+    # print(f"  Segments within boundary: {len(within_df)}")
+    # print(f"  Unique pixels outside boundary: {len(unique_pixels_outside)}")
 
     return within_df, unique_pixels_outside
     
