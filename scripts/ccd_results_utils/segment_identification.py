@@ -1,17 +1,44 @@
 import pandas as pd
-import geopandas as gpd
 import os
-import glob
-from pathlib import Path
-import rasterio
-from rasterio.transform import from_origin
-from rasterio.warp import calculate_default_transform, reproject, Resampling
-import numpy as np
-import matplotlib.pyplot as plt
 from datetime import datetime
-import colorsys
-import time
+from dateutil.relativedelta import relativedelta
+from datetime import timedelta
 
+def generate_date_ranges(date_ranges=None, auto_intervals=False, months=2):
+    """
+    Generates lists of date ranges.
+
+     - If `auto_intervals=True`: generates automatic intervals of `months` in `months` 
+       using the first and last date of `date_ranges`.
+    - If `auto_intervals=False`: returns `date_ranges` as-is.
+
+    Example:
+        generate_date_ranges([("2023-01-01", "2024-12-31")], auto_intervals=True, months=2)
+    """
+
+    # If no ranges were provided, return an empty list
+    if not date_ranges:
+        return []
+
+    # If manual mode, return the ranges as they are
+    if not auto_intervals:
+        return date_ranges
+
+    # Automatic mode: generate ranges of X months each
+    start_date = datetime.strptime(date_ranges[0][0], "%Y-%m-%d")
+    end_date = datetime.strptime(date_ranges[-1][1], "%Y-%m-%d")
+
+    intervals = []
+    current = start_date
+
+    while current <= end_date:
+        next_date = current + relativedelta(months=months) - timedelta(days=1)
+        if next_date > end_date:
+            next_date = end_date
+        intervals.append((current.strftime("%Y-%m-%d"), next_date.strftime("%Y-%m-%d")))
+        current = next_date + timedelta(days=1)
+
+    return intervals
 
 def read_parquet_identify_breaks(filepath):
     """
