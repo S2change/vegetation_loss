@@ -68,14 +68,15 @@ import sys
 module_path = os.path.abspath(os.path.join('..'))
 if module_path not in sys.path:
    sys.path.append(module_path)
-from ccd_results_utils.segment_identification import ndvi_loss_calculation
+from ccd_results_utils.segment_identification import generate_date_ranges, ndvi_loss_calculation
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 ## SCRIPT CONFIGS ##
 ##################################
 
 # Set input directory and output files
-input_directory = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo" # UPDATE
-output_raster_file = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/09_optimized_test.tif" # UPDATE
+input_directory = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG" # UPDATE
+output_raster_file = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG\processed_outputs\rasters\output_raster_ccd.tif" # UPDATE
 
 # Vector file is not set up
 output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
@@ -83,9 +84,15 @@ output_vector_file = None # Add path if vector file is wanted, to check which po
 # List of date ranges to filter for, in format (start_date, end_date)
 # Use "YYYY-MM-DD" for date values
 # Raster will be created for each date range pair
-date_ranges = [("2018-01-01", "2021-12-31"),
-               ("2018-01-01", "2018-02-28"),
-              ]
+
+# Example 1 – use a fixed range (no splitting):
+# date_ranges = generate_date_ranges([("2018-01-01", "2021-12-31")],auto_intervals=False)
+
+# Example 2 – automatically generate 2-month intervals:
+date_ranges = generate_date_ranges([("2023-01-01", "2024-12-31")], auto_intervals=True, months=2)
+
+# Number of parallel worker processes to use
+num_workers = 12
 
 # Boundary shapefile filtering (set to None to disable)
 boundary_shapefile = None  # Path to shapefile for spatial boundary filtering
@@ -421,7 +428,7 @@ def process_pixel_segments(segments, search_start_ms, search_end_ms):
     # If we've gone through all segments and found no break, return no break
     return (0, None, None, np.nan)
 
-def process_files_chunked(input_dir, date_ranges_list, boundary_shapefile=None, source_crs="EPSG:32629"):
+def process_files_chunked(input_dir, date_ranges_list, boundary_shapefile=None, source_crs="EPSG:32629", max_workers=None):
     """
     Generator that yields processed data from parquet files one at a time to avoid memory issues.
     Processes multiple date ranges in a single pass through each file.
@@ -437,6 +444,9 @@ def process_files_chunked(input_dir, date_ranges_list, boundary_shapefile=None, 
         Path to shapefile for spatial boundary filtering
     source_crs : str
         CRS of the coordinates
+    max_workers : int, optional
+     Maximum number of parallel worker processes to use. 
+     If None, defaults to using all available CPU cores minus one. 
 
     Yields:
     -------
@@ -448,30 +458,57 @@ def process_files_chunked(input_dir, date_ranges_list, boundary_shapefile=None, 
         print(f"No parquet files found in {input_dir}")
         return
 
-    print(f"Found {len(parquet_files)} parquet files to process")
+    total_files = len(parquet_files)
+    print(f"Found {total_files} parquet files to process")
 
+    # Convert date ranges to milliseconds
     date_ranges_ms_list = []
     for idx, (start_date, end_date) in enumerate(date_ranges_list):
         start_ms, end_ms = date_conversion_ms(start_date, end_date)
         date_ranges_ms_list.append((start_ms, end_ms, idx))
 
-    # Load boundary shapefile if specified
+    # Load boundary shapefile only once
     boundary_gdf = None
     if boundary_shapefile is not None:
         boundary_gdf = load_boundary_shapefile(boundary_shapefile, source_crs)
 
-    # Print filtering information
-    print("Processing multiple date ranges:")
+    # Diagnostics
+    print("Processing multiple date intervals:")
     for idx, (start_date, end_date) in enumerate(date_ranges_list):
-        print(f"  - Date range {idx + 1}: {start_date} to {end_date}")
+        print(f"  - Interval {idx + 1}: {start_date} to {end_date}")
 
     if boundary_shapefile is not None:
-        print(f"Spatial filtering: using boundary from {boundary_shapefile}")
+        print(f"Spatial filter: using boundary {boundary_shapefile}")
 
-    for i, file_path in enumerate(parquet_files, 1):
-        print(f"Processing file {i}/{len(parquet_files)}: {os.path.basename(file_path)}")
-        results_dict = process_parquet_file_optimized(file_path, date_ranges_ms_list, boundary_gdf, source_crs)
-        yield results_dict
+    # Parallel execution
+    results_all = []
+    with ProcessPoolExecutor(max_workers=max_workers - 1) as executor:
+        futures = {
+            executor.submit(
+                process_parquet_file_optimized,
+                file_path,
+                date_ranges_ms_list,
+                boundary_gdf,
+                source_crs
+            ): file_path
+            for file_path in parquet_files
+        }
+
+        # Progress counter
+        completed = 0
+        for future in as_completed(futures):
+            file_path = futures[future]
+            completed += 1
+            try:
+                result = future.result()
+                print(f"[✓] [{completed}/{total_files}] Processed: {os.path.basename(file_path)}")
+                results_all.append(result)
+            except Exception as e:
+                print(f"[X] [{completed}/{total_files}] Error while processing {file_path}: {e}")
+                
+    # Yield results after all files are processed
+    for result_dict in results_all:
+        yield result_dict
 
 def collect_pixel_data_chunked(input_dir, date_ranges_list, boundary_shapefile=None, source_crs="EPSG:32629"):
     """
@@ -498,7 +535,7 @@ def collect_pixel_data_chunked(input_dir, date_ranges_list, boundary_shapefile=N
     all_results_by_range = {idx: [] for idx in range(len(date_ranges_list))}
 
     # Process all files and collect results for each date range
-    for results_dict in process_files_chunked(input_dir, date_ranges_list, boundary_shapefile, source_crs):
+    for results_dict in process_files_chunked(input_dir, date_ranges_list, boundary_shapefile, source_crs, max_workers=num_workers):
         for date_range_idx, results_list in results_dict.items():
             all_results_by_range[date_range_idx].extend(results_list)
 
