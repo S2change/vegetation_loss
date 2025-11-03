@@ -546,7 +546,7 @@ def collect_pixel_data_chunked(input_dir, date_ranges_list, boundary_shapefile=N
         data_list = all_results_by_range[date_range_idx]
         total_rows = len(data_list)
 
-        print(f"➡️  Criando DataFrame para {date_ranges_list[date_range_idx]} com {total_rows:,} linhas...")
+        print(f"➤ Creating DataFrame for {date_ranges_list[date_range_idx]} with {total_rows:,} rows...")
 
         # Creation in chuncks
         chunk_size = 5_000_000
