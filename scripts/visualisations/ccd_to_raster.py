@@ -541,11 +541,24 @@ def collect_pixel_data_chunked(input_dir, date_ranges_list, boundary_shapefile=N
 
     # Create DataFrames for each date range
     dataframes_by_range = {}
+
     for date_range_idx in range(len(date_ranges_list)):
-        # Create DataFrame from flattened list of tuples
-        results_df = pd.DataFrame(all_results_by_range[date_range_idx],
-                                 columns=["x_coord", "y_coord", "is_break",
-                                         "tEnd_used", "tBreak_used", "ndvi_last_segment"])
+        data_list = all_results_by_range[date_range_idx]
+        total_rows = len(data_list)
+
+        print(f"➡️  Criando DataFrame para {date_ranges_list[date_range_idx]} com {total_rows:,} linhas...")
+
+        # Creation in chuncks
+        chunk_size = 5_000_000
+        dfs = []
+
+        for i in range(0, total_rows, chunk_size):
+            chunk = pd.DataFrame(data_list[i:i + chunk_size], columns=columns)
+            dfs.append(chunk)
+            print(f"   ✓ Chunk {i // chunk_size + 1} created ({len(chunk):,} lines)")
+
+        results_df = pd.concat(dfs, ignore_index=True)
+        del dfs, data_list  # Free up memory
 
         # Convert tEnd_used and tBreak_used from milliseconds to pandas Timestamp
         results_df["tEnd_used"] = pd.to_datetime(results_df["tEnd_used"], unit='ms', utc=True, errors='coerce').dt.tz_localize(None)
@@ -556,6 +569,9 @@ def collect_pixel_data_chunked(input_dir, date_ranges_list, boundary_shapefile=N
         results_df["tBreak_used_yyyymmdd"] = results_df["tBreak_used"].dt.strftime("%Y%m%d").fillna("0").astype(int)
 
         dataframes_by_range[date_range_idx] = results_df
+
+        print(f"Final DataFrame created for {date_ranges_list[date_range_idx]}"
+              f"with {len(results_df):,} rows and {len(results_df.columns)} columns.\n")
 
     return dataframes_by_range
 
