@@ -22,7 +22,7 @@ desenvolvimento (I&D) para o desenvolvimento de metodologias eficazes à escala 
 eficientes a nível computacional para a criação sistemática de um produto nacional em formato
 vetorial de delimitação de manchas superiores a 0.5 ha de perda recente de floresta e mato com
 base em análise automática de imagens de satélite
-* Data de início: contrato assinado a 20 de outubro de 2023
+* Data de início: contrato assinado a 20 de outubro de 2023; inicial data de vigência: 19/10/2025; aditamento: 31/03/2026
 * Centro de custos do ISA: 5207 (S2CHANGE)
 </details>
 
@@ -72,7 +72,7 @@ entregáveis:
 
 **Tarefa 2** - Construção da uma base de dados de referência (BDR) para calibração e validação espacial e temporal das metodologias a operacionalizar com base em dados resultantes de interpretação de imagens aéreas e de satélite, do Instituto de Conservação da Natureza e Florestas (ICNF) e outras fontes consideradas relevantes.
 
-*Duração: Meses 2-18*
+*Duração: Meses 2-18* 
 
 entregáveis:  
   * E2.1 – [Relatório com metodologia de criação da BDR](documents/deliverables/Entregavel_2_1.pdf) (1 de maio de 2024); [versão revista](documents/deliverables/Entregavel_2_1_v2.pdf) (14 de maio de 2024)
@@ -113,7 +113,14 @@ entregáveis:
   * E4.3 – Relatório de validação dos mapas nacionais.
   * E4.4 – Aplicação informática que possa ser integrada na cadeia de produção da DGT. 
 
-### Produtos
+## Pagamentos segundo aditamento (set 2025)
+
+- Entregáveis E2.3, E3.2, E3.3 e E4.1; contrato 20/4/2025; aditamento: 20/11/2025 (10% do calor contratado)
+- Entregáveis E3.4, E4.2, E4.3 e E4.4; contrato 19/10/2025; aditamento: 19/03/2026 (10% do calor contratado)
+
+Ver [cronograma](cronograma_aditamento_contrato_set_2025.png).
+
+## Produtos
 
 <details markdown="block">
 <summary> Bases de dados de referência e produtos cartográficos de perdas de vegetação </summary>
