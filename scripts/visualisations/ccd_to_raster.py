@@ -539,6 +539,9 @@ def collect_pixel_data_chunked(input_dir, date_ranges_list, boundary_shapefile=N
         for date_range_idx, results_list in results_dict.items():
             all_results_by_range[date_range_idx].extend(results_list)
 
+    # Define column names
+    columns = ["x_coord", "y_coord", "is_break", "tEnd_used", "tBreak_used", "ndvi_last_segment"]
+
     # Create DataFrames for each date range
     dataframes_by_range = {}
 
