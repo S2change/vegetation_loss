@@ -1,15 +1,14 @@
 """
-Raster to Vector Polygon Converter using Scipy Labels
+Raster to Vector Polygon Converter using Graph Algorithm
 
 This script converts a raster TIFF file to vector polygons with spatial-temporal clustering.
 
-- Uses connected component labeling (scipy.ndimage.label) to find spatially-connected groups
-- Applies date grouping ONLY within each spatial cluster
+- Uses graph-based algorithm (networkx + scipy KDTree) to cluster pixels
+- Combines spatial connectivity and temporal tolerance using graph edges
 - Configurable connectivity (4-connectivity or 8-connectivity)
 
 Features:
-- Spatial-temporal clustering of pixels
-- Merging pixels within a specified date range (per cluster)
+- Spatial-temporal clustering of pixels with tolerance-based date grouping
 - Filtering polygons by minimum area
 - Setting polygon values based on most common pixel value
 """
@@ -23,13 +22,14 @@ import rasterio
 from rasterio.features import shapes
 from shapely.geometry import shape
 import geopandas as gpd
-from scipy.ndimage import label, generate_binary_structure
+import networkx as nx
+from scipy.spatial import cKDTree
 
 ## SCRIPT CONFIGS ##
 ##################################
 
 input_raster = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/09_optimized_test_20180101_to_20211231.tif"  # Path to input raster TIFF file
-output_vector = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/13_label_timer.gpkg"  # Path to output vector file
+output_vector = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/14_graph_first_test.gpkg"  # Path to output vector file
 
 band_number = 1  # Which band contains the date values (default: 1 for first band)
 date_range_days = 30  # Number of days to group adjacent pixels within each spatial cluster (default: 0)
@@ -46,134 +46,126 @@ def parse_date_value(date_str):
     except (ValueError, TypeError):
         return None
 
-def create_date_groups_within_cluster(cluster_dates, date_range_days):
+def date_to_days(date_val):
+    """Convert YYYYMMDD to days since reference date (2000-01-01)."""
+    if date_val == 0 or date_val == -9999:
+        return 0
+    try:
+        dt = datetime.strptime(str(int(date_val)), '%Y%m%d')
+        ref = datetime(2000, 1, 1)
+        return (dt - ref).days
+    except (ValueError, TypeError):
+        return 0
+
+def graph_based_clustering(image, tolerance, connectivity=8):
     """
-    Group date values within a single spatial cluster based on temporal proximity.
+    Cluster pixels using graph algorithm with spatial and temporal constraints.
 
     Args:
-        cluster_dates: numpy array of date values in YYYYMMDD format (from one cluster)
-        date_range_days: number of days to group together
+        image: numpy array with numeric values (e.g., days since reference)
+        tolerance: maximum difference in values to be considered same cluster
+        connectivity: 4 for edge-only, 8 for edge+diagonal (default: 8)
 
     Returns:
-        dict mapping old date values to new grouped date values
+        labels: numpy array with cluster IDs
+        label_count: number of clusters found
     """
-    unique_values, counts = np.unique(cluster_dates, return_counts=True)
+    labels = np.full(image.shape, -1, dtype=int)
 
-    if len(unique_values) == 0:
-        return {}
+    # Get valid pixel coordinates and values (non-zero pixels)
+    rows, cols = np.where(image != 0)
+    if len(rows) == 0:
+        return labels, 0
 
-    # Convert to datetime objects for processing
-    date_data = []
-    for val, count in zip(unique_values, counts):
-        date_obj = parse_date_value(val)
-        if date_obj:
-            date_data.append((val, date_obj, count))
+    values = image[rows, cols]
 
-    if not date_data:
-        return {}
+    # Create coordinate array for KDTree (row, col positions)
+    coords = np.column_stack([rows, cols])
 
-    date_data.sort(key=lambda x: x[1])
+    # Build KDTree for spatial neighbor queries
+    tree = cKDTree(coords)
 
-    value_mapping = {}
-    processed = set()
+    # Determine maximum spatial distance based on connectivity
+    # 4-connectivity: only orthogonal neighbors (distance = 1)
+    # 8-connectivity: orthogonal + diagonal neighbors (distance = sqrt(2))
+    maxdist = np.sqrt(2) if connectivity == 8 else 1.0
 
-    for i, (val1, date1, count1) in enumerate(date_data):
-        if val1 in processed:
-            continue
+    # Build graph
+    G = nx.Graph()
 
-        # Find all values within date range
-        group_data = [(val1, count1)]
+    # Add nodes with their temporal values
+    for idx in range(len(rows)):
+        G.add_node(idx, value=values[idx])
 
-        # Only check subsequent dates (since sorted)
-        for j in range(i + 1, len(date_data)):
-            val2, date2, count2 = date_data[j]
-            if val2 in processed:
-                continue
+    # Find spatial neighbors within maxdist
+    pairs = tree.query_pairs(r=maxdist)
 
-            # Check if within date range
-            days_diff = abs((date2 - date1).days)
-            if days_diff <= date_range_days:
-                group_data.append((val2, count2))
-                processed.add(val2)
-            elif days_diff > date_range_days:
-                # Since sorted by date, no more matches possible
-                break
+    # Add edges if both spatial and temporal conditions are satisfied
+    for i, j in pairs:
+        # Add edge if temporal difference is within tolerance
+        if abs(values[i] - values[j]) <= tolerance:
+            G.add_edge(i, j)
 
-        # Find most common value in group
-        if len(group_data) > 1:
-            most_common_value = max(group_data, key=lambda x: x[1])[0]
+    # Find connected components (clusters)
+    connected_components = list(nx.connected_components(G))
 
-            # Store mapping for all values in group
-            for val, _ in group_data:
-                value_mapping[val] = most_common_value
+    # Assign cluster labels
+    for cluster_id, component in enumerate(connected_components):
+        for node_idx in component:
+            labels[rows[node_idx], cols[node_idx]] = cluster_id
 
-        processed.add(val1)
-
-    return value_mapping
+    return labels, len(connected_components)
 
 def create_spatial_temporal_groups(raster_array, date_range_days=0, connectivity=8):
     """
-    Group pixel values based on spatial proximity and temporal similarity.
+    Group pixel values based on spatial proximity and temporal similarity using graph algorithm.
 
     Args:
         raster_array: numpy array with date values in YYYYMMDD format
-        date_range_days: number of days to group together within each spatial cluster
+        date_range_days: number of days tolerance for grouping pixels
         connectivity: 4 for edge-only connectivity, 8 for edge+diagonal connectivity
 
     Returns:
-        numpy array with grouped values
+        tuple: (labeled_array with cluster IDs, original_dates array)
     """
     if date_range_days == 0:
-        return raster_array
+        # No clustering, return original array
+        return raster_array, raster_array
 
     print(f"Starting spatial-temporal clustering (connectivity={connectivity}, date_range={date_range_days} days)...")
 
-    mask = raster_array != 0
-
-    # Find and label spatially-connected components
+    # Convert YYYYMMDD dates to days since reference
     start_time = time.time()
-    if connectivity == 8:
-        structure = generate_binary_structure(2, 2)  # 8-connectivity (edges + diagonals)
-    else:
-        structure = generate_binary_structure(2, 1)  # 4-connectivity (edges only)
-
-    labeled_array, num_features = label(mask, structure=structure)  # type: ignore
+    vectorized_date_to_days = np.vectorize(date_to_days)
+    days_array = vectorized_date_to_days(raster_array)
     elapsed = time.time() - start_time
-    print(f"  Scipy labeling took {elapsed:.2f} seconds")
-    print(f"  Found {num_features} spatially-connected clusters")
+    print(f"  Date conversion took {elapsed:.2f} seconds")
 
-    if num_features == 0:
-        return raster_array
-
-    # Process each spatial cluster independently
+    # Apply graph-based clustering
     start_time = time.time()
-    grouped_array = raster_array.copy()
-    total_mappings = 0
+    labels, num_clusters = graph_based_clustering(days_array, tolerance=date_range_days, connectivity=connectivity)
+    elapsed = time.time() - start_time
+    print(f"  Graph-based clustering took {elapsed:.2f} seconds")
+    print(f"  Found {num_clusters} clusters")
 
-    for cluster_id in range(1, num_features + 1):
-        cluster_mask = (labeled_array == cluster_id)
+    # For each cluster, find the most common original date value and assign it
+    start_time = time.time()
+    result_array = np.zeros_like(raster_array)
+
+    for cluster_id in range(num_clusters):
+        cluster_mask = (labels == cluster_id)
         cluster_dates = raster_array[cluster_mask]
 
-        if len(cluster_dates) == 0:
-            continue
-
-        value_mapping = create_date_groups_within_cluster(cluster_dates, date_range_days)
-
-        if value_mapping:
-            total_mappings += len(value_mapping)
-
-            # Apply mappings only to pixels in this cluster
-            for old_val, new_val in value_mapping.items():
-                if old_val != new_val:
-                    # Only replace pixels that are both in this cluster AND have the old value
-                    replace_mask = cluster_mask & (grouped_array == old_val)
-                    grouped_array[replace_mask] = new_val
+        if len(cluster_dates) > 0:
+            # Use most common date in the cluster
+            unique_dates, counts = np.unique(cluster_dates, return_counts=True)
+            most_common_date = unique_dates[np.argmax(counts)]
+            result_array[cluster_mask] = most_common_date
 
     elapsed = time.time() - start_time
-    print(f"  Date grouping within clusters took {elapsed:.2f} seconds")
-    print(f"  Applied {total_mappings} date mappings")
+    print(f"  Cluster post-processing took {elapsed:.2f} seconds")
 
-    return grouped_array
+    return result_array, labels
 
 def raster_to_polygons(input_raster, output_vector, band_number=1, date_range_days=0,
                       min_area_ha=0.5, nodata_value=-9999, connectivity=8):
@@ -209,9 +201,11 @@ def raster_to_polygons(input_raster, output_vector, band_number=1, date_range_da
         mask = raster_data != nodata_value
         raster_data = np.where(mask, raster_data, 0)
 
-    # Group pixels by date range if specified (using spatial-temporal clustering)
+    # Group pixels by date range if specified (using graph-based clustering)
     if date_range_days > 0:
-        raster_data = create_spatial_temporal_groups(raster_data, date_range_days, connectivity)
+        raster_data, cluster_labels = create_spatial_temporal_groups(raster_data, date_range_days, connectivity)
+    else:
+        cluster_labels = raster_data
 
     print("\nConverting raster to polygons...")
     start_time = time.time()
@@ -275,7 +269,7 @@ def raster_to_polygons(input_raster, output_vector, band_number=1, date_range_da
 def main():
     overall_start = time.time()
     print("="*60)
-    print("RASTER TO POLYGON CONVERTER - SCIPY LABEL ALGORITHM")
+    print("RASTER TO POLYGON CONVERTER - GRAPH ALGORITHM")
     print("="*60 + "\n")
 
     if not os.path.exists(input_raster):
