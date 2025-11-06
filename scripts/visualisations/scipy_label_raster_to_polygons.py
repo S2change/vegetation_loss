@@ -152,22 +152,31 @@ def create_spatial_temporal_groups(raster_array, date_range_days=0, connectivity
 
     for cluster_id in range(1, num_features + 1):
         cluster_mask = (labeled_array == cluster_id)
-        cluster_dates = raster_array[cluster_mask]
 
-        if len(cluster_dates) == 0:
+        if not cluster_mask.any():
             continue
 
+        cluster_dates = raster_array[cluster_mask]
         value_mapping = create_date_groups_within_cluster(cluster_dates, date_range_days)
 
         if value_mapping:
             total_mappings += len(value_mapping)
 
-            # Apply mappings only to pixels in this cluster
-            for old_val, new_val in value_mapping.items():
-                if old_val != new_val:
-                    # Only replace pixels that are both in this cluster AND have the old value
-                    replace_mask = cluster_mask & (grouped_array == old_val)
-                    grouped_array[replace_mask] = new_val
+            # Build vectorized mapping for this cluster
+            # Extract unique old values that need changing
+            old_values = np.array([k for k, v in value_mapping.items() if k != v])
+            new_values = np.array([value_mapping[k] for k in old_values])
+
+            if len(old_values) > 0:
+                # Get cluster pixels only once
+                cluster_pixels = grouped_array[cluster_mask]
+
+                # Vectorized replacement using np.isin
+                for old_val, new_val in zip(old_values, new_values):
+                    cluster_pixels[cluster_pixels == old_val] = new_val
+
+                # Write back to the array
+                grouped_array[cluster_mask] = cluster_pixels
 
     elapsed = time.time() - start_time
     print(f"  Date grouping within clusters took {elapsed:.2f} seconds")
