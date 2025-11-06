@@ -29,7 +29,7 @@ from scipy.spatial import cKDTree
 ##################################
 
 input_raster = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/09_optimized_test_20180101_to_20211231.tif"  # Path to input raster TIFF file
-output_vector = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/14_graph_first_test.gpkg"  # Path to output vector file
+output_vector = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/15_graph_npvectorize.gpkg"  # Path to output vector file
 
 band_number = 1  # Which band contains the date values (default: 1 for first band)
 date_range_days = 30  # Number of days to group adjacent pixels within each spatial cluster (default: 0)
@@ -46,16 +46,56 @@ def parse_date_value(date_str):
     except (ValueError, TypeError):
         return None
 
-def date_to_days(date_val):
-    """Convert YYYYMMDD to days since reference date (2000-01-01)."""
-    if date_val == 0 or date_val == -9999:
-        return 0
-    try:
-        dt = datetime.strptime(str(int(date_val)), '%Y%m%d')
-        ref = datetime(2000, 1, 1)
-        return (dt - ref).days
-    except (ValueError, TypeError):
-        return 0
+def date_to_days_vectorized(date_array):
+    """
+    Convert YYYYMMDD array to days since reference date (2000-01-01) using vectorized operations.
+
+    Args:
+        date_array: numpy array with date values in YYYYMMDD format
+
+    Returns:
+        numpy array with days since 2000-01-01
+    """
+    # Create output array
+    result = np.zeros_like(date_array, dtype=np.int32)
+
+    # Mask for valid dates (not 0 or -9999)
+    valid_mask = (date_array != 0) & (date_array != -9999)
+
+    if not np.any(valid_mask):
+        return result
+
+    # Extract valid dates
+    valid_dates = date_array[valid_mask].astype(np.int32)
+
+    # Vectorized date parsing: extract year, month, day
+    year = valid_dates // 10000
+    month = (valid_dates % 10000) // 100
+    day = valid_dates % 100
+
+    # Calculate days since 2000-01-01 using vectorized operations
+    # Days since epoch for 2000-01-01
+    ref_days = 10957  # days from 1970-01-01 to 2000-01-01
+
+    # Calculate days from 1970-01-01 for each date
+    # Using approximate day calculation (365.25 days per year average)
+    days_from_1970 = (year - 1970) * 365 + (year - 1969) // 4 - (year - 1901) // 100 + (year - 1601) // 400
+
+    # Add month days (cumulative days at start of each month for non-leap year)
+    month_days = np.array([0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334])
+    days_from_1970 += month_days[month - 1]
+
+    # Add leap day if after February in leap year
+    is_leap = ((year % 4 == 0) & (year % 100 != 0)) | (year % 400 == 0)
+    days_from_1970 += ((month > 2) & is_leap).astype(np.int32)
+
+    # Add day of month
+    days_from_1970 += day - 1
+
+    # Convert to days since 2000-01-01
+    result[valid_mask] = days_from_1970 - ref_days
+
+    return result
 
 def graph_based_clustering(image, tolerance, connectivity=8):
     """
@@ -134,10 +174,9 @@ def create_spatial_temporal_groups(raster_array, date_range_days=0, connectivity
 
     print(f"Starting spatial-temporal clustering (connectivity={connectivity}, date_range={date_range_days} days)...")
 
-    # Convert YYYYMMDD dates to days since reference
+    # Convert YYYYMMDD dates to days since reference using vectorized operations
     start_time = time.time()
-    vectorized_date_to_days = np.vectorize(date_to_days)
-    days_array = vectorized_date_to_days(raster_array)
+    days_array = date_to_days_vectorized(raster_array)
     elapsed = time.time() - start_time
     print(f"  Date conversion took {elapsed:.2f} seconds")
 
