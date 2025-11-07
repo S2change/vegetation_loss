@@ -157,7 +157,27 @@ def graph_based_clustering(image, tolerance, connectivity=8):
     return labels, len(connected_components)
 
 def create_spatial_temporal_groups(raster_array, date_range_days=0, connectivity=8):
-    """
+    if date_range_days == 0:
+        return raster_array, raster_array
+
+    print(f"Starting spatial-temporal clustering (connectivity={connectivity}, date_range={date_range_days} days)...")
+
+    start_time = time.time()
+    days_array = date_to_days_vectorized(raster_array)
+    elapsed = time.time() - start_time
+    print(f"  Date conversion took {elapsed:.2f} seconds")
+
+    start_time = time.time()
+    labels, num_clusters = graph_based_clustering(days_array, tolerance=date_range_days, connectivity=connectivity)
+    elapsed = time.time() - start_time
+    print(f"  Graph-based clustering took {elapsed:.2f} seconds")
+    print(f"  Found {num_clusters} clusters")
+
+    return raster_array, labels
+
+"""
+def create_spatial_temporal_groups(raster_array, date_range_days=0, connectivity=8):
+    """"""
     Group pixel values based on spatial proximity and temporal similarity using graph algorithm.
 
     Args:
@@ -167,7 +187,7 @@ def create_spatial_temporal_groups(raster_array, date_range_days=0, connectivity
 
     Returns:
         tuple: (labeled_array with cluster IDs, original_dates array)
-    """
+    """"""
     if date_range_days == 0:
         # No clustering, return original array
         return raster_array, raster_array
@@ -208,10 +228,103 @@ def create_spatial_temporal_groups(raster_array, date_range_days=0, connectivity
     print(f"  Cluster post-processing took {elapsed:.2f} seconds")
 
     return result_array, labels
+"""
 
 def raster_to_polygons(input_raster, output_vector, band_number=1, date_range_days=0,
+                       min_area_ha=0.5, nodata_value=-9999, connectivity=8):
+
+    print(f"Processing raster: {input_raster}")
+
+    start_time = time.time()
+    with rasterio.open(input_raster) as src:
+        print(f"Raster has {src.count} band(s)")
+        print(f"Reading band {band_number}...")
+        raster_data = src.read(band_number)
+        transform = src.transform
+        crs = src.crs
+        print(f"Raster shape: {raster_data.shape}")
+        print(f"Raster CRS: {crs}")
+    elapsed = time.time() - start_time
+    print(f"Raster reading took {elapsed:.2f} seconds\n")
+
+    if nodata_value is not None:
+        mask = raster_data != nodata_value
+        raster_data = np.where(mask, raster_data, 0)
+
+    if date_range_days > 0:
+        raster_data, cluster_labels = create_spatial_temporal_groups(raster_data, date_range_days, connectivity)
+    else:
+        cluster_labels = raster_data
+
+    print("\nConverting raster to polygons...")
+    start_time = time.time()
+
+    polygons = []
+    values = []
+    areas_ha = []
+
+    for geom, cluster_id in shapes(cluster_labels, mask=(cluster_labels >= 0),
+                                   connectivity=connectivity,
+                                   transform=transform):
+        poly = shape(geom)
+        area_ha = poly.area / 10000
+
+        if area_ha < min_area_ha:
+            continue
+
+        cluster_mask = (cluster_labels == cluster_id)
+        cluster_dates = raster_data[cluster_mask]
+
+        if cluster_dates.size > 0:
+            unique_dates, counts = np.unique(cluster_dates, return_counts=True)
+            most_common_date = unique_dates[np.argmax(counts)]
+            polygons.append(poly)
+            values.append(int(most_common_date))
+            areas_ha.append(area_ha)
+
+    elapsed = time.time() - start_time
+    print(f"Polygon conversion took {elapsed:.2f} seconds")
+    print(f"Created {len(polygons)} polygons after filtering\n")
+
+    gdf = gpd.GeoDataFrame({
+        'date_value': values,
+        'area_ha': areas_ha
+    }, geometry=polygons, crs=crs)
+
+    def format_date(x):
+        date_obj = parse_date_value(x)
+        return date_obj.strftime('%Y-%m-%d') if date_obj else 'Invalid'
+
+    gdf['date_formatted'] = gdf['date_value'].apply(format_date)
+
+    print(f"Saving {len(gdf)} polygons to: {output_vector}")
+
+    start_time = time.time()
+    if output_vector.endswith('.shp'):
+        gdf.to_file(output_vector, driver='ESRI Shapefile')
+    elif output_vector.endswith('.gpkg'):
+        gdf.to_file(output_vector, driver='GPKG')
+    elif output_vector.endswith('.geojson'):
+        gdf.to_file(output_vector, driver='GeoJSON')
+    else:
+        gdf.to_file(output_vector, driver='ESRI Shapefile')
+    elapsed = time.time() - start_time
+    print(f"File writing took {elapsed:.2f} seconds\n")
+
+    print("Summary Statistics:")
+    print(f"Total polygons: {len(gdf)}")
+    print(f"Total area: {gdf['area_ha'].sum():.2f} ha")
+    print(f"Average polygon area: {gdf['area_ha'].mean():.2f} ha")
+    print(f"Minimum polygon area: {gdf['area_ha'].min():.2f} ha")
+    print(f"Maximum polygon area: {gdf['area_ha'].max():.2f} ha")
+
+    if len(gdf) > 0:
+        print(f"Date range: {gdf['date_formatted'].min()} to {gdf['date_formatted'].max()}")
+
+"""
+def raster_to_polygons(input_raster, output_vector, band_number=1, date_range_days=0,
                       min_area_ha=0.5, nodata_value=-9999, connectivity=8):
-    """
+    """"""
     Convert raster to vector polygons with spatial-temporal clustering.
 
     Args:
@@ -222,7 +335,7 @@ def raster_to_polygons(input_raster, output_vector, band_number=1, date_range_da
         min_area_ha: minimum polygon area in hectares
         nodata_value: value to treat as nodata
         connectivity: 4 for edge-only, 8 for edge+diagonal (default: 8)
-    """
+    """"""
 
     print(f"Processing raster: {input_raster}")
 
@@ -307,7 +420,7 @@ def raster_to_polygons(input_raster, output_vector, band_number=1, date_range_da
 
     if len(gdf) > 0:
         print(f"Date range: {gdf['date_formatted'].min()} to {gdf['date_formatted'].max()}")
-
+"""
 def main():
     overall_start = time.time()
     print("="*60)
