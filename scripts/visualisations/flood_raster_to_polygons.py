@@ -161,6 +161,9 @@ def create_spatial_temporal_groups(raster_array, date_range_days=0, connectivity
     result_array = np.zeros_like(raster_array)
 
     for cluster_id in range(num_clusters):
+        if cluster_id % 1000 == 0 and cluster_id > 0:
+            print(f"  Processed {cluster_id}/{num_clusters} clusters...")
+
         cluster_mask = (labels == cluster_id)
         cluster_dates = raster_array[cluster_mask]
 
