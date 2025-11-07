@@ -151,6 +151,9 @@ def create_spatial_temporal_groups(raster_array, date_range_days=0, connectivity
     total_mappings = 0
 
     for cluster_id in range(1, num_features + 1):
+        if cluster_id % 1000 == 0:
+            print(f"  Processed {cluster_id}/{num_features} clusters...")
+
         cluster_mask = (labeled_array == cluster_id)
 
         if not cluster_mask.any():
