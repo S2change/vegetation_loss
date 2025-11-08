@@ -270,10 +270,10 @@ def raster_to_polygons(input_raster, output_vector, band_number=1, date_range_da
     # Filter clusters by minimum pixel count
     valid_clusters = unique_labels[label_counts >= min_pixels]
 
-    # Create filtered cluster labels (set small clusters to -1)
-    filtered_labels = np.full_like(cluster_labels, -1)
-    for cluster_id in valid_clusters:
-        filtered_labels[cluster_labels == cluster_id] = cluster_id
+    # Create filtered cluster labels using vectorized operations (set small clusters to -1)
+    filtered_labels = np.full_like(cluster_labels, -1, dtype=np.int32)
+    valid_mask = np.isin(cluster_labels, valid_clusters)
+    filtered_labels[valid_mask] = cluster_labels[valid_mask]
 
     num_filtered_out = len(unique_labels) - len(valid_clusters)
     print(f"  Filtered out {num_filtered_out} small clusters (< {min_area_ha} ha)")
