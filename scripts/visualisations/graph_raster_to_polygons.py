@@ -256,6 +256,31 @@ def raster_to_polygons(input_raster, output_vector, band_number=1, date_range_da
     else:
         cluster_labels = raster_data
 
+    print("\nFiltering clusters by minimum area...")
+    start_time = time.time()
+
+    # Calculate pixel area from transform
+    pixel_area_m2 = abs(transform[0] * transform[4])  # pixel width * pixel height
+    pixel_area_ha = pixel_area_m2 / 10000
+    min_pixels = int(np.ceil(min_area_ha / pixel_area_ha))
+
+    # Count pixels per cluster
+    unique_labels, label_counts = np.unique(cluster_labels[cluster_labels >= 0], return_counts=True)
+
+    # Filter clusters by minimum pixel count
+    valid_clusters = unique_labels[label_counts >= min_pixels]
+
+    # Create filtered cluster labels (set small clusters to -1)
+    filtered_labels = np.full_like(cluster_labels, -1)
+    for cluster_id in valid_clusters:
+        filtered_labels[cluster_labels == cluster_id] = cluster_id
+
+    num_filtered_out = len(unique_labels) - len(valid_clusters)
+    print(f"  Filtered out {num_filtered_out} small clusters (< {min_area_ha} ha)")
+    print(f"  Remaining clusters: {len(valid_clusters)}")
+    elapsed = time.time() - start_time
+    print(f"  Filtering took {elapsed:.2f} seconds")
+
     print("\nConverting raster to polygons...")
     start_time = time.time()
 
@@ -263,14 +288,11 @@ def raster_to_polygons(input_raster, output_vector, band_number=1, date_range_da
     values = []
     areas_ha = []
 
-    for geom, cluster_id in shapes(cluster_labels, mask=(cluster_labels >= 0),
+    for geom, cluster_id in shapes(filtered_labels, mask=(filtered_labels >= 0),
                                    connectivity=connectivity,
                                    transform=transform):
         poly = shape(geom)
         area_ha = poly.area / 10000
-
-        if area_ha < min_area_ha:
-            continue
 
         cluster_mask = (cluster_labels == cluster_id)
         cluster_dates = raster_data[cluster_mask]
