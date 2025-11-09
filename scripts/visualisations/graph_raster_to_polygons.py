@@ -29,7 +29,7 @@ from scipy.spatial import cKDTree
 ##################################
 
 input_raster = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/09_optimized_test_20180101_to_20211231.tif"  # Path to input raster TIFF file
-output_vector = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/15_graph_npvectorize.gpkg"  # Path to output vector file
+output_vector = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/16_graph_additional_attributes.gpkg"  # Path to output vector file
 
 band_number = 1  # Which band contains the date values (default: 1 for first band)
 date_range_days = 30  # Number of days to group adjacent pixels within each spatial cluster (default: 0)
@@ -287,6 +287,9 @@ def raster_to_polygons(input_raster, output_vector, band_number=1, date_range_da
     polygons = []
     values = []
     areas_ha = []
+    min_dates = []
+    max_dates = []
+    date_diffs = []
 
     for geom, cluster_id in shapes(filtered_labels, mask=(filtered_labels >= 0),
                                    connectivity=connectivity,
@@ -300,9 +303,26 @@ def raster_to_polygons(input_raster, output_vector, band_number=1, date_range_da
         if cluster_dates.size > 0:
             unique_dates, counts = np.unique(cluster_dates, return_counts=True)
             most_common_date = unique_dates[np.argmax(counts)]
+
+            # Calculate min, max dates and difference
+            min_date = int(np.min(unique_dates))
+            max_date = int(np.max(unique_dates))
+
+            # Parse dates and calculate difference in days
+            min_date_obj = parse_date_value(min_date)
+            max_date_obj = parse_date_value(max_date)
+
+            if min_date_obj and max_date_obj:
+                date_diff_days = (max_date_obj - min_date_obj).days
+            else:
+                date_diff_days = -9999  # Use nodata value for invalid dates
+
             polygons.append(poly)
             values.append(int(most_common_date))
             areas_ha.append(area_ha)
+            min_dates.append(min_date)
+            max_dates.append(max_date)
+            date_diffs.append(date_diff_days)
 
     elapsed = time.time() - start_time
     print(f"Polygon conversion took {elapsed:.2f} seconds")
@@ -310,7 +330,10 @@ def raster_to_polygons(input_raster, output_vector, band_number=1, date_range_da
 
     gdf = gpd.GeoDataFrame({
         'date_value': values,
-        'area_ha': areas_ha
+        'area_ha': areas_ha,
+        'min_date': min_dates,
+        'max_date': max_dates,
+        'date_diff_days': date_diffs
     }, geometry=polygons, crs=crs)
 
     def format_date(x):
@@ -318,6 +341,8 @@ def raster_to_polygons(input_raster, output_vector, band_number=1, date_range_da
         return date_obj.strftime('%Y-%m-%d') if date_obj else 'Invalid'
 
     gdf['date_formatted'] = gdf['date_value'].apply(format_date)
+    gdf['min_date_formatted'] = gdf['min_date'].apply(format_date)
+    gdf['max_date_formatted'] = gdf['max_date'].apply(format_date)
 
     print(f"Saving {len(gdf)} polygons to: {output_vector}")
 
@@ -342,6 +367,13 @@ def raster_to_polygons(input_raster, output_vector, band_number=1, date_range_da
 
     if len(gdf) > 0:
         print(f"Date range: {gdf['date_formatted'].min()} to {gdf['date_formatted'].max()}")
+        print(f"\nDate Difference Statistics:")
+        valid_diffs = gdf[gdf['date_diff_days'] != -9999]['date_diff_days']
+        if len(valid_diffs) > 0:
+            print(f"  Average date difference: {valid_diffs.mean():.2f} days")
+            print(f"  Minimum date difference: {valid_diffs.min()} days")
+            print(f"  Maximum date difference: {valid_diffs.max()} days")
+            print(f"  Polygons with date span > 0: {(valid_diffs > 0).sum()}")
 
 """
 def raster_to_polygons(input_raster, output_vector, band_number=1, date_range_days=0,
