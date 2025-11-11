@@ -542,6 +542,11 @@ def main():
         base_name = os.path.splitext(raster_name)[0]
         output_path = os.path.join(output_vector, f"{base_name}.gpkg")
 
+        # Ensure the output folder exists
+        output_folder = os.path.dirname(output_path)
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder, exist_ok=True)
+
         print(f"[{i}/{len(raster_list)}] Processing {raster_name}...")
 
         try:
