@@ -113,7 +113,7 @@ entregáveis:
   * E4.3 – Relatório de validação dos mapas nacionais.
   * E4.4 – Aplicação informática que possa ser integrada na cadeia de produção da DGT. 
 
-## Pagamentos segundo aditamento (set 2025)
+## Aditamento (set 2025)
 
 - Entregáveis E2.3, E3.2, E3.3 e E4.1; contrato 20/4/2025; aditamento: 20/11/2025 (10% do calor contratado)
 - Entregáveis E3.4, E4.2, E4.3 e E4.4; contrato 19/10/2025; aditamento: 19/03/2026 (10% do calor contratado)
