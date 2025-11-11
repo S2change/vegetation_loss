@@ -28,16 +28,36 @@ from scipy.spatial import cKDTree
 ## SCRIPT CONFIGS ##
 ##################################
 
-input_raster = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/09_optimized_test_20180101_to_20211231.tif"  # Path to input raster TIFF file
-output_vector = "/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/16_graph_additional_attributes.gpkg"  # Path to output vector file
+input_raster = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG\processed_outputs\rasters"
+output_vector = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG\processed_outputs\vectors"
 
-band_number = 1  # Which band contains the date values (default: 1 for first band)
-date_range_days = 30  # Number of days to group adjacent pixels within each spatial cluster (default: 0)
+band_1 = 1  # First band containing date values (the script will compute the average with band_2)
+band_2 = 2  # Second band containing date values (used together with band_1 to compute average date)
+date_range_days = 10  # Number of days to group adjacent pixels within each spatial cluster (default: 0)
 min_area_ha = 0.5  # Minimum polygon area in hectares (default: 0.5)
 nodata_value = -9999  # Nodata value to exclude (default: -9999)
 connectivity = 8  # 4 for edge-only, 8 for edge+diagonal (default: 8)
 
 ##################################
+
+def yyyymmdd_to_datetime(arr, nodata_value=-9999):
+    """Converts a yyyymmdd array to datetime, ignoring nodata values and zeros."""
+    dt_array = np.full(arr.shape, None, dtype=object)
+    valid_mask = (arr != nodata_value) & (arr != 0)
+    for idx in zip(*np.where(valid_mask)):
+        val = arr[idx]
+        try:
+            dt_array[idx] = datetime.strptime(str(val), "%Y%m%d")
+        except ValueError:
+            dt_array[idx] = None
+    return dt_array, valid_mask
+
+def datetime_to_yyyymmdd(dt_array, nodata_value=-9999):
+    """Converts a datetime array back to yyyymmdd integers, assigning nodata where values are None."""
+    out = np.full(dt_array.shape, nodata_value, dtype=int)
+    for idx in zip(*np.where(dt_array != None)):
+        out[idx] = int(dt_array[idx].strftime("%Y%m%d"))
+    return out
 
 def parse_date_value(date_str):
     """Parse YYYYMMDD string to datetime object."""
@@ -238,18 +258,35 @@ def raster_to_polygons(input_raster, output_vector, band_number=1, date_range_da
     start_time = time.time()
     with rasterio.open(input_raster) as src:
         print(f"Raster has {src.count} band(s)")
-        print(f"Reading band {band_number}...")
-        raster_data = src.read(band_number)
+        
+        print("Reading band 1...")
+        band1 = src.read(band_1)
+        print("Reading band 2...")
+        band2 = src.read(band_2)
+        
         transform = src.transform
         crs = src.crs
-        print(f"Raster shape: {raster_data.shape}")
+        print(f"Raster shape: {band1.shape}")
         print(f"Raster CRS: {crs}")
     elapsed = time.time() - start_time
     print(f"Raster reading took {elapsed:.2f} seconds\n")
 
-    if nodata_value is not None:
-        mask = raster_data != nodata_value
-        raster_data = np.where(mask, raster_data, 0)
+    # Convert bands to datetime
+    dt1, mask1 = yyyymmdd_to_datetime(band1, nodata_value)
+    dt2, mask2 = yyyymmdd_to_datetime(band2, nodata_value)
+
+    combined_mask = mask1 & mask2
+
+    # Calculate the average of valid dates
+    mean_dt = np.full(band1.shape, None, dtype=object)
+    for idx in zip(*np.where(combined_mask)):
+        delta1 = dt1[idx] - datetime(1970,1,1)
+        delta2 = dt2[idx] - datetime(1970,1,1)
+        mean_days = (delta1.days + delta2.days) / 2
+        mean_dt[idx] = datetime(1970,1,1) + timedelta(days=int(round(mean_days)))
+
+    # Convert back to yyyymmdd
+    raster_data = datetime_to_yyyymmdd(mean_dt, nodata_value)
 
     if date_range_days > 0:
         raster_data, cluster_labels = create_spatial_temporal_groups(raster_data, date_range_days, connectivity)
@@ -489,16 +526,37 @@ def main():
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    try:
-        raster_to_polygons(
-            input_raster=input_raster,
-            output_vector=output_vector,
-            band_number=band_number,
-            date_range_days=date_range_days,
-            min_area_ha=min_area_ha,
-            nodata_value=nodata_value,
-            connectivity=connectivity
-        )
+    # Procurar todos os rasters na pasta de entrada
+    raster_list = sorted(glob.glob(os.path.join(input_raster, "*.tif")))
+
+    if not raster_list:
+        print(f"No .tif files found in {input_raster}")
+        sys.exit(0)
+
+    print(f"Found {len(raster_list)} rasters to process.\n")
+
+    for i, raster_path in enumerate(raster_list, 1):
+        raster_name = os.path.basename(raster_path)
+        base_name = os.path.splitext(raster_name)[0]
+        output_path = os.path.join(output_vector, f"{base_name}.gpkg")
+
+        print(f"[{i}/{len(raster_list)}] Processing {raster_name}...")
+
+        try:
+            raster_to_polygons(
+                input_raster=raster_path,
+                output_vector=output_path,
+                band_1=band_1,
+                band_2=band_2,
+                date_range_days=date_range_days,
+                min_area_ha=min_area_ha,
+                nodata_value=nodata_value,
+                connectivity=connectivity
+            )
+            print(f"Completed: {output_path}\n")
+
+        except Exception as e:
+            print(f"Error processing raster: {raster_name}: {e}\n")
 
         overall_elapsed = time.time() - overall_start
         print("\n" + "="*60)
@@ -506,10 +564,6 @@ def main():
         print("="*60)
         print(f"\nProcessing completed successfully!")
         print(f"Output saved to: {output_vector}")
-
-    except Exception as e:
-        print(f"Error processing raster: {str(e)}")
-        sys.exit(1)
 
 if __name__ == "__main__":
     main()
