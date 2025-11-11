@@ -252,7 +252,7 @@ def create_spatial_temporal_groups(raster_array, date_range_days=0, connectivity
     return result_array, labels
 """
 
-def raster_to_polygons(input_raster, output_vector, band_number=1, date_range_days=0,
+def raster_to_polygons(input_raster, output_vector, band_1=1, band_2=2, date_range_days=0,
                        min_area_ha=0.5, nodata_value=-9999, connectivity=8):
 
     print(f"Processing raster: {input_raster}")
