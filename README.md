@@ -97,9 +97,14 @@ entregáveis:
 
     Os scripts (que foram desenvolvidos para serem compatíveis com o pipeline de processamento de dados Sentinel-2 em ambiente HPC) estão disponíveis neste repositório. Em particular, foi criado e testado o código para as  tarefas abaixo. (30 de junho 2025)
     - Processamento da série temporal para Portugal Continental 2017-2024 e aplicação do algoritmo de deteção de alteração CCD, cujo output é um conjunto de ficheiros em formato `parquet` em que cada linha corresponde a um pixel Sentinel-2 e a um segmento identificado pelo algoritmo. O processamento foi aplicado aos pixels pertencentes à máscara de potenciais perdas de vegetação para Portugal Continental fornecida pela DGT (aprox. 500 M pixels Sentinel 2 com resolução 10 m). [Script](scripts/pyccd)
-    - (*) Conversão dos resultado os formato `parquet` para mapas bimestrais em formato `geotiff` com, para cada pixel, o valor (YYYMMDD) da data da última alteração identificada para um dado período. [Script](scripts/visualisations/ccd_break_filter_to_raster_multiple_outputs.py)
-    - (**) Criação de mapas vectoriais bimestrais a partir dos mapas raster. [Script](scripts/visualisations/raster_to_polygons.py)
-    - Nota: os dois últimos processamentos (*) e (**) estão combinados num único script por conveniência. [Script](scripts/visualisations/raster_polygon_processing.py).
+    - (*) Conversão dos resultado os formato `parquet` para mapas bimestrais em formato `geotiff`. Cada pixel agora possui quatro bandas: [Script](scripts/visualisations/ccd_to_raster.py)
+      - `last_tEnd`: data final do segmento antes da quebra.
+      - `last_tBreak`: data da quebra mais recente.
+      - `is_break`: indicador booleano que sinaliza se ocorreu uma alteração: `1` se for uma quebra conhecida, `0` se não houve alteração, `-1` se não for possível determinar se ocorreu uma quebra ou um aumento (casos em que o segmento pós-quebra não foi formado).
+      - `ndvi_last_tEnd`: valor do NDVI no final do último segmento.
+    - (**) Criação de mapas vectoriais bimestrais a partir dos mapas raster. [Script](scripts/visualisations/graph_raster_to_polygons.py)
+    - (***) Criação dos mapas nacionais bimestrais de perdas de vegetação.
+    - Nota: os dois últimos processamentos (*) e (**) estão combinados num único script por conveniência. [Script](scripts/visualisations/graph_raster_to_polygons.py).
     - Validação: ver link em E3.3
     
 
