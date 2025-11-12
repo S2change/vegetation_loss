@@ -51,7 +51,8 @@ def carregar_icnf(icnf_path):
     - Corrige geometrias inválidas.
     - Calcula a área de cada polígono em hectares.
     
-    Retorna: GeoDataFrame com os dados do ICNF processados.
+    Output: 
+        GeoDataFrame com os dados do ICNF processados.
     """
     icnf = gpd.read_file(icnf_path)
     icnf["data_icnf"] = pd.to_datetime(icnf["DH_Inicio"], errors="coerce")
