@@ -73,7 +73,7 @@ def carregar_ccd(ccd_folder, ano, crs):
         GeoDataFrame com todos os dados CCD do ano.
     """
     ccd_files = [f for f in os.listdir(ccd_folder) if f.endswith(".gpkg") and str(ano) in f]
-    print(f"📂 {len(ccd_files)} ficheiros CCD encontrados para o ano {ano}")
+    print(f"• {len(ccd_files)} ficheiros CCD encontrados para o ano {ano}")
     
     ccd_list = []
     for f in ccd_files:
