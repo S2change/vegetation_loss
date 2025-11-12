@@ -88,7 +88,7 @@ def carregar_ccd(ccd_folder, ano, crs):
         )
         
         # --- PRINT PARA VERIFICAR DATAS ---
-        print(f"Exemplo de datas convertidas do arquivo {f}:")
+        print(f"Exemplo de datas convertidas do ficheiro {f}:")
         print(gdf["date_value"].head(2))
         print()
         
