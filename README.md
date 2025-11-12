@@ -103,7 +103,7 @@ entregáveis:
       - `is_break`: indicador booleano que sinaliza se ocorreu uma alteração: `1` se for uma quebra conhecida, `0` se não houve alteração, `-1` se não for possível determinar se ocorreu uma quebra ou um aumento (casos em que o segmento pós-quebra não foi formado).
       - `ndvi_last_tEnd`: valor do NDVI calculado em last_tEnd.
     - (**) Criação de mapas vectoriais bimestrais a partir dos mapas raster. [Script](scripts/visualisations/graph_raster_to_polygons.py)
-    - (***) Criação dos mapas nacionais bimestrais de perdas de vegetação.
+    - (***) Criação dos mapas nacionais bimestrais de perdas de vegetação. [Script](scripts/visualisations/ccd_polygons_to_national_maps.py)
     - Nota: os dois últimos processamentos (*) e (**) estão combinados num único script por conveniência. [Script](scripts/visualisations/graph_raster_to_polygons.py).
     - Validação: ver link em E3.3
     
