@@ -7,12 +7,12 @@ Additionally, it calculates the total ICNF area inside and outside the mask, as 
 within the mask that is not covered by CCD detections.
 
 Finally, it generates a summary including the following metrics:
-  - "Área total ICNF",
-  - "Área total MBPV_v0",
-  - "Área ICNF dentro da máscara DGT_loss_vegetation",
-  - "Área ICNF fora da máscara DGT_loss_vegetation"
-  - "Área de interseção ICNF (dentro da máscara) e MBPV_v0",
-  - "Área ICNF (dentro da máscara) não coberta por MBPV_v0"
+  • Total ICNF area
+  • Total MBPV_v0 area
+  • ICNF area within the DGT_loss_vegetation mask
+  • ICNF area outside the DGT_loss_vegetation mask
+  • Intersection area between ICNF (within the mask) and MBPV_v0
+  • ICNF area (within the mask) not covered by MBPV_v0
 """
 
 import geopandas as gpd
