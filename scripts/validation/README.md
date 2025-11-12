@@ -14,6 +14,24 @@ Outputs:
 - Prints accuracy metrics (F1-score, omission and commission errors) to console
 - Files saved in the same folder as RASTER_FILE, in new directory /{raster_name}_accuracy_assessment
 
+### `validate_ccd_against_icnf.py`
+Cross-references burned area polygons from the ICNF dataset with change detection results from the CCD algorithm (MBPV_v0).
+
+Inputs:
+- `ICNF_PATH`: path to the ICNF burned area shapefile
+- `CCD_FOLDER`: directory containing the bimonthly national CCD maps with the detected polygons (.gpkg)
+- `MASK_PATH`: path to the spatial mask (.gpkg) used to restrict analysis
+- `WINDOW_DAYS`: temporal window (in days) for matching detections with ICNF polygons
+
+Outputs:
+- Prints to the console the summary of intersection and coverage metrics between ICNF and CCD detections
+- Generates a DataFrame with the following metrics:
+Total ICNF area
+Total MBPV_v0 area
+ICNF area inside/outside the DGT_loss_vegetation mask
+Intersection area between ICNF (inside mask) and MBPV_v0
+ICNF area (inside mask) not detected by MBPV_v0
+
 ### `avaliacao_exatidao_pyccd.py`
 
 Conducts accuracy assessment of the pyccd results.
