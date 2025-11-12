@@ -26,11 +26,11 @@ Inputs:
 Outputs:
 - Prints to the console the summary of intersection and coverage metrics between ICNF and CCD detections
 - Generates a DataFrame with the following metrics:
-Total ICNF area
-Total MBPV_v0 area
-ICNF area inside/outside the DGT_loss_vegetation mask
-Intersection area between ICNF (inside mask) and MBPV_v0
-ICNF area (inside mask) not detected by MBPV_v0
+    - Total ICNF area
+    - Total MBPV_v0 area
+    - ICNF area inside/outside the DGT_loss_vegetation mask
+    - Intersection area between ICNF (inside mask) and MBPV_v0
+    - ICNF area (inside mask) not detected by MBPV_v0
 
 ### `avaliacao_exatidao_pyccd.py`
 
