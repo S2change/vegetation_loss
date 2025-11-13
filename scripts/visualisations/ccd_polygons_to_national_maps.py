@@ -7,6 +7,10 @@ The script:
 - Filters only the intervals of interest (2023-2024, bimonthly).
 - Merges the GeoPackages for each interval into a single GeoPackage.
 - Saves the merged files into a dedicated output directory.
+
+NOTE:
+    Tile overlaps are not yet resolved in this version, which may lead to
+    overestimation of the total merged area where adjacent tiles overlap.
 """
 
 import os
