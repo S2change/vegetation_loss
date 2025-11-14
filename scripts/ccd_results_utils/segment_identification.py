@@ -4,41 +4,47 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from datetime import timedelta
 
-def generate_date_ranges(date_ranges=None, auto_intervals=False, months=2):
+def generate_date_ranges(ranges, auto_intervals=False, months=1):
     """
-    Generates lists of date ranges.
+    Generate date ranges based on a list of input intervals.
 
-     - If `auto_intervals=True`: generates automatic intervals of `months` in `months` 
-       using the first and last date of `date_ranges`.
-    - If `auto_intervals=False`: returns `date_ranges` as-is.
-
-    Example:
-        generate_date_ranges([("2023-01-01", "2024-12-31")], auto_intervals=True, months=2)
+    Parameters
+    ----------
+    ranges : list of tuple(str, str)
+        A list of (start_date, end_date) tuples, where each date is
+        provided as a string in the format "YYYY-MM-DD".
+    auto_intervals : bool, optional
+        If True, each input interval will be automatically split into
+        sub-intervals of the specified number of months. If False, the
+        original intervals are returned unchanged. Default is False.
+    months : int, optional
+        Size of each automatically generated sub-interval, expressed in
+        months. Only used when auto_intervals=True. Default is 1.
     """
+    result = []
 
-    # If no ranges were provided, return an empty list
-    if not date_ranges:
-        return []
+    for start_str, end_str in ranges:
+        start = datetime.strptime(start_str, "%Y-%m-%d").date()
+        end = datetime.strptime(end_str, "%Y-%m-%d").date()
 
-    # If manual mode, return the ranges as they are
-    if not auto_intervals:
-        return date_ranges
+        if auto_intervals:
+            current_start = start
+            while current_start <= end:
+                current_end = current_start + relativedelta(months=months) - relativedelta(days=1)
+                if current_end > end:
+                    current_end = end
 
-    # Automatic mode: generate ranges of X months each
-    start_date = datetime.strptime(date_ranges[0][0], "%Y-%m-%d")
-    end_date = datetime.strptime(date_ranges[-1][1], "%Y-%m-%d")
+                result.append((
+                    current_start.strftime("%Y-%m-%d"),
+                    current_end.strftime("%Y-%m-%d")
+                ))
 
-    intervals = []
-    current = start_date
+                current_start = current_end + relativedelta(days=1)
 
-    while current <= end_date:
-        next_date = current + relativedelta(months=months) - timedelta(days=1)
-        if next_date > end_date:
-            next_date = end_date
-        intervals.append((current.strftime("%Y-%m-%d"), next_date.strftime("%Y-%m-%d")))
-        current = next_date + timedelta(days=1)
+        else:
+            result.append((start_str, end_str))
 
-    return intervals
+    return result
 
 def read_parquet_identify_breaks(filepath):
     """
