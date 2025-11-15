@@ -4,7 +4,7 @@ This report reviews the processes used to create visualizations of the breaks de
 
 ## Creating the clusters
 
-Grouping the pixels that experienced a similar break together was done through the script [raster_polygon_processing.py](../../scripts/visualisations/raster_polygon_processing.py). The input variables determine the date range of interest, the date range tolerance for grouping pixels together, and the minimum area clusters need to cover to be saved to the final output. For this process, the date range was 2019-01-01 to 2020-12-31. This range was selected because it is the most recent dates that overlap with the reference data set that will be used in the accuracy assessment. The selected date range tolerance was 30 days, and the minimum area was 0.5 hectares.
+Grouping the pixels that experienced a similar break together was done through the script [raster_polygon_processing.py](../../scripts/visualisations/raster_polygon_processing.py). The input variables determine the date range of interest, the date range tolerance for grouping pixels together, and the minimum area clusters need to cover to be saved to the final output. For this process, the date range was 2018-09-01 to 2021-10-31. This range was selected because it is the most recent dates that overlap with the reference data set that will be used in the accuracy assessment. The selected date range tolerance was 30 days, and the minimum area was 0.5 hectares.
 
 Starting with the T29TNE CCDC results, the results were broken into groups of every two months. In each group, the most recent break date was saved for each pixel, and then a raster file where the value of each pixel was the recent break date in the format YYYYMMDD. Next step was to create a polygon file, in order to group pixels together and determine which groups should be saved because they were over 0.5 ha. Using the pixel values, all pixels within 30 days of each other were were assigned the same date, which was the most recent date out of the pixels grouped together. Then rasterio's shapes module was used to create polygons of connected pixels with the same assigned date. Finally, all polygons with areas under 0.5 ha were deleted.
 
@@ -20,18 +20,25 @@ The results table is below, with an average F1 Score of 95.5. Because the assess
 
 ## Results Table
 
-| Filename | F1 Score | Omission Error | Commission Error | Total VP | Total FP | Total FN | Total VN |
-|----------|----------|----------------|------------------|----------|----------|----------|----------|
-| 2019-01 - 2019-02 | 95.94 | 0 | 7.81 | 248 | 21 | 0 | 0 |
-| 2019-03 - 2019-04 | 88.34 | 8.82 | 14.33 | 1106 | 185 | 107 | 0 |
-| 2019-05 - 2019-06 | 75.6 | 15.61 | 31.54 | 254 | 117 | 47 | 0 |
-| 2019-07 - 2019-08 | 99.25 | 0.41 | 1.1 | 5860 | 65 | 24 | 0 |
-| 2019-09 - 2019-10 | 89.68 | 9.46 | 11.16 | 1990 | 250 | 208 | 0 |
-| 2019-11 - 2019-12 | 71.5 | 27.11 | 29.83 | 207 | 88 | 77 | 0 |
-| 2020-01 - 2020-02 | 94.42 | 4.35 | 6.77 | 923 | 67 | 42 | 0 |
-| 2020-03 - 2020-04 | 71.06 | 21.55 | 35.05 | 415 | 224 | 114 | 0 |
-| 2020-05 - 2020-06 | 86.92 | 14.01 | 12.14 | 1578 | 218 | 257 | 0 |
-| 2020-07 - 2020-08 | 99.17 | 0.53 | 1.13 | 4903 | 56 | 26 | 0 |
-| 2020-09 - 2020-10 | 98.98 | 0.42 | 1.62 | 12681 | 209 | 53 | 0 |
-| 2020-11 - 2020-12 | 62.89 | 34.62 | 39.42 | 355 | 231 | 188 | 0 |
-| GRAND_TOTAL | 95.5 | 3.61 | 5.37 | 30520 | 1731 | 1143 | 0 |
+| filename                                      | f1_score | omission_error | commission_error | total_VP | total_FP | total_FN | total_VN | had_polygon_mask |
+|-----------------------------------------------|----------|----------------|------------------|----------|----------|----------|----------|------------------|
+| output_raster_ccd_20180901_to_20181031.tif    | 29.92    | 52.89          | 78.08            | 212      | 755      | 238      | 0        | True             |
+| output_raster_ccd_20181101_to_20181231.tif    | 42.33    | 35.54          | 68.48            | 156      | 339      | 86       | 0        | True             |
+| output_raster_ccd_20190101_to_20190228.tif    | 55.86    | 23.46          | 56.02            | 336      | 428      | 103      | 0        | True             |
+| output_raster_ccd_20190301_to_20190430.tif    | 67.53    | 17.52          | 42.83            | 1144     | 857      | 243      | 0        | True             |
+| output_raster_ccd_20190501_to_20190630.tif    | 58.29    | 20.82          | 53.88            | 327      | 382      | 86       | 0        | True             |
+| output_raster_ccd_20190701_to_20190831.tif    | 95.92    | 1.49           | 6.55             | 5824     | 408      | 88       | 0        | True             |
+| output_raster_ccd_20190901_to_20191031.tif    | 85.56    | 9.51           | 18.86            | 2065     | 480      | 217      | 0        | True             |
+| output_raster_ccd_20191101_to_20191231.tif    | 62.53    | 26.2           | 45.75            | 338      | 285      | 120      | 0        | True             |
+| output_raster_ccd_20200101_to_20200229.tif    | 70.58    | 17.37          | 38.4             | 1075     | 670      | 226      | 0        | True             |
+| output_raster_ccd_20200301_to_20200430.tif    | 65.36    | 20.58          | 44.47            | 683      | 547      | 177      | 0        | True             |
+| output_raster_ccd_20200501_to_20200630.tif    | 76.5     | 16.34          | 29.53            | 1802     | 755      | 352      | 0        | True             |
+| output_raster_ccd_20200701_to_20200831.tif    | 97.11    | 2              | 3.77             | 4954     | 194      | 101      | 0        | True             |
+| output_raster_ccd_20200901_to_20201031.tif    | 98.16    | 1.15           | 2.52             | 12812    | 331      | 149      | 0        | True             |
+| output_raster_ccd_20201101_to_20201231.tif    | 52.01    | 44.73          | 50.89            | 388      | 402      | 314      | 0        | True             |
+| output_raster_ccd_20210101_to_20210228.tif    | 54.59    | 41.83          | 48.57            | 972      | 918      | 699      | 0        | True             |
+| output_raster_ccd_20210301_to_20210430.tif    | 84.65    | 8.73           | 21.07            | 502      | 134      | 48       | 0        | True             |
+| output_raster_ccd_20210501_to_20210630.tif    | 83.83    | 8.28           | 22.81            | 1262     | 373      | 114      | 0        | True             |
+| output_raster_ccd_20210701_to_20210831.tif    | 83.53    | 7.05           | 24.15            | 936      | 298      | 71       | 0        | True             |
+| output_raster_ccd_20210901_to_20211031.tif    | 59.77    | 18.76          | 52.73            | 849      | 947      | 196      | 0        | True             |
+| **GRAND_TOTAL**                               | **74.03**| **14.64**      | **34.65**         | **36637**| **19426**| **6284** | **0**    | **N/A**          |
