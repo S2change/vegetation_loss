@@ -16,7 +16,7 @@ The accuracy assessment was done through the script [raster_avaliacao_exatidao.p
 
 For every 2 month period, the script first uses the polygon file to create a mask of the raster file, which creates a raster file only containing the pixels that were grouped together with areas largers than 0.5 ha. This new masked raster is then spatially joined with the BDR reference data. The difference between the two dates from the predicted and the reference data is calculated, and the results are classified in the accuracy assessment based on whether or not the difference is within the tolerance margin.
 
-The results table is below, with an average F1 Score of 95.5. Because the assessment was only ran on pixels where a change was detected, there are no True Negative results, which is to be expected.
+The results table is below, with an average F1 Score of 74.03. Because the assessment was only ran on pixels where a change was detected, there are no True Negative results, which is to be expected.
 
 ## Results Table
 
