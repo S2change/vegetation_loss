@@ -9,8 +9,8 @@ Start Date - 2018-09-01 \
 End Date - 2021-10-31 \
 CRS - EPSG: 32629 \
 Date range for grouping pixels together - 10 \
-Minimum polygon area - 0.5 ha
-reference data for validation - [BDR_DGT_300](../data_info/reference_data/BDR_DGT_300) 
+Minimum polygon area - 0.5 ha \
+reference data for validation - [BDR_DGT_300](../data_info/reference_data/BDR_DGT_300) \
 Break day tolerance for accuracy assessment- 60 \
 
 ## Creating the clusters
