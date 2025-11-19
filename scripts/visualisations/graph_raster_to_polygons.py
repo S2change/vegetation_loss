@@ -10,7 +10,7 @@ This script converts a raster TIFF file to vector polygons with spatial-temporal
 Features:
 - Spatial-temporal clustering of pixels with tolerance-based date grouping
 - Filtering polygons by minimum area
-- Setting polygon values based on most common pixel value
+- Setting polygon values based on most common pixel value: perhaps replace mode by median (?) MC
 """
 
 import os
