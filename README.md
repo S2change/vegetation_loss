@@ -87,7 +87,7 @@ entregáveis:
   * E3.1 – [Manual de utilização operacional da metodologia implementada na cadeia de produção da DGT](documents/deliverables/Entregavel_3.1_v3.pdf) (20 de outubro de 2024).
   * E3.2 – Demonstrador prático: mapas nacionais vetoriais a delimitar manchas de perda recente de floresta e mato superiores a 0.5 ha com uma frequência bimestral relativos a um período contínuo de dois anos entre 2023 e 2025.
 
-    Mapas vectoriais bimestrais para os anos 2023 e 2024 foram elaborados como resultado de processamento de séries temporais Sentinel-2 através do algoritmo CCD para Portugal Continental e para a máscara de potenciais perdas de vegetação fornecida pela DGT (aprox. 500 M pixels Sentinel-2 de resolução 10 m). O processamento foi realizado em ambiente HPC usando a plataforma INCD/CNCA/LIP (Cirrus). Os mapas (em formato shapefile) estão disponível neste [link](data_info/vegetation_loss_products) (requer password). (30 de junho 2025)
+    Mapas vectoriais bimestrais para os anos 2023 e 2024 foram elaborados como resultado de processamento de séries temporais Sentinel-2 através do algoritmo CCD para Portugal Continental e para a máscara de potenciais perdas de vegetação fornecida pela DGT (aprox. 500 M pixels Sentinel-2 de resolução 10 m). O processamento foi realizado em ambiente HPC usando a plataforma INCD/CNCA/LIP (Cirrus). Os mapas (em formato shapefile) estão disponível neste [link](data_info/vegetation_loss_products) (requer password). (revisto em novembro 2025)
   * E3.3 – Relatório de validação dos mapas nacionais.
   
     Foram feitos dois exercícios de validação descritos abaixo. (30 de junho 2025)
