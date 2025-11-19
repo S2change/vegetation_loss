@@ -90,7 +90,7 @@ entregáveis:
     Mapas vectoriais bimestrais para os anos 2023 e 2024 foram elaborados como resultado de processamento de séries temporais Sentinel-2 através do algoritmo CCD para Portugal Continental e para a máscara de potenciais perdas de vegetação fornecida pela DGT (aprox. 500 M pixels Sentinel-2 de resolução 10 m). O processamento foi realizado em ambiente HPC usando a plataforma INCD/CNCA/LIP (Cirrus). Os mapas (em formato shapefile) estão disponível neste [link](data_info/vegetation_loss_products) (requer password). (revisto em novembro 2025)
   * E3.3 – Relatório de validação dos mapas nacionais.
   
-    Foram feitos dois exercícios de validação descritos abaixo. (30 de junho 2025)
+    Foram feitos dois exercícios de validação descritos abaixo (revisto nov 2025):
     - Usando [BDR_DGT_300](data_info/reference_data/BDR_DGT_300) e os mapas bimestrais de perdas de vegetação. Ver [script](scripts/validation/raster_avaliacao_exatidao.py) e [relatório E3.3A](documents/deliverables/Entregavel_3_3A_validacao_ccd_mbpv_dgt300_report_v1.md).
     - Fazendo uma comparação para os mapas bimestrais de perdas de vegetação para 2023-2024 com as áreas ardidas [ICNF](data_info/reference_data/ICNF) para Portugal Continental. Ver [script](scripts/validation/validate_ccd_against_icnf.py) e [relatório E3.3B](documents/deliverables/Entregavel_3_3B_validacao_ccd_mbpv_icnf_v1.pdf).
   * E3.4 – Aplicação informática que possa ser integrada na cadeia de produção da DGT:
