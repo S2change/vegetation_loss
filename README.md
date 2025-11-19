@@ -110,7 +110,7 @@ Nota: os dois últimos processamentos (b) e (c) estão combinados num único scr
 *Duração: Meses 13-24*
 
 entregáveis:
-  * E4.1 – Manual de utilização operacional da metodologia implementada na cadeia de produção da DGT.
+  * E4.1 – Manual de utilização operacional da metodologia implementada na cadeia de produção da DGT [E4.1, nov 2025](documents/deliverables/Entregavel_41_nov_2025.pdf)
   * E4.2 – Demonstrador prático: mapas nacionais a identificar o agente causador das perdas recentes de floresta e mato superiores a 0.5 ha produzidas na tarefa 3.
   * E4.3 – Relatório de validação dos mapas nacionais.
   * E4.4 – Aplicação informática que possa ser integrada na cadeia de produção da DGT. 
