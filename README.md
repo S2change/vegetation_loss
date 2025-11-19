@@ -91,22 +91,19 @@ entregáveis:
   * E3.3 – Relatório de validação dos mapas nacionais.
   
     Foram feitos dois exercícios de validação descritos abaixo. (30 de junho 2025)
-    - Usando [BDR_DGT_300](data_info/reference_data/BDR_DGT_300) e os mapas bimestrais de perdas de vegetação. Ver [script](scripts/validation/raster_avaliacao_exatidao.py) e [relatório E3.3A](documents/deliverables/Entregavel_3_3A_validacao_ccd_mbpv_v0_dgt300_report_v1.md).
-    - Fazendo uma comparação para os mapas bimestrais de perdas de vegetação para 2023-2024 com as áreas ardidas [ICNF](data_info/reference_data/ICNF) para Portugal Continental. Ver [script](scripts/validation/validate_ccd_against_icnf.py) e [relatório E3.3B](documents/deliverables/Entregavel_3_3B_validacao_ccd_mbpv_v1_icnf_v2.pdf).
-  * E3.4 – Aplicação informática que possa ser integrada na cadeia de produção da DGT.
+    - Usando [BDR_DGT_300](data_info/reference_data/BDR_DGT_300) e os mapas bimestrais de perdas de vegetação. Ver [script](scripts/validation/raster_avaliacao_exatidao.py) e [relatório E3.3A](documents/deliverables/Entregavel_3_3A_validacao_ccd_mbpv_dgt300_report_v1.md).
+    - Fazendo uma comparação para os mapas bimestrais de perdas de vegetação para 2023-2024 com as áreas ardidas [ICNF](data_info/reference_data/ICNF) para Portugal Continental. Ver [script](scripts/validation/validate_ccd_against_icnf.py) e [relatório E3.3B](documents/deliverables/Entregavel_3_3B_validacao_ccd_mbpv_icnf_v1.pdf).
+  * E3.4 – Aplicação informática que possa ser integrada na cadeia de produção da DGT:
 
-    Os scripts (que foram desenvolvidos para serem compatíveis com o pipeline de processamento de dados Sentinel-2 em ambiente HPC) estão disponíveis neste repositório. Em particular, foi criado e testado o código para as  tarefas abaixo. (30 de junho 2025)
-    - Processamento da série temporal para Portugal Continental 2017-2024 e aplicação do algoritmo de deteção de alteração CCD, cujo output é um conjunto de ficheiros em formato `parquet` em que cada linha corresponde a um pixel Sentinel-2 e a um segmento identificado pelo algoritmo. O processamento foi aplicado aos pixels pertencentes à máscara de potenciais perdas de vegetação para Portugal Continental fornecida pela DGT (aprox. 500 M pixels Sentinel 2 com resolução 10 m). [Script](scripts/pyccd)
-    - (*) Conversão dos resultado os formato `parquet` para mapas bimestrais em formato `geotiff`. Cada pixel agora possui quatro bandas: [Script](scripts/visualisations/ccd_to_raster.py)
-      - `last_tEnd`: data final do segmento antes da quebra.
-      - `last_tBreak`: data da quebra mais recente.
-      - `is_break`: indicador booleano que sinaliza se ocorreu uma alteração: `1` se for uma quebra conhecida, `0` se não houve alteração, `-1` se não for possível determinar se ocorreu uma quebra ou um aumento (casos em que o segmento pós-quebra não foi formado).
-      - `ndvi_last_tEnd`: valor do NDVI calculado em last_tEnd.
-    - (**) Criação de mapas vectoriais bimestrais a partir dos mapas raster. [Script](scripts/visualisations/graph_raster_to_polygons.py)
-    - (***) Criação dos mapas nacionais bimestrais de perdas de vegetação. [Script](scripts/visualisations/ccd_polygons_to_national_maps.py)
-    - Nota: os dois últimos processamentos (*) e (**) estão combinados num único script por conveniência. [Script](scripts/visualisations/graph_raster_to_polygons.py).
-    - Validação: ver link em E3.3
-    
+ Os scripts (que foram desenvolvidos para serem compatíveis com o pipeline de processamento de dados Sentinel-2 em ambiente HPC) estão disponíveis neste repositório. Em particular, foi criado e testado o código para as  tarefas abaixo:
+ - Processamento da série temporal para Portugal Continental 2017-2024 e aplicação do algoritmo de deteção de alteração CCD, cujo output é um conjunto de ficheiros em formato `parquet` em que cada linha corresponde a um pixel Sentinel-2 e a um segmento identificado pelo algoritmo. O processamento foi aplicado aos pixels pertencentes à máscara de potenciais perdas de vegetação para Portugal Continental fornecida pela DGT (aprox. 500 M pixels Sentinel 2 com resolução 10 m). [Script](scripts/pyccd)
+ - (a) Conversão dos resultado os formato `parquet` para mapas bimestrais em formato `geotiff`. Cada pixel agora possui quatro bandas: [Script](scripts/visualisations/ccd_to_raster.py): `last_tEnd`: data final do segmento antes da quebra; `last_tBreak`: data da quebra mais recente;  `is_break`: indicador booleano que sinaliza se ocorreu uma alteração: `1` se for uma quebra conhecida, `0` se não houve alteração, `-1` se não for possível determinar se ocorreu uma quebra ou um aumento (casos em que o segmento pós-quebra não foi formado); `ndvi_last_tEnd`: valor do NDVI calculado em last_tEnd.
+ - (b) Criação de mapas vectoriais bimestrais a partir dos mapas raster. [Script](scripts/visualisations/graph_raster_to_polygons.py)
+ - (c) Criação dos mapas nacionais bimestrais de perdas de vegetação. [Script](scripts/visualisations/ccd_polygons_to_national_maps.py)
+ - Validação: ver link em **E3.3**
+
+Nota: os dois últimos processamentos (b) e (c) estão combinados num único script por conveniência. [Script](scripts/visualisations/graph_raster_to_polygons.py).
+
 
 **Tarefa 4** – Adaptação e implementação operacional na cadeia de produção da DGT de uma metodologia automática com base em imagens de satélite para a identificação sistemática do agente causador das perdas recentes de floresta e mato delimitadas no produto da tarefa 3, com uma periodicidade de pelo menos dois meses.
 
