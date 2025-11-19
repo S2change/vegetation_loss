@@ -2,6 +2,17 @@
 
 This report reviews the processes used to create visualizations of the breaks detected by the CCDC model and assessing the accuracy of those breaks.
 
+## Parameters
+
+Tile Used - T29TNE_0999 \
+Start Date - 2018-09-01 \
+End Date - 2021-10-31 \
+CRS - EPSG: 32629 \
+Date range for grouping pixels together - 10 \
+Minimum polygon area - 0.5 ha
+reference data for validation - [BDR_DGT_300](../data_info/reference_data/BDR_DGT_300) 
+Break day tolerance for accuracy assessment- 60 \
+
 ## Creating the clusters
 
 Grouping the pixels that experienced a similar break together was done through the script [raster_polygon_processing.py](../../scripts/visualisations/graph_raster_to_polygons.py). This is a graph based algorithm where the input variables are the locations and chage detection dates for the pixels, the date range tolerance for connecting neighbor pixels (10 days), and the minimum area (0.5 ha) clusters need to cover to be saved to the final output. For this process, the date range was 2018-09-01 to 2021-10-31. This range was selected because it is the most recent dates that overlap with the reference data set that will be used in the accuracy assessment. The selected date range tolerance for validation was 30 days.
