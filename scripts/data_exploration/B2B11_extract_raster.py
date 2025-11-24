@@ -49,11 +49,12 @@ s2_images_folder_4_bands = "D:/s2_images/"
 
 max_date = datetime(2024, 12, 31) #limit date to collect images
 
-NODATA = 65535
-
 output_h5_folder = "E:/outputs_ROI/hdf5/"
 h5_filename = "s2_images-bands-pre-and-post-break.h5"
 output_tif = r"C:\Users\isa127909\Desktop\B2B11_tests\03_uint32_test.tif" # output path and name for tif file
+
+# value that bands get set to if no change date processed 
+NODATA = 65535
 
 
 ##################################
@@ -106,8 +107,8 @@ def create_dataframe_from_break_dates(break_dates_array, x_coords, y_coords):
     """
     print("Creating dataframe from break dates...")
 
-    # Find all pixels with valid break dates (non-zero, non-NODATA)
-    valid_mask = (break_dates_array > 0) & (break_dates_array != NODATA)
+    # Find all pixels with valid break dates
+    valid_mask = (break_dates_array > 0)
 
     # Get indices of valid pixels
     y_indices, x_indices = np.where(valid_mask)
