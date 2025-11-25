@@ -42,11 +42,11 @@ from pyccd.shared.read_files import read_tif_files_gee
 
 ## SCRIPT CONFIGS ##
 ##################################
-# This parameter gets overwritten when the script starts, leaving as a reminder in case decide to change later
-# tile = "T29TNE"
+# list of tiles to extract band values from
+tiles = ['T29TQG'] #['T29SMC','T29SNB','T29SNC','T29SPB','T29SPC','T29TME','T29TNF','T29TNG','T29TPE','T29TQG']:
 
 # Input TIF file containing break dates
-break_date_tif = "C:/Users/Public/Documents/outputs_ROI/break_dates.tif"
+break_date_tif = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQF\processed_outputs\rasters\output_raster_ccd_20241101_to_20241231.tif"
 break_date_band = 1  # Which band contains the break dates (1-indexed)
 
 # Optional polygon file to mask the raster (set to None to process all pixels)
@@ -59,10 +59,10 @@ max_date = datetime(2024, 12, 31) #limit date to collect images
 
 output_h5_folder = "E:/outputs_ROI/hdf5/"
 h5_filename = "s2_images-bands-pre-and-post-break.h5"
-output_tif = r"C:\Users\isa127909\Desktop\B2B11_tests\03_uint32_test.tif" # output path and name for tif file
+output_tif = r"C:\Users\isa127909\Desktop\B2B11_tests\04_first_raster_test_T29TQF_20241101_to_20241231.tif" # output path and name for tif file
 
 # value that bands get set to if no change date processed
-NODATA = -9999
+NODATA = 0
 
 
 ##################################
@@ -492,7 +492,7 @@ def main():
     
     
 if __name__ == '__main__':
-    for t in ['T29TME']:#['T29SMC','T29SNB','T29SNC','T29SPB','T29SPC','T29TME','T29TNF','T29TNG','T29TPE','T29TQG']:
+    for t in tiles:
         tile = t
         t1 = time.time()
         print("Started execution for tile {}.".format(tile))
