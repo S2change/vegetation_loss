@@ -51,12 +51,12 @@ for fname in parquet_files:
         filtro = df[(df['x_coord'] == xs) & (df['y_coord'] == ys)]
         if not filtro.empty:
             linhas_encontradas.append(filtro)
-            print(f"✅ Coordenadas encontradas em: {fname}")
+            print(f"Coordenadas encontradas em: {fname}")
     except Exception as e:
         print(f"Erro ao ler {fname}: {e}")
 
 if not linhas_encontradas:
-    raise ValueError("❌ Coordenadas não encontradas em nenhum ficheiro Parquet.")
+    raise ValueError("Coordenadas não encontradas em nenhum ficheiro Parquet.")
 
 # Junta todas as linhas em um único DataFrame
 df_coordenadas = pd.concat(linhas_encontradas, ignore_index=True)
@@ -146,7 +146,7 @@ df_coordenadas['geometry'] = [Point(point_x, point_y)] * len(df_coordenadas)
 # Cria GeoDataFrame
 gdf = gpd.GeoDataFrame(
     df_coordenadas[['tStart_str', 'tEnd_str', 'tBreak_str', 'geometry']],
-    crs="EPSG:32629"  # ajusta o CRS conforme o teu sistema de coordenadas
+    crs="EPSG:32629" 
 )
 
 # Caminho de saída
@@ -155,5 +155,5 @@ shapefile_path = rf"C:\Users\Public\Documents\outputs_ROI\ponto_{ys}_{xs}.shp"
 # Salva o shapefile
 gdf.to_file(shapefile_path)
 
-print(f"✅ Shapefile criado com {len(gdf)} segmentos:")
-print(f"📁 {shapefile_path}")
+print(f"Shapefile criado com {len(gdf)} segmentos:")
+print(f"{shapefile_path}")
