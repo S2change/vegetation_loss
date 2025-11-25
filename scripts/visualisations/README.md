@@ -1,3 +1,2 @@
-Scripts used for checking and verifying results from different parts of the project
-
-ccd_to_raster.py - For each inputted date range, it creates a geotiff with the last break dates in that range for pixels that have been processed through the CCD model in order to visualize results. Also creates a .qml file to color code break dates by year. A vector file can also be inputted to do spatial filtering.
+  - ccd_to_raster.py - For each inputted date range, it creates a geotiff with the last break dates in that range for pixels that have been processed through the CCD model in order to visualize results. Also creates a .qml file to color code break dates by year. A vector file can also be inputted to do spatial filtering.
+  - ccd_plot_one_point.py - reads segments in parquet and creates plot
