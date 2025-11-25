@@ -62,7 +62,7 @@ h5_filename = "s2_images-bands-pre-and-post-break.h5"
 output_tif = r"C:\Users\isa127909\Desktop\B2B11_tests\03_uint32_test.tif" # output path and name for tif file
 
 # value that bands get set to if no change date processed
-NODATA = 65535
+NODATA = -9999
 
 
 ##################################
