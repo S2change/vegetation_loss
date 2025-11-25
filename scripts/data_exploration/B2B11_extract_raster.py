@@ -4,7 +4,10 @@ This script extracts spectral values before and after break dates from a TIF fil
 
 The input TIF file should contain break dates in YYYYMMDD format in one of its bands.
 The script reads these break dates and finds the closest Sentinel-2 images before and after
-each break date (within configurable tolerance windows).
+each break date.
+
+Optional polygon masking: If a polygon file is specified, only pixels within the polygon
+boundaries will be processed, allowing for spatial subsetting of the analysis.
 
 The script collects band data at two stages:
 1. B2 and B11 bands (Blue and SWIR1)
@@ -27,6 +30,8 @@ import h5py
 import time
 import rasterio
 from rasterio.transform import from_origin
+import geopandas as gpd
+from rasterio import features
 
 import sys
 module_path = os.path.abspath(os.path.join('..'))
@@ -44,6 +49,9 @@ from pyccd.shared.read_files import read_tif_files_gee
 break_date_tif = "C:/Users/Public/Documents/outputs_ROI/break_dates.tif"
 break_date_band = 1  # Which band contains the break dates (1-indexed)
 
+# Optional polygon file to mask the raster (set to None to process all pixels)
+polygon_file = None
+
 s2_images_folder_B2_B11 = "C:/Users/Public/Documents/s2_images_B2_B11/"
 s2_images_folder_4_bands = "D:/s2_images/"
 
@@ -53,7 +61,7 @@ output_h5_folder = "E:/outputs_ROI/hdf5/"
 h5_filename = "s2_images-bands-pre-and-post-break.h5"
 output_tif = r"C:\Users\isa127909\Desktop\B2B11_tests\03_uint32_test.tif" # output path and name for tif file
 
-# value that bands get set to if no change date processed 
+# value that bands get set to if no change date processed
 NODATA = 65535
 
 
@@ -68,7 +76,7 @@ def load_break_dates_from_tif(break_date_tif, break_date_band=1):
         break_date_band (int): Which band to read (1-indexed).
 
     Returns:
-        tuple: (break_dates_array, x_coords, y_coords, spatial_ref) where break_dates_array
+        tuple: (break_dates_array, x_coords, y_coords, transform, crs) where break_dates_array
                contains dates in YYYYMMDD format (0 for no break).
     """
     print(f"Loading break dates from {break_date_tif}, band {break_date_band}")
@@ -86,14 +94,60 @@ def load_break_dates_from_tif(break_date_tif, break_date_band=1):
     x_coords = break_dates_band.x.values
     y_coords = break_dates_band.y.values
 
+    # Get transform and CRS
+    transform = break_dates_band.rio.transform()
+    crs = break_dates_band.rio.crs
+
     print(f"Loaded break dates with shape: {break_dates_array.shape}")
     print(f"Break date range: {break_dates_array[break_dates_array > 0].min()} to {break_dates_array[break_dates_array > 0].max()}")
     print(f"Number of pixels with breaks: {np.sum(break_dates_array > 0)}")
 
-    return break_dates_array, x_coords, y_coords, break_dates_band.spatial_ref
+    return break_dates_array, x_coords, y_coords, transform, crs
 
 
-def create_dataframe_from_break_dates(break_dates_array, x_coords, y_coords):
+def load_polygon_mask(polygon_file, break_dates_array, x_coords, y_coords, transform, crs):
+    """
+    Creates a boolean mask from a polygon file that matches the raster dimensions.
+
+    Args:
+        polygon_file (str): Path to polygon file (shapefile, geopackage, etc.).
+        break_dates_array (np.ndarray): 2D array to match dimensions.
+        x_coords (np.ndarray): X coordinates of the raster.
+        y_coords (np.ndarray): Y coordinates of the raster.
+        transform (affine.Affine): Affine transform of the raster.
+        crs: CRS of the raster.
+
+    Returns:
+        np.ndarray: Boolean mask array where True = inside polygon, False = outside.
+    """
+    print(f"Loading polygon mask from {polygon_file}")
+
+    # Read the polygon file
+    gdf = gpd.read_file(polygon_file)
+
+    # Reproject to match raster CRS if needed
+    if gdf.crs != crs:
+        print(f"Reprojecting polygon from {gdf.crs} to {crs}")
+        gdf = gdf.to_crs(crs)
+
+    # Create a mask by rasterizing the polygons
+    mask = features.rasterize(
+        [(geom, 1) for geom in gdf.geometry],
+        out_shape=break_dates_array.shape,
+        transform=transform,
+        fill=0,
+        dtype='uint8'
+    )
+
+    # Convert to boolean
+    mask = mask.astype(bool)
+
+    print(f"Polygon mask created: {np.sum(mask)} pixels inside polygon")
+
+    return mask
+
+
+def create_dataframe_from_break_dates(break_dates_array, x_coords, y_coords, polygon_mask=None):
     """
     Creates a dataframe from the break dates TIF data.
 
@@ -101,6 +155,7 @@ def create_dataframe_from_break_dates(break_dates_array, x_coords, y_coords):
         break_dates_array (np.ndarray): 2D array of break dates in YYYYMMDD format.
         x_coords (np.ndarray): X coordinates.
         y_coords (np.ndarray): Y coordinates.
+        polygon_mask (np.ndarray, optional): Boolean mask where True = inside polygon.
 
     Returns:
         pandas.DataFrame: DataFrame with columns x_coord, y_coord, break_date_yyyymmdd.
@@ -109,6 +164,11 @@ def create_dataframe_from_break_dates(break_dates_array, x_coords, y_coords):
 
     # Find all pixels with valid break dates
     valid_mask = (break_dates_array > 0)
+
+    # Apply polygon mask if provided
+    if polygon_mask is not None:
+        print(f"Applying polygon mask to filter pixels")
+        valid_mask = valid_mask & polygon_mask
 
     # Get indices of valid pixels
     y_indices, x_indices = np.where(valid_mask)
@@ -330,10 +390,15 @@ def create_tiff(xarray_da, x_inds, y_inds, result): #(2, n_points, 6)
 def main():
 
     # Load break dates from TIF file
-    break_dates_array, x_coords, y_coords, _ = load_break_dates_from_tif(break_date_tif, break_date_band)
+    break_dates_array, x_coords, y_coords, transform, crs = load_break_dates_from_tif(break_date_tif, break_date_band)
+
+    # Load polygon mask if specified
+    polygon_mask = None
+    if polygon_file is not None:
+        polygon_mask = load_polygon_mask(polygon_file, break_dates_array, x_coords, y_coords, transform, crs)
 
     # Create dataframe from break dates
-    combined_df = create_dataframe_from_break_dates(break_dates_array, x_coords, y_coords)
+    combined_df = create_dataframe_from_break_dates(break_dates_array, x_coords, y_coords, polygon_mask)
 
     # Convert break dates from YYYYMMDD to ordinal for image lookup
     print("Converting break dates to ordinal format...")
