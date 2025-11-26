@@ -7,7 +7,7 @@
 
 *HDF5 files* → **from Apr 2017 aprox to end of 2024**<br>
 - HDF5 for B3, B4, B8, B12 ( shape: (dates, bands, n_points) ) — `E:\outputs_ROI\hdf5`<br>
-- HDF5 for B2 and B11 — **dir** it doesn't exist yet.
+- HDF5 for B2 and B11 — directory doesn't exist yet.
 
 *Parquets PyCCD outputs*
 - Parameters: chisq = 0.999 / alpha = 2 / lasso_iter = 1000<br>
