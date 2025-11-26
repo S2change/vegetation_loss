@@ -6,12 +6,12 @@
 - TIFFs B2 and B11 (downloaded from GEE) — **dir PC ISA:** `C:\Users\Public\Documents\s2_images_B2_B11`<br>
 
 *HDF5 files* -> from Apr 2017 aprox to end of 2024<br>
-- HDF5 for B3, B4, B8, B12 ( shape: (dates, bands, n_points) ) — **dir PC ISA:** `E:\outputs_ROI\hdf5` // ICND (some files)<br>
+- HDF5 for B3, B4, B8, B12 ( shape: (dates, bands, n_points) ) — **dir PC ISA:** `E:\outputs_ROI\hdf5`<br>
 - HDF5 for B2 and B11 — **dir PC ISA:** it doesn't exist yet.
 
 *Parquets PyCCD outputs*
 - Parameters: chisq = 0.999 / alpha = 2 / lasso_iter = 1000<br>
-- **dir PC ISA:** `C:\Users\Public\Documents\outputs_ROI\tabular` // INCD (some files)<br>
+- **dir PC ISA:** `C:\Users\Public\Documents\outputs_ROI\tabular`<br>
 
 *dates, bands, for N=10 window around each reference change for BDR-DGT-300,  ICNF 2020--2024, and BDR_NVG*<br>
 - **dir PC ISA:** `C:\Users\Public\Documents\ref_datasets\amostras_por_pixel`<br>
