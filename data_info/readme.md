@@ -7,7 +7,7 @@
 
 *HDF5 files* -> from Apr 2017 aprox to end of 2024<br>
 - HDF5 for B3, B4, B8, B12 ( shape: (dates, bands, n_points) ) — **dir PC ISA:** `E:\outputs_ROI\hdf5` // ICND (some files)<br>
-- HDF5 for B2, B11 — **dir PC ISAA:** it doesn't exist yet.
+- HDF5 for B2 and B11 — **dir PC ISA:** it doesn't exist yet.
 
 *Parquets PyCCD outputs*
 - Parameters: chisq=0.999 / alfa = 2 / lasso_iter = 1000<br>
