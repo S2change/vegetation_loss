@@ -10,7 +10,7 @@
 - HDF5 for B2 and B11 — **dir PC ISA:** it doesn't exist yet.
 
 *Parquets PyCCD outputs*
-- Parameters: chisq=0.999 / alfa = 2 / lasso_iter = 1000<br>
+- Parameters: chisq=0.999 / alpha = 2 / lasso_iter = 1000<br>
 - **dir PC ISA:** `C:\Users\Public\Documents\outputs_ROI\tabular` // INCD (some files)<br>
 
 *dates, bands, for N=10 window around each reference change for BDR-DGT-300,  ICNF 2020--2024, and BDR_NVG*<br>
