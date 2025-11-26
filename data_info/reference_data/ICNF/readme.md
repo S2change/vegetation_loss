@@ -29,3 +29,11 @@ The fields are:
 | 19 | AreaHaPov |  | Decimal (double) | Real | 32 | 15 |  |
 | 20 | AreaHaMato |  | Decimal (double) | Real | 32 | 15 |  |
 | 21 | AreaHaAgri |  | Decimal (double) | Real | 32 | 15 |  |
+
+<br><br>
+`squares_icnf_dates.gpkg` — 3-km grid used for CCD error diagnostics 
+- Purpose: identify areas where CCD fails to detect change within the burned perimeter.<br>
+- Fields included in the GeoPackage:  
+  - `id` — unique cell identifier  
+  - `DH_Inicio` — start date of the fire, from the ICNF dataset  
+  - `DH_Fim` — end date of the fire, from the ICNF dataset
