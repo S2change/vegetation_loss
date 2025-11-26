@@ -42,12 +42,21 @@ from pyccd.shared.read_files import read_tif_files_gee
 
 ## SCRIPT CONFIGS ##
 ##################################
-# list of tiles to extract band values from
-tiles = ['T29TQG'] #['T29SMC','T29SNB','T29SNC','T29SPB','T29SPC','T29TME','T29TNF','T29TNG','T29TPE','T29TQG']:
-
 # Input TIF file containing break dates
 break_date_tif = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQF\processed_outputs\rasters\output_raster_ccd_20241101_to_20241231.tif"
 break_date_band = 1  # Which band contains the break dates (1-indexed)
+
+# Automatically extract tile from break_date_tif path
+# Looks for pattern like T29TQF, T29TQG, etc. in the path
+import re
+tile_match = re.search(r'T\d{2}[A-Z]{3}', break_date_tif)
+if tile_match:
+    tiles = [tile_match.group()]
+    print(f"Automatically detected tile from path: {tiles[0]}")
+else:
+    # Fallback to manual specification if pattern not found
+    tiles = ['T29TQF']
+    print(f"Warning: Could not auto-detect tile from path. Using fallback: {tiles[0]}")
 
 # Optional polygon file to mask the raster (set to None to process all pixels)
 polygon_file = None
