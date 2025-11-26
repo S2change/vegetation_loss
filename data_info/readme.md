@@ -2,25 +2,25 @@
 
 ## Files per S2 tile:
 *TIFF files* -> from Apr 2017 aprox to 20-11-2025<br>
-- TIFFs B3, B4, B8, B12 (downloaded from GEE) — **dir PC ISA:** `D:\s2_images`<br>
-- TIFFs B2 and B11 (downloaded from GEE) — **dir PC ISA:** `C:\Users\Public\Documents\s2_images_B2_B11`<br>
+- TIFFs B3, B4, B8, B12 (downloaded from GEE) —  `D:\s2_images`<br>
+- TIFFs B2 and B11 (downloaded from GEE) — `C:\Users\Public\Documents\s2_images_B2_B11`<br>
 
 *HDF5 files* -> from Apr 2017 aprox to end of 2024<br>
-- HDF5 for B3, B4, B8, B12 ( shape: (dates, bands, n_points) ) — **dir PC ISA:** `E:\outputs_ROI\hdf5`<br>
-- HDF5 for B2 and B11 — **dir PC ISA:** it doesn't exist yet.
+- HDF5 for B3, B4, B8, B12 ( shape: (dates, bands, n_points) ) — `E:\outputs_ROI\hdf5`<br>
+- HDF5 for B2 and B11 — **dir** it doesn't exist yet.
 
 *Parquets PyCCD outputs*
 - Parameters: chisq = 0.999 / alpha = 2 / lasso_iter = 1000<br>
-- **dir PC ISA:** `C:\Users\Public\Documents\outputs_ROI\tabular`<br>
+- `C:\Users\Public\Documents\outputs_ROI\tabular`<br>
 
 *dates, bands, for N=10 window around each reference change for BDR-DGT-300,  ICNF 2020--2024, and BDR_NVG*<br>
-- **dir PC ISA:** `C:\Users\Public\Documents\ref_datasets\amostras_por_pixel`<br>
+- `C:\Users\Public\Documents\ref_datasets\amostras_por_pixel`<br>
 
 *Rasters and polygons generated from PyCCD parquet outputs* -> bimonthly from 2023-01-01 to 2024-12-31<br>
 - Parameters: tol = 10 days / min_area = 0.5 ha / connectivity = 8<br>
-- Rasters (organized per tile) — **dir PC ISA:** `C:\Users\Public\Documents\outputs_ROI\tabular\T29SMD\processed_outputs\rasters`<br>
-- Polygons (organized per tile) — **dir PC ISA:** `C:\Users\Public\Documents\outputs_ROI\tabular\T29SMD\processed_outputs\vectors`<br>
-- Polygons also available as a single polygon map for forest and shrubland areas across mainland Portugal (rasters not available at this scale) — **dir PC ISA:** `C:\Users\Public\Documents\outputs_ROI\tabular\MBPV_v1`
+- Rasters (organized per tile) — `C:\Users\Public\Documents\outputs_ROI\tabular\T29SMD\processed_outputs\rasters`<br>
+- Polygons (organized per tile) — `C:\Users\Public\Documents\outputs_ROI\tabular\T29SMD\processed_outputs\vectors`<br>
+- Polygons also available as a single polygon map for forest and shrubland areas across mainland Portugal (rasters not available at this scale) — `C:\Users\Public\Documents\outputs_ROI\tabular\MBPV_v1`
 
 ## Reference data (available in oneDrive, folder ref_datasets)
 1. BDR-DGT-300
