@@ -1,11 +1,11 @@
 # Information about our data sets
 
 ## Files per S2 tile:
-*TIFF files* -> from Apr 2017 aprox to 20-11-2025<br>
+*TIFF files* → **from Apr 2017 aprox to 2025-11-20**<br>
 - TIFFs B3, B4, B8, B12 (downloaded from GEE) —  `D:\s2_images`<br>
 - TIFFs B2 and B11 (downloaded from GEE) — `C:\Users\Public\Documents\s2_images_B2_B11`<br>
 
-*HDF5 files* -> from Apr 2017 aprox to end of 2024<br>
+*HDF5 files* → **from Apr 2017 aprox to end of 2024**<br>
 - HDF5 for B3, B4, B8, B12 ( shape: (dates, bands, n_points) ) — `E:\outputs_ROI\hdf5`<br>
 - HDF5 for B2 and B11 — **dir** it doesn't exist yet.
 
@@ -16,7 +16,7 @@
 *dates, bands, for N=10 window around each reference change for BDR-DGT-300,  ICNF 2020--2024, and BDR_NVG*<br>
 - `C:\Users\Public\Documents\ref_datasets\amostras_por_pixel`<br>
 
-*Rasters and polygons generated from PyCCD parquet outputs* -> bimonthly from 2023-01-01 to 2024-12-31<br>
+*Rasters and polygons generated from PyCCD parquet outputs* → **bimonthly from 2023-01-01 to 2024-12-31**<br>
 - Parameters: tol = 10 days / min_area = 0.5 ha / connectivity = 8<br>
 - Rasters (organized per tile) — `C:\Users\Public\Documents\outputs_ROI\tabular\T29SMD\processed_outputs\rasters`<br>
 - Polygons (organized per tile) — `C:\Users\Public\Documents\outputs_ROI\tabular\T29SMD\processed_outputs\vectors`<br>
