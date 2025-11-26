@@ -1,7 +1,7 @@
 # Information about our data sets
 
 ## Files per S2 tile:
-*TIFF FILES* -> from Apr 2017 aprox to 20-11-2025<br>
+*TIFF files* -> from Apr 2017 aprox to 20-11-2025<br>
 - TIFFs B3, B4, B8, B12 (downloaded from GEE) — **dir PC ISA:** `D:\s2_images`<br>
 - TIFFs B2 and B11 (downloaded from GEE) — **dir PC ISA:** `C:\Users\Public\Documents\s2_images_B2_B11`<br>
 
@@ -9,7 +9,7 @@
 - HDF5 for B3, B4, B8, B12 ( shape: (dates, bands, n_points) ) — **dir PC ISA:** `E:\outputs_ROI\hdf5` // ICND (some files)<br>
 - HDF5 for B2, B11 — **dir PC ISAA:** it doesn't exist yet.
 
-*PARQUETS PyCCD outputs*
+*Parquets PyCCD outputs*
 - Parameters: chisq=0.999 / alfa = 2 / lasso_iter = 1000<br>
 - **dir PC ISA:** `C:\Users\Public\Documents\outputs_ROI\tabular` // INCD (some files)<br>
 
