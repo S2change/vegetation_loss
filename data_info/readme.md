@@ -18,7 +18,7 @@
 
 *Rasters and polygons generated from PyCCD parquet outputs* -> bimonthly from 2023-01-01 to 2024-12-31<br>
 - Parameters: tol=10 days; min_area=0.5 ha; connectivity = 8<br>
-- Rasters (ornganized per tile) — **dir PC ISA:** `C:\Users\Public\Documents\outputs_ROI\tabular\T29SMD\processed_outputs\rasters`<br>
+- Rasters (organized per tile) — **dir PC ISA:** `C:\Users\Public\Documents\outputs_ROI\tabular\T29SMD\processed_outputs\rasters`<br>
 - Polygons (organized per tile) — **dir PC ISA:** `C:\Users\Public\Documents\outputs_ROI\tabular\T29SMD\processed_outputs\vectors`<br>
 - Polygons also available as a single polygon map for forest and shrubland areas across mainland Portugal (rasters not available at this scale) — **dir PC ISA:** `C:\Users\Public\Documents\outputs_ROI\tabular\MBPV_v1`
 
