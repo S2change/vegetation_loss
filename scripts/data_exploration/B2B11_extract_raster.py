@@ -160,33 +160,20 @@ def create_dataframe_from_break_dates(break_dates_array, x_coords, y_coords, pol
     Returns:
         pandas.DataFrame: DataFrame with columns x_coord, y_coord, break_date_yyyymmdd.
     """
-    print("\n=== DEBUG: create_dataframe_from_break_dates ===")
-    print(f"break_dates_array shape: {break_dates_array.shape}")
-    print(f"x_coords length: {len(x_coords)}, range: [{x_coords.min():.2f}, {x_coords.max():.2f}]")
-    print(f"y_coords length: {len(y_coords)}, range: [{y_coords.min():.2f}, {y_coords.max():.2f}]")
-
     # Find all pixels with valid break dates
     valid_mask = (break_dates_array > 0)
-    print(f"Pixels with valid break dates (>0): {np.sum(valid_mask)}")
 
     # Apply polygon mask if provided
     if polygon_mask is not None:
-        print(f"Applying polygon mask to filter pixels")
         valid_mask = valid_mask & polygon_mask
 
     # Get indices of valid pixels
     y_indices, x_indices = np.where(valid_mask)
-    print(f"Valid pixel array indices - x_indices: {x_indices[:5]}, y_indices: {y_indices[:5]}")
 
     # Get corresponding coordinates and break dates
     x_pixel_coords = x_coords[x_indices]
     y_pixel_coords = y_coords[y_indices]
     break_dates = break_dates_array[y_indices, x_indices]
-
-    print(f"Pixel coordinates (first 5):")
-    print(f"  x_pixel_coords: {x_pixel_coords[:5]}")
-    print(f"  y_pixel_coords: {y_pixel_coords[:5]}")
-    print(f"  break_dates: {break_dates[:5]}")
 
     # Create dataframe
     df = pd.DataFrame({
@@ -272,8 +259,6 @@ def get_indices(df, geotiffs_da):
         tuple: (x_inds, y_inds, time_end_inds, time_start_inds) where time_end_inds are pre-break
                and time_start_inds are post-break.
     """
-    print("\n=== DEBUG: get_indices ===")
-
     points_x_int = xr.DataArray(np.round(df.x_coord.values).astype('int'), dims=['location'])
     points_y_int = xr.DataArray(np.round(df.y_coord.values).astype('int'), dims=['location'])
 
@@ -281,30 +266,8 @@ def get_indices(df, geotiffs_da):
     y_coords = geotiffs_da.y.values
     times = geotiffs_da.time.values
 
-    print(f"geotiffs_da dimensions: {geotiffs_da.dims}")
-    print(f"geotiffs_da shape: {geotiffs_da.shape}")
-    print(f"geotiffs_da x coord range: [{x_coords.min():.2f}, {x_coords.max():.2f}], length: {len(x_coords)}")
-    print(f"geotiffs_da y coord range: [{y_coords.min():.2f}, {y_coords.max():.2f}], length: {len(y_coords)}")
-    print(f"x_coords sorted ascending: {np.all(x_coords[:-1] <= x_coords[1:])}")
-    print(f"y_coords sorted ascending: {np.all(y_coords[:-1] <= y_coords[1:])}")
-
-    print(f"\nPixel coordinates from dataframe (first 5):")
-    print(f"  x_coord: {df.x_coord.values[:5]}")
-    print(f"  y_coord: {df.y_coord.values[:5]}")
-
     x_inds = np.searchsorted(x_coords, points_x_int.values, side='left')
     y_inds = np.searchsorted(y_coords, points_y_int.values, side='left')
-
-    print(f"\nComputed indices (first 5):")
-    print(f"  x_inds: {x_inds[:5]}")
-    print(f"  y_inds: {y_inds[:5]}")
-    print(f"Index ranges: x_inds [{x_inds.min()}, {x_inds.max()}], y_inds [{y_inds.min()}, {y_inds.max()}]")
-
-    # Check if any indices are out of bounds
-    if np.any(x_inds >= len(x_coords)) or np.any(y_inds >= len(y_coords)):
-        print(f"WARNING: Some indices are out of bounds!")
-        print(f"  x_inds out of bounds: {np.sum(x_inds >= len(x_coords))}")
-        print(f"  y_inds out of bounds: {np.sum(y_inds >= len(y_coords))}")
 
     # Find pre- and post-break images for each pixel
     time_end_inds = np.zeros(len(df), dtype=int)
@@ -376,26 +339,12 @@ def create_tiff(xarray_da, x_inds, y_inds, result): #(2, n_points, 6)
     """
     Creates output GeoTIFF with band values.
     """
-    print("\n=== DEBUG: create_tiff ===")
-
     #create mask
     mask = np.zeros((xarray_da.sizes['x'], xarray_da.sizes['y']), dtype='uint32')
     mask[:] = NODATA #sets all elements to NODATA
 
-    print(f"Mask shape: {mask.shape} (x, y) = ({xarray_da.sizes['x']}, {xarray_da.sizes['y']})")
-    print(f"Result shape: {result.shape}")
-    print(f"x_inds shape: {x_inds.shape}, range: [{x_inds.min()}, {x_inds.max()}]")
-    print(f"y_inds shape: {y_inds.shape}, range: [{y_inds.min()}, {y_inds.max()}]")
-
-    # Check the indexing approach
-    print(f"\nIndexing test (first 5 pixels):")
-    print(f"  x_inds: {x_inds[:5]}")
-    print(f"  y_inds: {y_inds[:5]}")
-    print(f"  -y_inds: {-y_inds[:5]}")
-
     #get transform and crs
     transform, crs = get_transform_crs(xarray_da)
-    print(f"Transform: {transform}")
 
     with rasterio.open(
         output_tif,
@@ -411,8 +360,6 @@ def create_tiff(xarray_da, x_inds, y_inds, result): #(2, n_points, 6)
         compress="deflate"
     ) as dst:
 
-        print(f"Output TIF dimensions: height={mask.shape[1]}, width={mask.shape[0]}")
-
         #loop through result array and write to GeoTiff
         band_number = 1
         for t in range(result.shape[0]): #time dimension - first is before break, then post break
@@ -424,21 +371,12 @@ def create_tiff(xarray_da, x_inds, y_inds, result): #(2, n_points, 6)
                     continue
 
                 #pixels inside mask (analyzed by pyccd) are set to the correct value given by result
-                print(f"\nBand {band_number} (t={t}, b={b}):")
-                print(f"  Setting mask[x_inds, -y_inds] with result values")
-                print(f"  Sample result values (first 5): {result[t,:5,b]}")
-
                 mask[x_inds, -y_inds] = result[t,:,b] #use -y_inds because y_coord is reversed
-
-                print(f"  Non-NODATA pixels in mask: {np.sum(mask != NODATA)}")
 
                 # Shift up by 1 pixel to correct displacement
                 shifted = np.roll(mask.T, shift=-1, axis=0)
                 # Set last row to nodata
                 shifted[-1, :] = NODATA
-
-                print(f"  After shift: Non-NODATA pixels: {np.sum(shifted != NODATA)}")
-                print(f"  Shifted shape: {shifted.shape}")
 
                 dst.write(shifted, band_number) #without shifting: dst.write(mask.T, band_number)
 
@@ -533,8 +471,6 @@ def main():
 
     # Add break dates only to pre-break period (index 6)
     break_dates_array = combined_df['break_date_yyyymmdd'].to_numpy()
-    print(f"Break dates array stats - Min: {break_dates_array.min()}, Max: {break_dates_array.max()}, Shape: {break_dates_array.shape}")
-    print(f"Break dates array sample: {break_dates_array[:10].tolist()}")
     result[0,:,6] = break_dates_array  # Pre-break period
     result[1,:,6] = 0  # Post-break period set to 0 (will be skipped in output)
     
