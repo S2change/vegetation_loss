@@ -220,85 +220,6 @@ def yyyymmdd_to_ordinal(yyyymmdd):
         print(f"Error converting {yyyymmdd} to ordinal: {e}")
         return None
 
-
-# def find_closest_image(target_ordinal, available_ordinals, search_before=True):
-#     """
-#     Finds the closest available image to the target date.
-
-#     Args:
-#         target_ordinal (int): Target date in ordinal format.
-#         available_ordinals (np.ndarray): Array of available image dates in ordinal format.
-#         search_before (bool): If True, search for images before the target (pre-break).
-#                               If False, search for images after the target (post-break).
-
-#     Returns:
-#         int: Index of the closest image, or -1 if none found.
-#     """
-#     if target_ordinal is None:
-#         return -1
-
-#     if search_before:
-#         # Find images before or on the break date
-#         mask = available_ordinals <= target_ordinal
-#         if not np.any(mask):
-#             return -1
-#         # Get the latest image before the break date (closest to break date)
-#         valid_indices = np.where(mask)[0]
-#         return valid_indices[-1]  # Last index (latest date before break)
-#     else:
-#         # Find images after or on the break date
-#         mask = available_ordinals >= target_ordinal
-#         if not np.any(mask):
-#             return -1
-#         # Get the earliest image after the break date (closest to break date)
-#         valid_indices = np.where(mask)[0]
-#         return valid_indices[0]  # First index (earliest date after break)
-
-
-# def get_indices(df, geotiffs_da):
-#     """
-#     Gets the indices for the xarray selection with isel. Uses the coordinates x and y from the dataframe
-#     and the break dates to find the closest pre- and post-break images.
-
-#     Args:
-#         df (pandas.dataframe): DataFrame with x_coord, y_coord, break_date_ordinal columns.
-#         geotiffs_da (xarray.DataArray): DataArray with time series of Sentinel-2 images.
-
-#     Returns:
-#         tuple: (x_inds, y_inds, time_end_inds, time_start_inds) where time_end_inds are pre-break
-#                and time_start_inds are post-break.
-#     """
-#     points_x_int = xr.DataArray(np.round(df.x_coord.values).astype('int'), dims=['location'])
-#     points_y_int = xr.DataArray(np.round(df.y_coord.values).astype('int'), dims=['location'])
-
-#     x_coords = geotiffs_da.x.values
-#     y_coords = geotiffs_da.y.values
-#     times = geotiffs_da.time.values
-
-#     x_inds = np.searchsorted(x_coords, points_x_int.values, side='left')
-#     y_inds = np.searchsorted(y_coords, points_y_int.values, side='left')
-
-#     # Find pre- and post-break images for each pixel
-#     time_end_inds = np.zeros(len(df), dtype=int)
-#     time_start_inds = np.zeros(len(df), dtype=int)
-
-#     for i, break_ordinal in enumerate(df.break_date_ordinal.values):
-#         # Find pre-break image (closest before break date)
-#         pre_idx = find_closest_image(break_ordinal, times, search_before=True)
-#         if pre_idx == -1:
-#             print(f"Warning: No pre-break image found for pixel {i} (break date ordinal: {break_ordinal})")
-#             pre_idx = 0  # Default to first image
-#         time_end_inds[i] = pre_idx
-
-#         # Find post-break image (closest after break date)
-#         post_idx = find_closest_image(break_ordinal, times, search_before=False)
-#         if post_idx == -1:
-#             print(f"Warning: No post-break image found for pixel {i} (break date ordinal: {break_ordinal})")
-#             post_idx = len(times) - 1  # Default to last image
-#         time_start_inds[i] = post_idx
-
-#     return x_inds, y_inds, time_end_inds, time_start_inds
-
 def get_indices(df, geotiffs_da):
     """
     Gets the indices for the xarray selection with isel. Uses the coordinates x and y from the dataframe
@@ -482,11 +403,32 @@ def main():
         #perform value selection based on coordinates and dates
         #step 1.2: get values of tend (can be done directly, since we already have access to the indices)
         print('---- Collecting values pre break')
-        #select values
+
+        # Find valid images for pre-break (searching backwards from break date)
+        adjusted_time_end_inds = time_end_inds.copy()
+        for i in range(len(adjusted_time_end_inds)):
+            current_idx = adjusted_time_end_inds[i]
+            # Search backwards until we find valid data or hit the beginning
+            while current_idx >= 0:
+                test_values = geotiffs_da.isel(
+                    x=x_inds[i],
+                    y=y_inds[i],
+                    time=current_idx
+                ).values
+                # Check if all bands have valid data (not 0 and not NODATA)
+                if np.all(test_values > 0) and np.all(test_values != NODATA):
+                    adjusted_time_end_inds[i] = current_idx
+                    break
+                current_idx -= 1
+            if current_idx < 0:
+                print(f"Warning: No valid pre-break image found for pixel {i}, using original index")
+                adjusted_time_end_inds[i] = time_end_inds[i]
+
+        #select values with adjusted indices
         selected_values = geotiffs_da.isel(
             x=xr.DataArray(x_inds, dims='z'),
             y=xr.DataArray(y_inds, dims='z'),
-            time=xr.DataArray(time_end_inds, dims='z')
+            time=xr.DataArray(adjusted_time_end_inds, dims='z')
         )
         #fill result array
         if k == 'Bands B2 and B11':
@@ -496,11 +438,33 @@ def main():
 
         #step 2: get values of tstart (can be done directly, since we already have access to the indices)
         print('---- Collecting values post break')
-        #select values
+
+        # Find valid images for post-break (searching forwards from break date)
+        adjusted_time_start_inds = time_start_inds.copy()
+        max_time_idx = len(geotiffs_da.time) - 1
+        for i in range(len(adjusted_time_start_inds)):
+            current_idx = adjusted_time_start_inds[i]
+            # Search forwards until we find valid data or hit the end
+            while current_idx <= max_time_idx:
+                test_values = geotiffs_da.isel(
+                    x=x_inds[i],
+                    y=y_inds[i],
+                    time=current_idx
+                ).values
+                # Check if all bands have valid data (not 0 and not NODATA)
+                if np.all(test_values > 0) and np.all(test_values != NODATA):
+                    adjusted_time_start_inds[i] = current_idx
+                    break
+                current_idx += 1
+            if current_idx > max_time_idx:
+                print(f"Warning: No valid post-break image found for pixel {i}, using original index")
+                adjusted_time_start_inds[i] = time_start_inds[i]
+
+        #select values with adjusted indices
         selected_values = geotiffs_da.isel(
             x=xr.DataArray(x_inds, dims='z'),
             y=xr.DataArray(y_inds, dims='z'),
-            time=xr.DataArray(time_start_inds, dims='z')
+            time=xr.DataArray(adjusted_time_start_inds, dims='z')
         )
          #fill result array
         if k == 'Bands B2 and B11':
@@ -534,7 +498,7 @@ if __name__ == '__main__':
 
         main()
 
-        print("Execution finished - HDF5 file created for tile {}. Execution took {} minutes".format(tile, round((time.time()-t1)/60,2)))
+        print(f"Execution finished. Execution took {round((time.time()-t1)/60,2)} minutes")
 
 # TODO
 #separar os hdf5 do pre e pos break dos outros hdf5 (pasta separada) e.g. pre-post
