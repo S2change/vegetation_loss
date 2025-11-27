@@ -71,7 +71,7 @@ h5_filename = "s2_images-bands-pre-and-post-break.h5"
 output_tif = r"C:\Users\isa127909\Desktop\B2B11_tests\04_first_raster_test_T29TQF_20241101_to_20241231.tif" # output path and name for tif file
 
 # value that bands get set to if no change date processed
-NODATA = 0
+NODATA = 65535
 
 
 ##################################
@@ -221,39 +221,83 @@ def yyyymmdd_to_ordinal(yyyymmdd):
         return None
 
 
-def find_closest_image(target_ordinal, available_ordinals, search_before=True):
-    """
-    Finds the closest available image to the target date.
+# def find_closest_image(target_ordinal, available_ordinals, search_before=True):
+#     """
+#     Finds the closest available image to the target date.
 
-    Args:
-        target_ordinal (int): Target date in ordinal format.
-        available_ordinals (np.ndarray): Array of available image dates in ordinal format.
-        search_before (bool): If True, search for images before the target (pre-break).
-                              If False, search for images after the target (post-break).
+#     Args:
+#         target_ordinal (int): Target date in ordinal format.
+#         available_ordinals (np.ndarray): Array of available image dates in ordinal format.
+#         search_before (bool): If True, search for images before the target (pre-break).
+#                               If False, search for images after the target (post-break).
 
-    Returns:
-        int: Index of the closest image, or -1 if none found.
-    """
-    if target_ordinal is None:
-        return -1
+#     Returns:
+#         int: Index of the closest image, or -1 if none found.
+#     """
+#     if target_ordinal is None:
+#         return -1
 
-    if search_before:
-        # Find images before or on the break date
-        mask = available_ordinals <= target_ordinal
-        if not np.any(mask):
-            return -1
-        # Get the latest image before the break date (closest to break date)
-        valid_indices = np.where(mask)[0]
-        return valid_indices[-1]  # Last index (latest date before break)
-    else:
-        # Find images after or on the break date
-        mask = available_ordinals >= target_ordinal
-        if not np.any(mask):
-            return -1
-        # Get the earliest image after the break date (closest to break date)
-        valid_indices = np.where(mask)[0]
-        return valid_indices[0]  # First index (earliest date after break)
+#     if search_before:
+#         # Find images before or on the break date
+#         mask = available_ordinals <= target_ordinal
+#         if not np.any(mask):
+#             return -1
+#         # Get the latest image before the break date (closest to break date)
+#         valid_indices = np.where(mask)[0]
+#         return valid_indices[-1]  # Last index (latest date before break)
+#     else:
+#         # Find images after or on the break date
+#         mask = available_ordinals >= target_ordinal
+#         if not np.any(mask):
+#             return -1
+#         # Get the earliest image after the break date (closest to break date)
+#         valid_indices = np.where(mask)[0]
+#         return valid_indices[0]  # First index (earliest date after break)
 
+
+# def get_indices(df, geotiffs_da):
+#     """
+#     Gets the indices for the xarray selection with isel. Uses the coordinates x and y from the dataframe
+#     and the break dates to find the closest pre- and post-break images.
+
+#     Args:
+#         df (pandas.dataframe): DataFrame with x_coord, y_coord, break_date_ordinal columns.
+#         geotiffs_da (xarray.DataArray): DataArray with time series of Sentinel-2 images.
+
+#     Returns:
+#         tuple: (x_inds, y_inds, time_end_inds, time_start_inds) where time_end_inds are pre-break
+#                and time_start_inds are post-break.
+#     """
+#     points_x_int = xr.DataArray(np.round(df.x_coord.values).astype('int'), dims=['location'])
+#     points_y_int = xr.DataArray(np.round(df.y_coord.values).astype('int'), dims=['location'])
+
+#     x_coords = geotiffs_da.x.values
+#     y_coords = geotiffs_da.y.values
+#     times = geotiffs_da.time.values
+
+#     x_inds = np.searchsorted(x_coords, points_x_int.values, side='left')
+#     y_inds = np.searchsorted(y_coords, points_y_int.values, side='left')
+
+#     # Find pre- and post-break images for each pixel
+#     time_end_inds = np.zeros(len(df), dtype=int)
+#     time_start_inds = np.zeros(len(df), dtype=int)
+
+#     for i, break_ordinal in enumerate(df.break_date_ordinal.values):
+#         # Find pre-break image (closest before break date)
+#         pre_idx = find_closest_image(break_ordinal, times, search_before=True)
+#         if pre_idx == -1:
+#             print(f"Warning: No pre-break image found for pixel {i} (break date ordinal: {break_ordinal})")
+#             pre_idx = 0  # Default to first image
+#         time_end_inds[i] = pre_idx
+
+#         # Find post-break image (closest after break date)
+#         post_idx = find_closest_image(break_ordinal, times, search_before=False)
+#         if post_idx == -1:
+#             print(f"Warning: No post-break image found for pixel {i} (break date ordinal: {break_ordinal})")
+#             post_idx = len(times) - 1  # Default to last image
+#         time_start_inds[i] = post_idx
+
+#     return x_inds, y_inds, time_end_inds, time_start_inds
 
 def get_indices(df, geotiffs_da):
     """
@@ -261,15 +305,19 @@ def get_indices(df, geotiffs_da):
     and the break dates to find the closest pre- and post-break images.
 
     Args:
-        df (pandas.dataframe): DataFrame with x_coord, y_coord, break_date_ordinal columns.
-        geotiffs_da (xarray.DataArray): DataArray with time series of Sentinel-2 images.
+        df (pandas.dataframe) :  DataFrame with x_coord, y_coord, break_date_ordinal columns.
+        geotiffs_da (xarray.DataArray) : DataArray with time series of Sentinel-2 images (B2 and B11).
 
-    Returns:
-        tuple: (x_inds, y_inds, time_end_inds, time_start_inds) where time_end_inds are pre-break
-               and time_start_inds are post-break.
+    Returns indices. 
     """
+
+    # COORDENADAS X E Y DOS PONTOS ESCOLHIDOS
+
     points_x_int = xr.DataArray(np.round(df.x_coord.values).astype('int'), dims=['location'])
     points_y_int = xr.DataArray(np.round(df.y_coord.values).astype('int'), dims=['location'])
+
+    # Use break_date_ordinal for both pre and post
+    break_dates = xr.DataArray(np.round(df.break_date_ordinal.values).astype('int'), dims=['z'])
 
     x_coords = geotiffs_da.x.values
     y_coords = geotiffs_da.y.values
@@ -277,28 +325,10 @@ def get_indices(df, geotiffs_da):
 
     x_inds = np.searchsorted(x_coords, points_x_int.values, side='left')
     y_inds = np.searchsorted(y_coords, points_y_int.values, side='left')
-
-    # Find pre- and post-break images for each pixel
-    time_end_inds = np.zeros(len(df), dtype=int)
-    time_start_inds = np.zeros(len(df), dtype=int)
-
-    for i, break_ordinal in enumerate(df.break_date_ordinal.values):
-        # Find pre-break image (closest before break date)
-        pre_idx = find_closest_image(break_ordinal, times, search_before=True)
-        if pre_idx == -1:
-            print(f"Warning: No pre-break image found for pixel {i} (break date ordinal: {break_ordinal})")
-            pre_idx = 0  # Default to first image
-        time_end_inds[i] = pre_idx
-
-        # Find post-break image (closest after break date)
-        post_idx = find_closest_image(break_ordinal, times, search_before=False)
-        if post_idx == -1:
-            print(f"Warning: No post-break image found for pixel {i} (break date ordinal: {break_ordinal})")
-            post_idx = len(times) - 1  # Default to last image
-        time_start_inds[i] = post_idx
+    time_end_inds = np.searchsorted(times, break_dates.values, side='left') - 1
+    time_start_inds = np.searchsorted(times, break_dates.values, side='left')
 
     return x_inds, y_inds, time_end_inds, time_start_inds
-
 
 def save_to_hdf5(result, selected_values, output_h5_path):
     """
