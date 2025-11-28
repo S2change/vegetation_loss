@@ -437,8 +437,12 @@ def main():
     # Add break dates to pre-break period (index 6) and is_break_value to post-break period (index 6)
     break_dates_array = combined_df['break_date_yyyymmdd'].to_numpy()
     is_break_values_array = combined_df['is_break_value'].to_numpy()
+    
+    is_break_converted = np.where(is_break_values_array == -1, 2,
+                                   np.where(is_break_values_array < 0, 0, is_break_values_array))
+
     result[0,:,6] = break_dates_array  # Pre-break period: change date
-    result[1,:,6] = is_break_values_array  # Post-break period: is_break_value
+    result[1,:,6] = is_break_converted  # Post-break period: is_break_value (converted)
     
     #reorder result to have bands in natural order (B2, B3, B4, B8, B11, B12, change_date/is_break)
     idx_order = [0,2,3,4,1,5,6]
