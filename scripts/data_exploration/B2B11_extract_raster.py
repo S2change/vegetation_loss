@@ -255,8 +255,8 @@ def get_indices(df, geotiffs_da):
 
     x_inds = np.searchsorted(x_coords, points_x_int.values, side='left')
     y_inds = np.searchsorted(y_coords, points_y_int.values, side='left')
-    time_end_inds = np.searchsorted(times, break_dates.values, side='left') - 1
-    time_start_inds = np.searchsorted(times, break_dates.values, side='left')
+    time_end_inds = np.searchsorted(times, break_dates.values, side='right') - 1
+    time_start_inds = np.searchsorted(times, break_dates.values, side='right')
 
     return x_inds, y_inds, time_end_inds, time_start_inds
 
