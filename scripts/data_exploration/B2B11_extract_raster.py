@@ -86,9 +86,9 @@ def load_break_dates_from_tif(break_date_tif, break_date_band=1):
         break_date_band (int): Which band to read for break dates (1-indexed).
 
     Returns:
-        tuple: (break_dates_array, band3_array, x_coords, y_coords, transform, crs) where
+        tuple: (break_dates_array, is_break_array, x_coords, y_coords, transform, crs) where
                break_dates_array contains dates in YYYYMMDD format (0 for no break) and
-               band3_array contains values from band 3 (-99, -1, 0, or 1).
+               is_break_array contains values from band 3 (-99, -1, 0, or 1).
     """
     print(f"Loading break dates from {break_date_tif}, band {break_date_band}")
 
@@ -102,8 +102,8 @@ def load_break_dates_from_tif(break_date_tif, break_date_band=1):
     break_dates_array = break_dates_band.values
 
     # Get band 3 array (0-indexed, so band 3 is index 2)
-    band3_array = break_dates_da.isel(band=is_break_band - 1).values
-    print(f"Loaded band 3 with unique values: {np.unique(band3_array)}")
+    is_break_array = break_dates_da.isel(band=is_break_band - 1).values
+    print(f"Loaded band 3 with unique values: {np.unique(is_break_array)}")
 
     # Get coordinates
     x_coords = break_dates_band.x.values
@@ -117,7 +117,7 @@ def load_break_dates_from_tif(break_date_tif, break_date_band=1):
     print(f"Break date range: {break_dates_array[break_dates_array > 0].min()} to {break_dates_array[break_dates_array > 0].max()}")
     print(f"Number of pixels with breaks: {np.sum(break_dates_array > 0)}")
 
-    return break_dates_array, band3_array, x_coords, y_coords, transform, crs
+    return break_dates_array, is_break_array, x_coords, y_coords, transform, crs
 
 
 def load_polygon_mask(polygon_file, break_dates_array, x_coords, y_coords, transform, crs):
@@ -162,19 +162,19 @@ def load_polygon_mask(polygon_file, break_dates_array, x_coords, y_coords, trans
     return mask
 
 
-def create_dataframe_from_break_dates(break_dates_array, band3_array, x_coords, y_coords, polygon_mask=None):
+def create_dataframe_from_break_dates(break_dates_array, is_break_array, x_coords, y_coords, polygon_mask=None):
     """
     Creates a dataframe from the break dates TIF data.
 
     Args:
         break_dates_array (np.ndarray): 2D array of break dates in YYYYMMDD format.
-        band3_array (np.ndarray): 2D array of band 3 values (-99, -1, 0, or 1).
+        is_break_array (np.ndarray): 2D array of band 3 values (-99, -1, 0, or 1).
         x_coords (np.ndarray): X coordinates.
         y_coords (np.ndarray): Y coordinates.
         polygon_mask (np.ndarray, optional): Boolean mask where True = inside polygon.
 
     Returns:
-        pandas.DataFrame: DataFrame with columns x_coord, y_coord, break_date_yyyymmdd, band3_value.
+        pandas.DataFrame: DataFrame with columns x_coord, y_coord, break_date_yyyymmdd, is_break_value.
     """
     # Find all pixels with valid break dates
     valid_mask = (break_dates_array > 0)
@@ -190,14 +190,14 @@ def create_dataframe_from_break_dates(break_dates_array, band3_array, x_coords, 
     x_pixel_coords = x_coords[x_indices]
     y_pixel_coords = y_coords[y_indices]
     break_dates = break_dates_array[y_indices, x_indices]
-    band3_values = band3_array[y_indices, x_indices]
+    is_break_values = is_break_array[y_indices, x_indices]
 
     # Create dataframe
     df = pd.DataFrame({
         'x_coord': x_pixel_coords,
         'y_coord': y_pixel_coords,
         'break_date_yyyymmdd': break_dates,
-        'band3_value': band3_values
+        'is_break_value': is_break_values
     })
 
     print(f"Created dataframe with {len(df)} pixels with breaks")
@@ -321,7 +321,7 @@ def create_tiff(xarray_da, x_inds, y_inds, result): #(2, n_points, 6)
         driver="GTiff",
         height=mask.shape[1],
         width=mask.shape[0],
-        count=result.shape[0]*result.shape[-1],  # All bands including band3_value at position [1,:,6]
+        count=result.shape[0]*result.shape[-1],  # All bands including is_break_value at position [1,:,6]
         dtype='uint32',
         crs=crs,
         transform=transform,
@@ -353,7 +353,7 @@ def create_tiff(xarray_da, x_inds, y_inds, result): #(2, n_points, 6)
 def main():
 
     # Load break dates from TIF file
-    break_dates_array, band3_array, x_coords, y_coords, transform, crs = load_break_dates_from_tif(break_date_tif, break_date_band)
+    break_dates_array, is_break_array, x_coords, y_coords, transform, crs = load_break_dates_from_tif(break_date_tif, break_date_band)
 
     # Load polygon mask if specified
     polygon_mask = None
@@ -361,7 +361,7 @@ def main():
         polygon_mask = load_polygon_mask(polygon_file, break_dates_array, x_coords, y_coords, transform, crs)
 
     # Create dataframe from break dates
-    combined_df = create_dataframe_from_break_dates(break_dates_array, band3_array, x_coords, y_coords, polygon_mask)
+    combined_df = create_dataframe_from_break_dates(break_dates_array, is_break_array, x_coords, y_coords, polygon_mask)
 
     # Convert break dates from YYYYMMDD to ordinal for image lookup
     print("Converting break dates to ordinal format...")
@@ -434,13 +434,13 @@ def main():
         elif k == 'Original 4 bands':
             result[1,:,2:6] = selected_values.values
 
-    # Add break dates to pre-break period (index 6) and band3_value to post-break period (index 6)
+    # Add break dates to pre-break period (index 6) and is_break_value to post-break period (index 6)
     break_dates_array = combined_df['break_date_yyyymmdd'].to_numpy()
-    band3_values_array = combined_df['band3_value'].to_numpy()
+    is_break_values_array = combined_df['is_break_value'].to_numpy()
     result[0,:,6] = break_dates_array  # Pre-break period: change date
-    result[1,:,6] = band3_values_array  # Post-break period: band3 value
+    result[1,:,6] = is_break_values_array  # Post-break period: is_break_value
     
-    #reorder result to have bands in natural order (B2, B3, B4, B8, B11, B12, change_date)
+    #reorder result to have bands in natural order (B2, B3, B4, B8, B11, B12, change_date/is_break)
     idx_order = [0,2,3,4,1,5,6]
     result = result[:,:,idx_order]
 
