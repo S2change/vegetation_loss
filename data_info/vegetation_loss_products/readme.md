@@ -1,5 +1,5 @@
 Products:
-- MBPV_v1: (*mapa bimestral de perdas de vegetação*). This is an experimental product for 2023-2024 that is solely based on the PyCCD estimated breaks. Furthermore, the PyCCD processing uses a parameter (number of observations per CCD segment) which is **probably too high and makes it harder to determine breaks, in particular at the end of the temporal series**.  Neighbor pixels with similar dates (less than 10 days) are clustered and clusters with area smaller than 0.5 ha are discarded.
+- MBPV_v1: (*mapa bimestral de perdas de vegetação*). This is an experimental product for 2023-2024 that is solely based on the PyCCD estimated breaks. Furthermore, the PyCCD processing uses a parameter (minimum number of observations required  to identify break) which is **probably too high and makes it harder to determine breaks, in particular at the end of the temporal series**.  Neighbor pixels with similar dates (less than 10 days) are clustered and clusters with area smaller than 0.5 ha are discarded.
 
   The steps to produce this data set are the following:
   1. Process Sentinel-2 time series up to 2024-12-31 with PyCCD.
