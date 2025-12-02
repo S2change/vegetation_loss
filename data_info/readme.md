@@ -12,6 +12,7 @@
 *Parquets PyCCD outputs*
 - Parameters: chisq = 0.999 / alpha = 2 / lasso_iter = 1000<br>
 - `C:\Users\Public\Documents\outputs_ROI\tabular`<br>
+- 480 parquet files (480 tasks) per tile
 
 *dates, bands, for N=10 window around each reference change for BDR-DGT-300,  ICNF 2020--2024, and BDR_NVG*<br>
 - `C:\Users\Public\Documents\ref_datasets\amostras_por_pixel`<br>
