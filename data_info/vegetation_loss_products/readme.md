@@ -1,5 +1,5 @@
 Products:
-- MBPV_v1: (*mapa bimestral de perdas de vegetação*). This is an experimental product for 2023-2024 that is solely based on the PyCCD estimated breaks. Pixels with similar dates are clustered and clusters with area smaller than 0.5 ha are discarded. A password is needed to unzip the file `MBPV_v2.zip`.
+- MBPV_v1: (*mapa bimestral de perdas de vegetação*). This is an experimental product for 2023-2024 that is solely based on the PyCCD estimated breaks. Furthermore, the PyCCD processing uses a parameter (number of observations per CCD segment) which is **probably too high and makes it harder to determine breaks, in particular at the end of the temporal series**.  Neighbor pixels with similar dates (less than 10 days) are clustered and clusters with area smaller than 0.5 ha are discarded.
 
   The steps to produce this data set are the following:
   1. Process Sentinel-2 time series up to 2024-12-31 with PyCCD.
@@ -11,3 +11,6 @@ Products:
   3. Convert each bimonthly raster file to vector format with script `/scripts/visualisations/graph_raster_to_polygons.py`:
      - Input: For each period (2 months) and for each tile: 1 multi-band GeoTIFF raster file (.tif); date is mean between last_tEnd, last_tBreak, date_range_days = 10 (number of days to group adjacent pixels within each spatial cluster); min_area_ha = 0.5 (minimum polygon area in hectares).
      - Output: For each period (2 months) and for each tile: 1 polygon geopackage file; attributes: mean, min, max dates for each polygon; polygon area, with polygons at least 0.5 ha.
+
+
+Note: A password is needed to unzip the file `MBPV_v1.7z`.
