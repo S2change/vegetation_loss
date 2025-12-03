@@ -91,7 +91,7 @@ entregáveis:
   * E3.3 – Relatório de validação dos mapas nacionais.
   
     Foram feitos dois exercícios de validação descritos abaixo (revisto nov 2025):
-    - Usando [BDR_DGT_300](data_info/reference_data/BDR_DGT_300) e os mapas bimestrais de perdas de vegetação. Ver [script](scripts/validation/raster_avaliacao_exatidao.py) e [relatório E3.3A](documents/deliverables/Entregavel_3_3A_validacao_ccd_mbpv_dgt300_report_v1.md).
+    - Usando [BDR_DGT_300](data_info/reference_data/BDR_DGT_300) e os mapas bimestrais de perdas de vegetação. Ver [script](scripts/validation/raster_avaliacao_exatidao.py) e [relatório E3.3A (pdf)](documents/deliverables/Entregavel_3_3_A.pdf)  ou [relatório E3.3A (markdown)](documents/deliverables/Entregavel_3_3A_validacao_ccd_mbpv_dgt300_report_v1.md)
     - Fazendo uma comparação para os mapas bimestrais de perdas de vegetação para 2023-2024 com as áreas ardidas [ICNF](data_info/reference_data/ICNF) para Portugal Continental. Ver [script](scripts/validation/validate_ccd_against_icnf.py) e [relatório E3.3B](documents/deliverables/Entregavel_3_3B_validacao_ccd_mbpv_v1_icnf_v3.pdf).
   * E3.4 – Aplicação informática que possa ser integrada na cadeia de produção da DGT:
 
