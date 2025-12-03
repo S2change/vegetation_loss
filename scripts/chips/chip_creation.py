@@ -70,8 +70,11 @@ if __name__ == "__main__":
 
     with rio.open(INPUT_TIF) as src:
         metadata = src.meta.copy()
+        band_names = src.descriptions
 
         print(f"Input image size: {src.meta['width']} x {src.meta['height']}")
+        print(f"Number of bands: {src.count}")
+        print(f"Band names: {band_names}")
         print(f"Chip size: {CHIP_WIDTH} x {CHIP_HEIGHT}")
         print(f"Overlap: {OVERLAP} pixels")
         print(f"Output directory: {OUTPUT_DIR}")
@@ -87,6 +90,7 @@ if __name__ == "__main__":
 
             with rio.open(out_filepath, 'w', **metadata) as dst:
                 dst.write(src.read(window=window))
+                dst.descriptions = band_names
 
             chip_count += 1
             # if chip_count >= 5:
