@@ -422,7 +422,7 @@ def process_pixel_segments(segments, search_start_ms, search_end_ms):
 
             if newer_segment["redStart"] == 0 and newer_segment["redStart2"] == 0 and newer_segment["nirStart"] == 0 and newer_segment["nirStart2"] == 0:
                 ndvi = calculate_ndvi(active_segment)
-                return (-1, last_tEnd, last_tBreak, ndvi)
+                return (-1, active_segment["tEnd"], active_segment["tBreak"], ndvi)
 
             ndvi_check = ndvi_loss_calculation(active_segment, newer_segment)
             if ndvi_check == 1:
