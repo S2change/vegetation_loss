@@ -420,7 +420,7 @@ def process_pixel_segments(segments, search_start_ms, search_end_ms):
             active_segment = filtered_segments[-1]  # Older segment (active at time of break)
             newer_segment = filtered_segments[-2]   # Newer segment
 
-            if newer_segment["redStart"] == 0 & newer_segment["redStart2"] == 0 & newer_segment["nirStart"] == 0 & newer_segment["nirStart2"] == 0:
+            if newer_segment["redStart"] == 0 and newer_segment["redStart2"] == 0 and newer_segment["nirStart"] == 0 and newer_segment["nirStart2"] == 0:
                 ndvi = calculate_ndvi(active_segment)
                 return (-1, last_tEnd, last_tBreak, ndvi)
 
