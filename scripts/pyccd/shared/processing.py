@@ -252,21 +252,87 @@ def process_detection_results(results, ponto_desejado, NODATA_VALUE, dates, ndvi
     # # Se não houver mais segmentos a seguir adiciona NODATA_VALUE se só existir um segmento adiciona -65535
     # ndvi_magnitudes.append(NODATA_VALUE if ndvi_magnitudes and any(ndvi_magnitudes) else -NODATA_VALUE)
         
-    datas = [datetime.fromordinal(data) for data in break_dates]
-    break_dates_epoch = [int(data.replace(tzinfo=timezone.utc).timestamp() * 1000) for data in datas]
+
+    # ============================================================
+    #   CREATE FINAL ARTIFICIAL SEGMENT
+    # ============================================================
+    last_segment = results['change_models'][-1]
+    last_date = dates[-1]
     
-    datas = [datetime.fromordinal(data) for data in start_dates]
-    start_dates_epoch = [int(data.replace(tzinfo=timezone.utc).timestamp() * 1000) for data in datas]
+    if last_segment['end_day'] < last_date:
     
-    datas = [datetime.fromordinal(data) for data in end_dates]
-    end_dates_epoch = [int(data.replace(tzinfo=timezone.utc).timestamp() * 1000) for data in datas]
+        print("Creating final artificial segment...")
+    
+        t_break = last_segment['break_day']
+        idx_break = np.searchsorted(dates, t_break)
+    
+        # --- Remaining fields = 0 ---
+        start_dates.append(0)
+        end_dates.append(0)
+        break_dates.append(0)
+        prob.append(0)
+    
+        coeficientes.append([0, 0, 0, 0, 0, 0, 0])
+        intercept_values.append(0)
+    
+        if idx_break + 2 < len(dates):
+    
+            # --- Spectral values ---
+            greenStart.append(greens[idx_break + 1])
+            greenStart2.append(greens[idx_break + 2])
+            greenEnd.append(0)
+            greenEnd2.append(0)
+    
+            redStart.append(reds[idx_break + 1])
+            redStart2.append(reds[idx_break + 2])
+            redEnd.append(0)
+            redEnd2.append(0)
+    
+            nirStart.append(nirs[idx_break + 1])
+            nirStart2.append(nirs[idx_break + 2])
+            nirEnd.append(0)
+            nirEnd2.append(0)
+    
+            swir2Start.append(swir2s[idx_break + 1])
+            swir2Start2.append(swir2s[idx_break + 2])
+            swir2End.append(0)
+            swir2End2.append(0)
+    
+        else:
+            print("There are not enough values after the break to create an artificial segment.")
+            # ensure the segment is complete even without data
+            greenStart.append(0);  greenStart2.append(0)
+            greenEnd.append(0);    greenEnd2.append(0)
+    
+            redStart.append(0);    redStart2.append(0)
+            redEnd.append(0);      redEnd2.append(0)
+    
+            nirStart.append(0);    nirStart2.append(0)
+            nirEnd.append(0);      nirEnd2.append(0)
+    
+            swir2Start.append(0);  swir2Start2.append(0)
+            swir2End.append(0);    swir2End2.append(0)
+
+    # mask_array = np.array(results['processing_mask'], dtype='bool')
+    # mask_len, mask_num_false = (len(mask_array), np.uint16(np.sum(~mask_array)))
+    
+    # Convert only valid values; keep 0 when it is an artificial segment
+    break_dates_epoch = [
+        int(datetime.fromordinal(d).replace(tzinfo=timezone.utc).timestamp() * 1000) if d >= 1 else 0
+        for d in break_dates]
+    
+    start_dates_epoch = [
+        int(datetime.fromordinal(d).replace(tzinfo=timezone.utc).timestamp() * 1000) if d >= 1 else 0
+        for d in start_dates]
+    
+    end_dates_epoch = [
+        int(datetime.fromordinal(d).replace(tzinfo=timezone.utc).timestamp() * 1000) if d >= 1 else 0
+        for d in end_dates]
     
     ponto_desejado_x, ponto_desejado_y = ponto_desejado
     ponto_desejado_x = int(ponto_desejado_x)
     ponto_desejado_y = int(ponto_desejado_y)
-
-    # mask_array = np.array(results['processing_mask'], dtype='bool')
-    # mask_len, mask_num_false = (len(mask_array), np.uint16(np.sum(~mask_array)))
+    
     
     # If you remove the last element from tbreak when running the validation, an error occurs because the columns do not have the same size.
     dados = [{
@@ -276,9 +342,6 @@ def process_detection_results(results, ponto_desejado, NODATA_VALUE, dates, ndvi
         'changeProb': prob,
         'x_coord': ponto_desejado_x, 
         'y_coord': ponto_desejado_y,
-        # 'ndvi_magnitude': ndvi_magnitudes,
-        # 'prediction_dates': [d.tolist() for d in prediction_dates],
-        # 'predicted_values': [[int(value) for value in sublist] for sublist in predicted_values], 
         'coeficientes': coeficientes, 
         'intercept_values': intercept_values,
         
@@ -313,3 +376,4 @@ def process_detection_results(results, ponto_desejado, NODATA_VALUE, dates, ndvi
     
     df = df[ordem_colunas]
     return df
+
