@@ -334,7 +334,7 @@ def adjustpeek(dates, defpeek):
         int number of observations to use
     """
     delta = np.median(np.diff(dates))
-    adj_peek = int(np.round(defpeek * 16 / delta))
+    adj_peek = int(np.round(defpeek * 5 / delta))
 
     return adj_peek if adj_peek > defpeek else defpeek
 
