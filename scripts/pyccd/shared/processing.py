@@ -259,7 +259,7 @@ def process_detection_results(results, ponto_desejado, NODATA_VALUE, dates, ndvi
     last_segment = results['change_models'][-1]
     last_date = dates[-1]
     
-    if last_segment['end_day'] < last_date:
+    if last_segment['break_day'] < last_date:
     
         print("Creating final artificial segment...")
     
@@ -376,4 +376,5 @@ def process_detection_results(results, ponto_desejado, NODATA_VALUE, dates, ndvi
     
     df = df[ordem_colunas]
     return df
+
 
