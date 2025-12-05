@@ -263,8 +263,7 @@ def process_detection_results(results, ponto_desejado, NODATA_VALUE, dates, ndvi
     
         print("Creating final artificial segment...")
     
-        t_break = last_segment['break_day']
-        idx_break = np.searchsorted(dates, t_break)
+        idx_break = np.searchsorted(dates, last_segment['break_day'])
     
         # --- Remaining fields = 0 ---
         start_dates.append(0)
@@ -274,44 +273,44 @@ def process_detection_results(results, ponto_desejado, NODATA_VALUE, dates, ndvi
     
         coeficientes.append([0, 0, 0, 0, 0, 0, 0])
         intercept_values.append(0)
-    
-        if idx_break + 2 < len(dates):
-    
+        
+        greenStart.append(greens[idx_break])
+        redStart.append(reds[idx_break])
+        nirStart.append(nirs[idx_break])
+        swir2Start.append(swir2s[idx_break])
+        
+        if idx_break <= len(dates):
             # --- Spectral values ---
-            greenStart.append(greens[idx_break + 1])
-            greenStart2.append(greens[idx_break + 2])
+            greenStart2.append(greens[idx_break + 1])
             greenEnd.append(0)
             greenEnd2.append(0)
     
-            redStart.append(reds[idx_break + 1])
-            redStart2.append(reds[idx_break + 2])
+            redStart2.append(reds[idx_break + 1])
             redEnd.append(0)
             redEnd2.append(0)
     
-            nirStart.append(nirs[idx_break + 1])
-            nirStart2.append(nirs[idx_break + 2])
+            nirStart2.append(nirs[idx_break + 1])
             nirEnd.append(0)
             nirEnd2.append(0)
-    
-            swir2Start.append(swir2s[idx_break + 1])
-            swir2Start2.append(swir2s[idx_break + 2])
+
+            swir2Start2.append(swir2s[idx_break + 1])
             swir2End.append(0)
             swir2End2.append(0)
     
         else:
             print("There are not enough values after the break to create an artificial segment.")
             # ensure the segment is complete even without data
-            greenStart.append(0);  greenStart2.append(0)
-            greenEnd.append(0);    greenEnd2.append(0)
+            greenStart2.append(0)
+            greenEnd2.append(0)
     
-            redStart.append(0);    redStart2.append(0)
-            redEnd.append(0);      redEnd2.append(0)
+            redStart2.append(0)
+            redEnd2.append(0)
     
-            nirStart.append(0);    nirStart2.append(0)
-            nirEnd.append(0);      nirEnd2.append(0)
+            nirStart2.append(0)
+            nirEnd2.append(0)
     
-            swir2Start.append(0);  swir2Start2.append(0)
-            swir2End.append(0);    swir2End2.append(0)
+            swir2Start2.append(0)
+            swir2End2.append(0)
 
     # mask_array = np.array(results['processing_mask'], dtype='bool')
     # mask_len, mask_num_false = (len(mask_array), np.uint16(np.sum(~mask_array)))
@@ -376,5 +375,6 @@ def process_detection_results(results, ponto_desejado, NODATA_VALUE, dates, ndvi
     
     df = df[ordem_colunas]
     return df
+
 
 
