@@ -151,7 +151,7 @@ def load_polygon_mask(polygon_file, break_dates_array, x_coords, y_coords, trans
         out_shape=break_dates_array.shape,
         transform=transform,
         fill=0,
-        dtype='uint8'
+        dtype='int8'
     )
 
     # Convert to boolean
@@ -275,7 +275,7 @@ def save_to_hdf5(result, selected_values, output_h5_path):
         data = hf.create_dataset(
             "values",
             shape=result.shape,
-            dtype='uint16',
+            dtype='int16',
             compression='lzf', #supposed to be the best compression for fast read/write
             chunks=(1, 1024, 1)
         )
@@ -309,7 +309,7 @@ def create_tiff(xarray_da, x_inds, y_inds, result): #(2, n_points, 6)
     Creates output GeoTIFF with band values.
     """
     #create mask
-    mask = np.zeros((xarray_da.sizes['x'], xarray_da.sizes['y']), dtype='uint32')
+    mask = np.zeros((xarray_da.sizes['x'], xarray_da.sizes['y']), dtype='int32')
     mask[:] = NODATA #sets all elements to NODATA
 
     #get transform and crs
@@ -322,7 +322,7 @@ def create_tiff(xarray_da, x_inds, y_inds, result): #(2, n_points, 6)
         height=mask.shape[1],
         width=mask.shape[0],
         count=result.shape[0]*result.shape[-1],  # All bands including is_break_value at position [1,:,6]
-        dtype='uint32',
+        dtype='int32',
         crs=crs,
         transform=transform,
         nodata=NODATA,
@@ -438,11 +438,11 @@ def main():
     break_dates_array = combined_df['break_date_yyyymmdd'].to_numpy()
     is_break_values_array = combined_df['is_break_value'].to_numpy()
     
-    is_break_converted = np.where(is_break_values_array == -1, 2,
-                                   np.where(is_break_values_array < 0, 0, is_break_values_array))
+    # is_break_converted = np.where(is_break_values_array == -1, 2,
+    #                                np.where(is_break_values_array < 0, 0, is_break_values_array))
 
     result[0,:,6] = break_dates_array  # Pre-break period: change date
-    result[1,:,6] = is_break_converted  # Post-break period: is_break_value (converted)
+    result[1,:,6] = is_break_values_array  # Post-break period: is_break_value (converted)
     
     #reorder result to have bands in natural order (B2, B3, B4, B8, B11, B12, change_date/is_break)
     idx_order = [0,2,3,4,1,5,6]
