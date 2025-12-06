@@ -114,10 +114,19 @@ def ndvi_avg_calculation(nir1, nir2, red1, red2):
     Returns:
     * NDVI value calculated from the average NIR and Red values
     """
-    avg_nir = (nir1 + nir2) / 2
-    avg_red = (red1 + red2) / 2
 
-    ndvi = (avg_nir - avg_red) / (avg_nir + avg_red)
+    # Don't average if one set has 0's
+    if (nir1 == 0 or red1 == 0) and (nir2 != 0 and red2 != 0):
+        nir_value = nir2
+        red_value = red2
+    elif (nir2 == 0 or red2 == 0) and (nir1 != 0 and red1 != 0):
+        nir_value = nir1
+        red_value = red1
+    else:
+        nir_value = (nir1 + nir2) / 2
+        red_value = (red1 + red2) / 2
+
+    ndvi = (nir_value - red_value) / (nir_value + red_value)
 
     return ndvi
 
