@@ -411,7 +411,7 @@ def process_pixel_segments(segments, search_start_ms, search_end_ms):
             last_tBreak = last_seg["tBreak"]
             last_tEnd = last_seg["tEnd"]
 
-            if pd.notna(last_tBreak) and pd.notna(last_tEnd) and last_tBreak != last_tEnd:
+            if pd.notna(last_tBreak) and last_tBreak != 0 and pd.notna(last_tEnd) and last_tEnd != 0 and last_tBreak != last_tEnd:
                 ndvi = calculate_ndvi(last_seg)
                 return (-1, last_tEnd, last_tBreak, ndvi)
 
