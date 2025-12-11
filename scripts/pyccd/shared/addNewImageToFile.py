@@ -33,6 +33,7 @@ def addNewImageToFile(output_file, tiles, var, S2_tile, BDR_DGT, N, random_state
     gdf_pixel_centers = process_pixel_centers(BDR_DGT, raster_path)
     geospatial_data_meters = readPoints(gdf_pixel_centers, N, random_state_value)
     
+    # WARNING: THESE FUNCTIONS REQUIRE 3 PARAMETERS (S2_tile, tiles, and max_date) TO WORK
     if var == 'THEIA':
         tif_names, tif_dates = read_tif_files_theia(S2_tile, tiles)
     else:
