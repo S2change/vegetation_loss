@@ -92,7 +92,7 @@ def read_tif_files_theia(S2_tile, tiles, min_year, max_date):
     date_objects = [datetime.strptime(date, '%Y%m%d').date() for date in dates]
     return list_files, date_objects
 #%%
-def read_tif_files_gee(S2_tile, tiles, max_date):
+def read_tif_files_gee(S2_tile, tiles, max_date, min_date=None):
     """
     Reads and filters GEE Sentinel-2 TIFF files from a specified directory based on a maximum date.
     It filters the files by their embedded timestamp and returns a list of files and corresponding dates that 
@@ -128,7 +128,7 @@ def read_tif_files_gee(S2_tile, tiles, max_date):
         timestamp_ms = int(date_str)
         timestamp_sec = timestamp_ms / 1000
         date_obj = datetime.utcfromtimestamp(timestamp_sec).date()
-        if date_obj <= max_date.date():
+        if (max_date is None or date_obj <= max_date.date()) and (min_date is None or date_obj >= min_date.date()):
             tiff_files.append(file)
     
     list_files.extend(tiff_files)
@@ -140,7 +140,7 @@ def read_tif_files_gee(S2_tile, tiles, max_date):
         timestamp_ms = int(date_str)
         timestamp_sec = timestamp_ms / 1000
         date_obj = datetime.utcfromtimestamp(timestamp_sec).date()
-        if date_obj <= max_date.date():
+        if (max_date is None or date_obj <= max_date.date()) and (min_date is None or date_obj >= min_date.date()):
             date_objects.append(date_obj)
     
     return list_files, date_objects
