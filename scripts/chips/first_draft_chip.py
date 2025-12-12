@@ -312,6 +312,16 @@ def apply_cascading_selection(image_stack, nodata=65535):
 
     return result
 
+def stack_bands(b2b11, bands4):
+    """Stack bands in order: B2, B3, B4, B8, B11, B12"""
+    return np.stack([
+        b2b11[0],   # B2
+        bands4[0],  # B3
+        bands4[1],  # B4
+        bands4[2],  # B8
+        b2b11[1],   # B11
+        bands4[3]   # B12
+    ])
 
 if __name__ == "__main__":
     tile = TILE
@@ -400,31 +410,13 @@ if __name__ == "__main__":
             pre_selected_4bands = apply_cascading_selection(pre_stack_4bands, NODATA)  # (4, 256, 256) - B3, B4, B8, B12
             post_selected_4bands = apply_cascading_selection(post_stack_4bands, NODATA)
 
-            # Construct 14-band output
-            # Band order: [B2, B3, B4, B8, B11, B12, metadata] × 2 (pre/post)
-            # B2B11 collection has: [B2, B11]
-            # 4-band collection has: [B3, B4, B8, B12]
-
-            # Initialize output array: (14, height, width)
-            output_bands = np.zeros((14, CHIP_HEIGHT, CHIP_WIDTH), dtype=np.uint16)
-
-            # Pre-break bands (0-6): [B2, B3, B4, B8, B11, B12, break_date]
-            output_bands[0] = pre_selected_b2b11[0]   # B2
-            output_bands[1] = pre_selected_4bands[0]  # B3
-            output_bands[2] = pre_selected_4bands[1]  # B4
-            output_bands[3] = pre_selected_4bands[2]  # B8
-            output_bands[4] = pre_selected_b2b11[1]   # B11
-            output_bands[5] = pre_selected_4bands[3]  # B12
-            output_bands[6] = chip_break_date         # Break date (broadcast to all pixels)
-
-            # Post-break bands (7-13): [B2, B3, B4, B8, B11, B12, is_break]
-            output_bands[7] = post_selected_b2b11[0]   # B2
-            output_bands[8] = post_selected_4bands[0]  # B3
-            output_bands[9] = post_selected_4bands[1]  # B4
-            output_bands[10] = post_selected_4bands[2] # B8
-            output_bands[11] = post_selected_b2b11[1]  # B11
-            output_bands[12] = post_selected_4bands[3] # B12
-            output_bands[13] = chip_data[IS_BREAK_BAND - 1]  # is_break values from input TIF
+            # Stack pre/post bands and metadata into 14-band output
+            output_bands = np.vstack([
+                stack_bands(pre_selected_b2b11, pre_selected_4bands),              # Bands 0-5
+                np.full((1, CHIP_HEIGHT, CHIP_WIDTH), chip_break_date, dtype=np.int16),  # Band 6
+                stack_bands(post_selected_b2b11, post_selected_4bands),            # Bands 7-12
+                chip_data[IS_BREAK_BAND - 1][np.newaxis]                           # Band 13
+            ])
 
             # Update metadata for output
             metadata['transform'] = transform
