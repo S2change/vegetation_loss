@@ -330,15 +330,27 @@ def apply_cascading_selection(image_stack, nodata=65535):
 
     return result
 
-def stack_bands(b2b11, bands4):
-    """Stack bands in order: B2, B3, B4, B8, B11, B12"""
+def reorder_bands(bands_combined):
+    """
+    Reorder combined bands from [B2, B11, B3, B4, B8, B12] to [B2, B3, B4, B8, B11, B12]
+
+    Parameters:
+    -----------
+    bands_combined : numpy.ndarray
+        Array of shape (6, height, width) with bands in order [B2, B11, B3, B4, B8, B12]
+
+    Returns:
+    --------
+    numpy.ndarray
+        Array of shape (6, height, width) with bands reordered to [B2, B3, B4, B8, B11, B12]
+    """
     return np.stack([
-        b2b11[0],   # B2
-        bands4[0],  # B3
-        bands4[1],  # B4
-        bands4[2],  # B8
-        b2b11[1],   # B11
-        bands4[3]   # B12
+        bands_combined[0],  # B2
+        bands_combined[2],  # B3
+        bands_combined[3],  # B4
+        bands_combined[4],  # B8
+        bands_combined[1],  # B11
+        bands_combined[5]   # B12
     ])
 
 if __name__ == "__main__":
@@ -415,19 +427,29 @@ if __name__ == "__main__":
             pre_stack_4bands = load_s2_window(pre_images_4bands, S2_IMAGES_FOLDER_4_BANDS, tile, window)
             post_stack_4bands = load_s2_window(post_images_4bands, S2_IMAGES_FOLDER_4_BANDS, tile, window)
 
-            # Apply cascading selection for each collection
-            pre_selected_b2b11 = apply_cascading_selection(pre_stack_b2b11, NODATA)  # (2, 256, 256) - B2, B11
-            post_selected_b2b11 = apply_cascading_selection(post_stack_b2b11, NODATA)
+            # Skip chip if we couldn't load images from both collections
+            if pre_stack_b2b11 is None or pre_stack_4bands is None or post_stack_b2b11 is None or post_stack_4bands is None:
+                print("  Warning: Could not load all required images, skipping chip")
+                continue
 
-            pre_selected_4bands = apply_cascading_selection(pre_stack_4bands, NODATA)  # (4, 256, 256) - B3, B4, B8, B12
-            post_selected_4bands = apply_cascading_selection(post_stack_4bands, NODATA)
+            # Combine bands: [B2, B11] + [B3, B4, B8, B12] -> shape: (n_images, 6, height, width)
+            pre_stack_all = np.concatenate([pre_stack_b2b11, pre_stack_4bands], axis=1)
+            post_stack_all = np.concatenate([post_stack_b2b11, post_stack_4bands], axis=1)
+
+            # Apply cascading selection once per period: (6, height, width) in order [B2, B11, B3, B4, B8, B12]
+            pre_selected = apply_cascading_selection(pre_stack_all, NODATA)
+            post_selected = apply_cascading_selection(post_stack_all, NODATA)
+
+            # Reorder to [B2, B3, B4, B8, B11, B12] for output
+            pre_bands_reordered = reorder_bands(pre_selected)
+            post_bands_reordered = reorder_bands(post_selected)
 
             # Stack pre/post bands and metadata into 14-band output
             output_bands = np.vstack([
-                stack_bands(pre_selected_b2b11, pre_selected_4bands),              # Bands 0-5
-                np.full((1, CHIP_HEIGHT, CHIP_WIDTH), chip_break_date, dtype=np.int16),  # Band 6
-                stack_bands(post_selected_b2b11, post_selected_4bands),            # Bands 7-12
-                chip_data[IS_BREAK_BAND - 1][np.newaxis]                           # Band 13
+                pre_bands_reordered,                                                        # Bands 0-5
+                np.full((1, CHIP_HEIGHT, CHIP_WIDTH), chip_break_date, dtype=np.uint16),   # Band 6
+                post_bands_reordered,                                                       # Bands 7-12
+                chip_data[IS_BREAK_BAND - 1][np.newaxis]                                    # Band 13
             ])
 
             # Update metadata for output
