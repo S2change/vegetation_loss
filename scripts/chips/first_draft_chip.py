@@ -174,10 +174,9 @@ def yyyymmdd_to_datetime(yyyymmdd):
     except (ValueError, IndexError):
         return None
 
-def select_images_in_window(break_datetime, all_dates, all_filenames,
-                            window_days=45, max_images=9, pre_break=True):
+def select_dates_in_window(break_datetime, all_dates, window_days=45, max_images=9, pre_break=True):
     """
-    Select up to max_images S2 images within window_days of break date.
+    Select up to max_images S2 dates within window_days of break date.
 
     Parameters:
     -----------
@@ -185,19 +184,17 @@ def select_images_in_window(break_datetime, all_dates, all_filenames,
         The break date
     all_dates : list of datetime
         All available image dates
-    all_filenames : list of str
-        Corresponding filenames
     window_days : int
         Maximum days from break date
     max_images : int
-        Maximum number of images to return
+        Maximum number of dates to return
     pre_break : bool
-        If True, select images before break; if False, after break
+        If True, select dates before break; if False, after break
 
     Returns:
     --------
-    list of str
-        Selected filenames, sorted by temporal proximity (closest first)
+    list of datetime
+        Selected dates, sorted by temporal proximity (closest first)
     """
     if break_datetime is None:
         return []
@@ -205,24 +202,45 @@ def select_images_in_window(break_datetime, all_dates, all_filenames,
     window = timedelta(days=window_days)
     candidates = []
 
-    for date, filename in zip(all_dates, all_filenames):
+    for date in all_dates:
         if pre_break:
             # Pre-break: date must be before break and within window
             if date < break_datetime and (break_datetime - date) <= window:
-                candidates.append((date, filename))
+                candidates.append(date)
         else:
             # Post-break: date must be after break and within window
             if date >= break_datetime and (date - break_datetime) <= window:
-                candidates.append((date, filename))
+                candidates.append(date)
 
     # Sort by temporal proximity (closest to break date first)
     if pre_break:
-        candidates.sort(key=lambda x: break_datetime - x[0])  # Closest = smallest difference
+        candidates.sort(key=lambda d: break_datetime - d)
     else:
-        candidates.sort(key=lambda x: x[0] - break_datetime)
+        candidates.sort(key=lambda d: d - break_datetime)
 
-    # Return up to max_images filenames
-    return [filename for date, filename in candidates[:max_images]]
+    return candidates[:max_images]
+
+
+def get_filenames_for_dates(selected_dates, all_dates, all_filenames):
+    """
+    Get filenames corresponding to selected dates.
+
+    Parameters:
+    -----------
+    selected_dates : list of datetime
+        Dates to find filenames for
+    all_dates : list of datetime
+        All available dates
+    all_filenames : list of str
+        Corresponding filenames
+
+    Returns:
+    --------
+    list of str
+        Filenames matching the selected dates (in same order)
+    """
+    date_to_filename = dict(zip(all_dates, all_filenames))
+    return [date_to_filename[date] for date in selected_dates if date in date_to_filename]
 
 def load_s2_window(image_paths, s2_folder, tile, window):
     """
@@ -372,34 +390,28 @@ if __name__ == "__main__":
 
             print(f"\nProcessing chip at ({window.col_off}, {window.row_off}), break date: {chip_break_date}")
 
-            # Select images within temporal window for B2B11
-            pre_images_b2b11 = select_images_in_window(
-                break_dt, tif_dates_b2b11, tif_names_b2b11,
-                TEMPORAL_WINDOW_DAYS, MAX_IMAGES_PER_PERIOD, pre_break=True
+            # Select dates within temporal window (use intersection of both collections)
+            available_dates = set(tif_dates_b2b11) & set(tif_dates_4bands)
+            available_dates_list = sorted(available_dates)
+
+            pre_dates = select_dates_in_window(
+                break_dt, available_dates_list, TEMPORAL_WINDOW_DAYS, MAX_IMAGES_PER_PERIOD, pre_break=True
             )
-            post_images_b2b11 = select_images_in_window(
-                break_dt, tif_dates_b2b11, tif_names_b2b11,
-                TEMPORAL_WINDOW_DAYS, MAX_IMAGES_PER_PERIOD, pre_break=False
+            post_dates = select_dates_in_window(
+                break_dt, available_dates_list, TEMPORAL_WINDOW_DAYS, MAX_IMAGES_PER_PERIOD, pre_break=False
             )
 
-            # Select images within temporal window for 4-bands
-            pre_images_4bands = select_images_in_window(
-                break_dt, tif_dates_4bands, tif_names_4bands,
-                TEMPORAL_WINDOW_DAYS, MAX_IMAGES_PER_PERIOD, pre_break=True
-            )
-            post_images_4bands = select_images_in_window(
-                break_dt, tif_dates_4bands, tif_names_4bands,
-                TEMPORAL_WINDOW_DAYS, MAX_IMAGES_PER_PERIOD, pre_break=False
-            )
+            # Get filenames for selected dates from both collections
+            pre_images_b2b11 = get_filenames_for_dates(pre_dates, tif_dates_b2b11, tif_names_b2b11)
+            post_images_b2b11 = get_filenames_for_dates(post_dates, tif_dates_b2b11, tif_names_b2b11)
+            pre_images_4bands = get_filenames_for_dates(pre_dates, tif_dates_4bands, tif_names_4bands)
+            post_images_4bands = get_filenames_for_dates(post_dates, tif_dates_4bands, tif_names_4bands)
 
-            print(f"  Pre-break: {len(pre_images_b2b11)} B2B11 images, {len(pre_images_4bands)} 4-band images")
-            print(f"  Post-break: {len(post_images_b2b11)} B2B11 images, {len(post_images_4bands)} 4-band images")
+            print(f"  Pre-break: {len(pre_dates)} images, Post-break: {len(post_dates)} images")
 
-            # Load windowed data for B2B11 images
+            # Load windowed data from both collections
             pre_stack_b2b11 = load_s2_window(pre_images_b2b11, S2_IMAGES_FOLDER_B2_B11, tile, window)
             post_stack_b2b11 = load_s2_window(post_images_b2b11, S2_IMAGES_FOLDER_B2_B11, tile, window)
-
-            # Load windowed data for 4-band images
             pre_stack_4bands = load_s2_window(pre_images_4bands, S2_IMAGES_FOLDER_4_BANDS, tile, window)
             post_stack_4bands = load_s2_window(post_images_4bands, S2_IMAGES_FOLDER_4_BANDS, tile, window)
 
