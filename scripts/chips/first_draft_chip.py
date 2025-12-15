@@ -93,7 +93,7 @@ def get_chips(ds, chip_width, chip_height, overlap):
             transform = windows.transform(window, ds.transform)
             yield window, transform
 
-def chip_processing_check(chip_data, is_break_band_index):
+def pixel_proportion_check(chip_data, is_break_band_index):
     """
     Calculate the proportion of processed pixels that have a break
 
@@ -368,6 +368,9 @@ if __name__ == "__main__":
     )
     print(f"Found {len(tif_names_b2b11)} B2B11 images and {len(tif_names_4bands)} 4-band images")
 
+    available_dates = set(tif_dates_b2b11) & set(tif_dates_4bands)
+    available_dates_list = sorted(available_dates)
+
     with rio.open(INPUT_TIF) as src:
         metadata = src.meta.copy()
         band_names = src.descriptions
@@ -387,7 +390,7 @@ if __name__ == "__main__":
             chip_data = src.read(window=window)
 
             # Check if chip meets processing threshold
-            processed_proportion = chip_processing_check(chip_data, IS_BREAK_BAND - 1)
+            processed_proportion = pixel_proportion_check(chip_data, IS_BREAK_BAND - 1)
             if processed_proportion < PROCESSING_THRESHOLD:
                 continue
 
@@ -401,10 +404,6 @@ if __name__ == "__main__":
                 continue
 
             print(f"\nProcessing chip at ({window.col_off}, {window.row_off}), break date: {chip_break_date}")
-
-            # Select dates within temporal window (use intersection of both collections)
-            available_dates = set(tif_dates_b2b11) & set(tif_dates_4bands)
-            available_dates_list = sorted(available_dates)
 
             pre_dates = select_dates_in_window(
                 break_dt, available_dates_list, TEMPORAL_WINDOW_DAYS, MAX_IMAGES_PER_PERIOD, pre_break=True
