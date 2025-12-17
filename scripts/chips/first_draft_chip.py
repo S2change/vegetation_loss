@@ -2,14 +2,18 @@ import os
 import numpy as np
 import rasterio as rio
 from rasterio import windows
-from datetime import datetime, timedelta
+from datetime import datetime
 import sys
+import xarray as xr
+import rioxarray
+from dask.diagnostics import ProgressBar
 
 # Add parent directory to path to import pyccd modules
 module_path = os.path.abspath(os.path.join('..'))
 if module_path not in sys.path:
     sys.path.append(module_path)
 from pyccd.shared.read_files import read_tif_files_gee
+from data_exploration.B2B11_extract_raster import yyyymmdd_to_ordinal
 
 
 # ============================================================================
@@ -20,6 +24,9 @@ from pyccd.shared.read_files import read_tif_files_gee
 INPUT_TIF = r"/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/09_optimized_test_20180101_to_20211231.tif"
 BREAK_DATE_BAND = 1
 IS_BREAK_BAND = 4
+# Min/Max dates for S2 files. Use format datetime(2024, 12, 31)
+MIN_DATE = None
+MAX_DATE = datetime(2024, 12, 31)
 
 # Output directory for chips
 OUTPUT_DIR = r"/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/chips"
@@ -55,6 +62,120 @@ MAX_IMAGES_PER_PERIOD = 9
 NODATA = 65535
 
 # ============================================================================
+
+
+def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates):
+    """
+    Load full S2 time series into xarray DataArray with chunking for memory efficiency.
+
+    Parameters:
+    -----------
+    s2_folder : str
+        Base folder path for S2 images
+    tile : str
+        Tile name (e.g., 'T29TQF')
+    tif_names : list of str
+        List of S2 image filenames
+    tif_dates : list of datetime
+        Corresponding dates for each image
+
+    Returns:
+    --------
+    xr.DataArray
+        DataArray with dimensions (time, band, y, x) where time is in ordinal format
+    """
+    print(f"  Loading {len(tif_names)} images into xarray...")
+
+    # Convert dates to ordinals for time indexing
+    tif_dates_ord = [d.toordinal() for d in tif_dates]
+    time_var = xr.Variable('time', tif_dates_ord)
+
+    # Load with spatial chunking aligned to chip size for optimal performance
+    tifs_xr = []
+    for fname in tif_names:
+        da = rioxarray.open_rasterio(
+            os.path.join(s2_folder, tile, fname),
+            chunks={'x': CHIP_WIDTH, 'y': CHIP_HEIGHT, 'band': -1}
+        )
+        tifs_xr.append(da)
+
+    # Concatenate along time dimension
+    geotiffs_da = xr.concat(tifs_xr, dim=time_var)
+
+    print(f"  Loaded xarray with shape: {geotiffs_da.shape}")
+    return geotiffs_da
+
+
+def spatial_subset_by_window(xarray_da, window):
+    """
+    Extract chip extent from xarray DataArray using rasterio window.
+
+    Parameters:
+    -----------
+    xarray_da : xr.DataArray
+        DataArray with dimensions (time, band, y, x)
+    window : rasterio.windows.Window
+        Window specification for chip extent
+
+    Returns:
+    --------
+    xr.DataArray
+        DataArray subset to window extent
+    """
+    # Convert window pixel coords to xarray slice indices
+    x_slice = slice(window.col_off, window.col_off + window.width)
+    y_slice = slice(window.row_off, window.row_off + window.height)
+
+    return xarray_da.isel(x=x_slice, y=y_slice)
+
+
+def select_temporal_window_xarray(xarray_da, break_ordinal, window_days=45,
+                                   max_images=9, pre_break=True):
+    """
+    Select up to max_images within window_days of break, ordered by proximity.
+
+    Parameters:
+    -----------
+    xarray_da : xr.DataArray
+        DataArray with time dimension in ordinals
+    break_ordinal : int
+        Break date as ordinal
+    window_days : int
+        Temporal window in days
+    max_images : int
+        Maximum number of images to return
+    pre_break : bool
+        If True, select dates before break; if False, after break
+
+    Returns:
+    --------
+    xr.DataArray or None
+        DataArray with selected time steps (shape: n_images, band, y, x)
+        Returns None if no images found in window
+    """
+    if break_ordinal is None:
+        return None
+
+    times = xarray_da.time.values
+
+    if pre_break:
+        # Find times before break within window
+        mask = (times < break_ordinal) & (times >= break_ordinal - window_days)
+        valid_times = times[mask]
+        # Sort by proximity (closest to break first)
+        valid_times = np.sort(valid_times)[::-1][:max_images]
+    else:
+        # Find times after break within window
+        mask = (times >= break_ordinal) & (times <= break_ordinal + window_days)
+        valid_times = times[mask]
+        # Sort by proximity (closest to break first)
+        valid_times = np.sort(valid_times)[:max_images]
+
+    if len(valid_times) == 0:
+        return None
+
+    # Select these time steps from xarray
+    return xarray_da.sel(time=valid_times)
 
 
 def get_chips(ds, chip_width, chip_height, overlap):
@@ -148,186 +269,40 @@ def determine_break_date(chip_data, break_date_band_index):
 
     return int(unique_dates[max_count_index])
 
-def yyyymmdd_to_datetime(yyyymmdd):
+def cascading_selection(image_stack_xr, nodata=65535):
     """
-    Convert YYYYMMDD integer to datetime object.
-
+    Apply cascading selection using index-based gathering.
+    
+    Finds first valid image considering ALL bands together,
+    then extracts all bands from that same image to maintain
+    spectral consistency.
+    
     Parameters:
     -----------
-    yyyymmdd : int
-        Date in YYYYMMDD format
-
-    Returns:
-    --------
-    datetime or None
-        Datetime object or None if invalid
-    """
-    if yyyymmdd == 0 or yyyymmdd is None:
-        return None
-
-    try:
-        date_str = str(int(yyyymmdd))
-        year = int(date_str[:4])
-        month = int(date_str[4:6])
-        day = int(date_str[6:8])
-        return datetime(year, month, day)
-    except (ValueError, IndexError):
-        return None
-
-def select_dates_in_window(break_datetime, all_dates, window_days=45, max_images=9, pre_break=True):
-    """
-    Select up to max_images S2 dates within window_days of break date.
-
-    Parameters:
-    -----------
-    break_datetime : datetime
-        The break date
-    all_dates : list of datetime
-        All available image dates
-    window_days : int
-        Maximum days from break date
-    max_images : int
-        Maximum number of dates to return
-    pre_break : bool
-        If True, select dates before break; if False, after break
-
-    Returns:
-    --------
-    list of datetime
-        Selected dates, sorted by temporal proximity (closest first)
-    """
-    if break_datetime is None:
-        return []
-
-    window = timedelta(days=window_days)
-    candidates = []
-
-    for date in all_dates:
-        if pre_break:
-            # Pre-break: date must be before break and within window
-            if date < break_datetime and (break_datetime - date) <= window:
-                candidates.append(date)
-        else:
-            # Post-break: date must be after break and within window
-            if date >= break_datetime and (date - break_datetime) <= window:
-                candidates.append(date)
-
-    # Sort by temporal proximity (closest to break date first)
-    if pre_break:
-        candidates.sort(key=lambda d: break_datetime - d)
-    else:
-        candidates.sort(key=lambda d: d - break_datetime)
-
-    return candidates[:max_images]
-
-
-def get_filenames_for_dates(selected_dates, all_dates, all_filenames):
-    """
-    Get filenames corresponding to selected dates.
-
-    Parameters:
-    -----------
-    selected_dates : list of datetime
-        Dates to find filenames for
-    all_dates : list of datetime
-        All available dates
-    all_filenames : list of str
-        Corresponding filenames
-
-    Returns:
-    --------
-    list of str
-        Filenames matching the selected dates (in same order)
-    """
-    date_to_filename = dict(zip(all_dates, all_filenames))
-    return [date_to_filename[date] for date in selected_dates if date in date_to_filename]
-
-def load_s2_window(image_paths, s2_folder, tile, window):
-    """
-    Load windowed S2 data from multiple images.
-
-    Parameters:
-    -----------
-    image_paths : list of str
-        List of S2 image filenames
-    s2_folder : str
-        Base folder path for S2 images
-    tile : str
-        Tile name (e.g., 'T29TQF')
-    window : rasterio.windows.Window
-        Window specification for chip extent
-
-    Returns:
-    --------
-    numpy.ndarray or None
-        Array of shape (n_images, n_bands, height, width)
-        Returns None if no valid images loaded
-    """
-    if not image_paths:
-        return None
-
-    loaded_images = []
-
-    for img_path in image_paths:
-        full_path = os.path.join(s2_folder, tile, img_path)
-        try:
-            with rio.open(full_path) as src:
-                # Read windowed data (all bands)
-                chip_data = src.read(window=window)
-                loaded_images.append(chip_data)
-        except Exception as e:
-            print(f"Warning: Could not load {img_path}: {e}")
-            continue
-
-    if not loaded_images:
-        return None
-
-    # Stack into single array: (n_images, n_bands, height, width)
-    return np.stack(loaded_images, axis=0)
-
-def apply_cascading_selection(image_stack, nodata=65535):
-    """
-    Apply cascading selection to choose best pixel from multiple images.
-
-    For each pixel location, selects the first image (temporally closest)
-    that has valid data (not NODATA).
-
-    Parameters:
-    -----------
-    image_stack : numpy.ndarray
-        Array of shape (n_images, n_bands, height, width)
+    image_stack_xr : xr.DataArray
+        DataArray with dimensions (time, band, y, x)
     nodata : int
         NODATA sentinel value
-
+    
     Returns:
     --------
-    numpy.ndarray
-        Selected values of shape (n_bands, height, width)
+    xr.DataArray
+        Selected values of shape (band, y, x)
     """
-    if image_stack is None or len(image_stack) == 0:
-        # Return NODATA array if no images available
-        # Default assumes 2 bands (B2, B11) or 4 bands (B3, B4, B8, B12)
-        # Will be overridden by actual data shape when available
-        n_bands, height, width = 2, CHIP_HEIGHT, CHIP_WIDTH
-        return np.full((n_bands, height, width), nodata, dtype=np.uint16)
-
-    n_images, n_bands, height, width = image_stack.shape
-    result = np.full((n_bands, height, width), nodata, dtype=np.uint16)
-
-    # Process each band separately
-    for band_idx in range(n_bands):
-        # Extract all images for this band: (n_images, height, width)
-        band_stack = image_stack[:, band_idx, :, :]
-
-        # Create condition list: [img0 < nodata, img1 < nodata, ...]
-        conditions = [band_stack[i] < nodata for i in range(n_images)]
-
-        # Create choice list: [img0, img1, img2, ...]
-        choices = [band_stack[i] for i in range(n_images)]
-
-        # Apply np.select - picks first valid (non-NODATA) value
-        result[band_idx] = np.select(conditions, choices, default=nodata)
-
+    if image_stack_xr is None:
+        return None
+    
+    # get index of first image where all bands have data
+    valid_mask = image_stack_xr < nodata
+    all_bands_valid = valid_mask.all(dim='band')
+    first_valid_idx = all_bands_valid.argmax(dim='time')
+    
+    result = image_stack_xr.isel(time=first_valid_idx)
+    
+    # Handle edge case: pixels where NO images have all bands valid
+    any_image_all_valid = all_bands_valid.any(dim='time')
+    result = result.where(any_image_all_valid, nodata)
+    
     return result
 
 def reorder_bands(bands_combined):
@@ -353,23 +328,59 @@ def reorder_bands(bands_combined):
         bands_combined[5]   # B12
     ])
 
-if __name__ == "__main__":
-    tile = TILE
-    in_path = os.path.dirname(INPUT_TIF)
-    input_filename = os.path.basename(INPUT_TIF)
+def s2_band_files_identical_check(first_files_names, first_files_dates, second_files_names, second_files_dates):
+    """
+    Safety check that S2 tif files have identical dates for combining the 2 bands with the 4 bands files
+    
+    Parameters:
+    -----------
+    first_files_names : list
+        Names of the first list of tif files
+    irst_files_dates : list
+        Dates of the first list of tif files
+    second_files_names : list
+        Names of the second list of tif files
+    second_files_dates : list
+        Dates of the second list of tif files
 
+    Returns:
+    --------
+    tuple
+        tuple of the 4 different lists that have now been filtered to only include identical dates
+    """
+    available_dates = set(first_files_dates) & set(second_files_dates)
+    print("Filtering images to common dates...")
+    first_names_filtered = [name for name, date in zip(first_files_names, first_files_dates) if date in available_dates]
+    first_dates_filtered = [date for date in first_files_dates if date in available_dates]
+    second_names_filtered = [name for name, date in zip(second_files_names, second_files_dates) if date in available_dates]
+    second_dates_filtered = [date for date in second_files_dates if date in available_dates]
+    print(f"Filtered to {len(first_names_filtered)} common dates")
+    return first_names_filtered, first_dates_filtered, second_names_filtered, second_dates_filtered
+
+
+if __name__ == "__main__":
     # Load S2 image file lists for both band collections
     print("Loading S2 image file lists...")
     tif_names_b2b11, tif_dates_b2b11 = read_tif_files_gee(
-        tile, os.path.join(S2_IMAGES_FOLDER_B2_B11, tile), max_date=datetime(2024, 12, 31)
+        TILE, os.path.join(S2_IMAGES_FOLDER_B2_B11, TILE), MAX_DATE, MIN_DATE
     )
-    tif_names_4bands, tif_dates_4bands = read_tif_files_gee(
-        tile, os.path.join(S2_IMAGES_FOLDER_4_BANDS, tile), max_date=datetime(2024, 12, 31)
+    tif_names_bands4, tif_dates_bands4 = read_tif_files_gee(
+        TILE, os.path.join(S2_IMAGES_FOLDER_4_BANDS, TILE), MAX_DATE, MIN_DATE
     )
-    print(f"Found {len(tif_names_b2b11)} B2B11 images and {len(tif_names_4bands)} 4-band images")
+    print(f"Found {len(tif_names_b2b11)} B2B11 images and {len(tif_names_bands4)} 4-band images")
 
-    available_dates = set(tif_dates_b2b11) & set(tif_dates_4bands)
-    available_dates_list = sorted(available_dates)
+    b2b11_names, b2b11_dates, bands4_names, bands4_dates = s2_band_files_identical_check(tif_names_b2b11, tif_dates_b2b11, tif_names_bands4, tif_dates_bands4)
+
+    # Load xarray time series before processing chips
+    print("\nLoading S2 time series into xarray...")
+    print("Loading B2B11 collection...")
+    geotiffs_b2b11 = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates)
+    print("Loading 4-band collection...")
+    geotiffs_4bands = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_4_BANDS, TILE, bands4_names, bands4_dates)
+    print("Combining into one array...")
+    geotiffs_combined = xr.concat([geotiffs_b2b11, geotiffs_4bands], dim='band')
+    print(f"Combined xarray shape: {geotiffs_combined.shape}")
+    print("Xarray loading complete!\n")
 
     with rio.open(INPUT_TIF) as src:
         metadata = src.meta.copy()
@@ -398,46 +409,39 @@ if __name__ == "__main__":
             if chip_break_date == 0:
                 continue
 
-            # Convert break date to datetime
-            break_dt = yyyymmdd_to_datetime(chip_break_date)
-            if break_dt is None:
+            # Convert break date to ordinal for xarray temporal indexing
+            break_ordinal = yyyymmdd_to_ordinal(chip_break_date)
+            if break_ordinal is None:
                 continue
 
             print(f"\nProcessing chip at ({window.col_off}, {window.row_off}), break date: {chip_break_date}")
 
-            pre_dates = select_dates_in_window(
-                break_dt, available_dates_list, TEMPORAL_WINDOW_DAYS, MAX_IMAGES_PER_PERIOD, pre_break=True
+            # Spatially subset xarray for this chip
+            spatial_subset_chip_xr = spatial_subset_by_window(geotiffs_combined, window)
+
+            # Temporal selection using xarray
+            pre_selected_chip_xr = select_temporal_window_xarray(
+                spatial_subset_chip_xr, break_ordinal, TEMPORAL_WINDOW_DAYS, MAX_IMAGES_PER_PERIOD, pre_break=True
             )
-            post_dates = select_dates_in_window(
-                break_dt, available_dates_list, TEMPORAL_WINDOW_DAYS, MAX_IMAGES_PER_PERIOD, pre_break=False
+            post_selected_chip_xr = select_temporal_window_xarray(
+                spatial_subset_chip_xr, break_ordinal, TEMPORAL_WINDOW_DAYS, MAX_IMAGES_PER_PERIOD, pre_break=False
             )
 
-            # Get filenames for selected dates from both collections
-            pre_images_b2b11 = get_filenames_for_dates(pre_dates, tif_dates_b2b11, tif_names_b2b11)
-            post_images_b2b11 = get_filenames_for_dates(post_dates, tif_dates_b2b11, tif_names_b2b11)
-            pre_images_4bands = get_filenames_for_dates(pre_dates, tif_dates_4bands, tif_names_4bands)
-            post_images_4bands = get_filenames_for_dates(post_dates, tif_dates_4bands, tif_names_4bands)
-
-            print(f"  Pre-break: {len(pre_dates)} images, Post-break: {len(post_dates)} images")
-
-            # Load windowed data from both collections
-            pre_stack_b2b11 = load_s2_window(pre_images_b2b11, S2_IMAGES_FOLDER_B2_B11, tile, window)
-            post_stack_b2b11 = load_s2_window(post_images_b2b11, S2_IMAGES_FOLDER_B2_B11, tile, window)
-            pre_stack_4bands = load_s2_window(pre_images_4bands, S2_IMAGES_FOLDER_4_BANDS, tile, window)
-            post_stack_4bands = load_s2_window(post_images_4bands, S2_IMAGES_FOLDER_4_BANDS, tile, window)
-
-            # Skip chip if we couldn't load images from both collections
-            if pre_stack_b2b11 is None or pre_stack_4bands is None or post_stack_b2b11 is None or post_stack_4bands is None:
-                print("  Warning: Could not load all required images, skipping chip")
+            if pre_selected_chip_xr is None or post_selected_chip_xr is None:
+                print("  Warning: Could not find any images in temporal window, skipping chip")
                 continue
 
-            # Combine bands: [B2, B11] + [B3, B4, B8, B12] -> shape: (n_images, 6, height, width)
-            pre_stack_all = np.concatenate([pre_stack_b2b11, pre_stack_4bands], axis=1)
-            post_stack_all = np.concatenate([post_stack_b2b11, post_stack_4bands], axis=1)
+            pre_selected_xr = cascading_selection(pre_selected_chip_xr, NODATA)
+            post_selected_xr = cascading_selection(post_selected_chip_xr, NODATA)
 
-            # Apply cascading selection once per period: (6, height, width) in order [B2, B11, B3, B4, B8, B12]
-            pre_selected = apply_cascading_selection(pre_stack_all, NODATA)
-            post_selected = apply_cascading_selection(post_stack_all, NODATA)
+            if pre_selected_xr is None or post_selected_xr is None:
+                print("  Warning: Cascading selection failed, skipping chip")
+                continue
+
+            # Convert xarray to numpy for further processing
+            # Shape: (band, y, x) -> (6, height, width)
+            pre_selected = pre_selected_xr.values
+            post_selected = post_selected_xr.values
 
             # Reorder to [B2, B3, B4, B8, B11, B12] for output
             pre_bands_reordered = reorder_bands(pre_selected)
@@ -446,7 +450,7 @@ if __name__ == "__main__":
             # Stack pre/post bands and metadata into 14-band output
             output_bands = np.vstack([
                 pre_bands_reordered,                                                        # Bands 0-5
-                np.full((1, CHIP_HEIGHT, CHIP_WIDTH), chip_break_date, dtype=np.uint16),   # Band 6
+                np.full((1, CHIP_HEIGHT, CHIP_WIDTH), chip_break_date, dtype=np.int16),   # Band 6
                 post_bands_reordered,                                                       # Bands 7-12
                 chip_data[IS_BREAK_BAND - 1][np.newaxis]                                    # Band 13
             ])
@@ -455,7 +459,7 @@ if __name__ == "__main__":
             metadata['transform'] = transform
             metadata['width'], metadata['height'] = window.width, window.height
             metadata['count'] = 14  # 14 bands
-            metadata['dtype'] = 'uint16'
+            metadata['dtype'] = 'int16'
             metadata['nodata'] = NODATA
 
             # Write output chip
