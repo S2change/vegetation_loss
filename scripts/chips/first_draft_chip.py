@@ -7,6 +7,7 @@ import sys
 import xarray as xr
 import rioxarray
 from dask.diagnostics import ProgressBar
+import re
 
 # Add parent directory to path to import pyccd modules
 module_path = os.path.abspath(os.path.join('..'))
@@ -46,11 +47,20 @@ OVERLAP = 64
 PROCESSING_THRESHOLD = 0.8
 
 # S2 image folder paths (two separate collections)
-S2_IMAGES_FOLDER_B2_B11 = r"/Users/domwelsh/green_ds/Thesis/s2_images_B2_B11/"
-S2_IMAGES_FOLDER_4_BANDS = r"/Users/domwelsh/green_ds/Thesis/s2_images/"
+S2_IMAGES_FOLDER_B2_B11 = r"C:/Users/Public/Documents/s2_images_B2_B11/"
+S2_IMAGES_FOLDER_4_BANDS = r"D:/s2_images/"
 
-# Tile name (e.g., T29TQF)
-TILE = "T29TQF"  # Update based on your data
+# Automatically extract tile from INPUT_TIF path
+# Looks for pattern like T29TQF, T29TQG, etc. in the path
+# Update fallback to set default if no tile is in path
+tile_match = re.search(r'T\d{2}[A-Z]{3}', INPUT_TIF)
+if tile_match:
+    TILE = tile_match.group()
+    print(f"Automatically detected tile from path: {TILE}")
+else:
+    # Fallback to manual specification if pattern not found
+    TILE = "T29TQF"
+    print(f"Warning: Could not auto-detect tile from path. Using fallback: {TILE}")
 
 # Temporal window for image selection
 TEMPORAL_WINDOW_DAYS = 45
@@ -359,6 +369,8 @@ def s2_band_files_identical_check(first_files_names, first_files_dates, second_f
 
 
 if __name__ == "__main__":
+    ProgressBar().register()
+
     # Load S2 image file lists for both band collections
     print("Loading S2 image file lists...")
     tif_names_b2b11, tif_dates_b2b11 = read_tif_files_gee(
@@ -474,7 +486,7 @@ if __name__ == "__main__":
 
             chip_count += 1
             print(f"  Wrote chip: {out_filepath}")
-            # if chip_count >= 5:
-            #     break
+            if chip_count >= 1:
+                break
 
         print(f"Successfully created {chip_count} chips in {OUTPUT_DIR}")
