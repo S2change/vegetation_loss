@@ -22,19 +22,19 @@ from data_exploration.B2B11_extract_raster import yyyymmdd_to_ordinal
 # ============================================================================
 
 # Input TIF file path and relevant bands
-INPUT_TIF = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQF\processed_outputs\rasters\output_raster_ccd_20240901_to_20241031.tif"
+INPUT_TIF = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG\processed_outputs\output_raster_ccd_20180101_to_20211231.tif"
 BREAK_DATE_BAND = 1
-IS_BREAK_BAND = 4
+IS_BREAK_BAND = 3
 # Min/Max dates for S2 files. Use format datetime(2024, 12, 31)
 MIN_DATE = None
 MAX_DATE = datetime(2024, 12, 31)
 
 # Output directory for chips
-OUTPUT_DIR = r"C:\Users\isa127909\Desktop\B2B11_tests\T29TQF_chips"
+OUTPUT_DIR = r"C:\Users\isa127909\Desktop\B2B11_tests\T29TQG_chips"
 
 # Output filename pattern, {} will be filled with the x, y coordinates of the first pixel in the chip
 # '(tile)_(break's start date)_(break's end date)_{}-{}.tif
-OUTPUT_FILENAME = 'T29TQF_20240901_20241031_{}-{}.tif'
+OUTPUT_FILENAME = 'T29TQG_20180101_20211231_{}-{}.tif'
 
 # Chip dimensions in pixels
 CHIP_WIDTH = 256
@@ -44,7 +44,7 @@ CHIP_HEIGHT = 256
 OVERLAP = 64
 
 # Percentage in float of DGT pixels that need to have a break date
-PROCESSING_THRESHOLD = 0.1
+PROCESSING_THRESHOLD = 0.0
 
 # S2 image folder paths (two separate collections)
 S2_IMAGES_FOLDER_B2_B11 = r"C:/Users/Public/Documents/s2_images_B2_B11/"
@@ -59,7 +59,7 @@ if tile_match:
     print(f"Automatically detected tile from path: {TILE}")
 else:
     # Fallback to manual specification if pattern not found
-    TILE = "T29TQF"
+    TILE = "T29TQG"
     print(f"Warning: Could not auto-detect tile from path. Using fallback: {TILE}")
 
 # Temporal window for image selection
@@ -186,7 +186,9 @@ def select_temporal_window_xarray(xarray_da, break_ordinal, window_days=45,
         return None
 
     # Select these time steps from xarray
-    return xarray_da.sel(time=valid_times)
+    indices = [i for i, t in enumerate(xarray_da.time.values) if t in valid_times]
+    return xarray_da.isel(time=indices)
+    # return xarray_da.sel(time=valid_times)
 
 
 def get_chips(ds, chip_width, chip_height, overlap):
@@ -415,8 +417,11 @@ if __name__ == "__main__":
 
             # Check if chip meets processing threshold
             processed_proportion = pixel_proportion_check(chip_data, IS_BREAK_BAND - 1)
+            if processed_proportion == 0.0:
+                print("No pixels have breaks")
+                continue
             if processed_proportion < PROCESSING_THRESHOLD:
-                print("Chip failed processing propotion check")
+                print("Chip failed processing proportion check")
                 continue
 
             chip_break_date = determine_break_date(chip_data, BREAK_DATE_BAND - 1)
@@ -490,7 +495,7 @@ if __name__ == "__main__":
 
             chip_count += 1
             print(f"  Wrote chip: {out_filepath}")
-            if chip_count >= 10:
+            if chip_count >= 1:
                 break
 
         print(f"Successfully created {chip_count} chips in {OUTPUT_DIR}")
