@@ -22,7 +22,7 @@ from data_exploration.B2B11_extract_raster import yyyymmdd_to_ordinal
 # ============================================================================
 
 # Input TIF file path and relevant bands
-INPUT_TIF = r"/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/09_optimized_test_20180101_to_20211231.tif"
+INPUT_TIF = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQF\processed_outputs\rasters\output_raster_ccd_20240901_to_20241031.tif"
 BREAK_DATE_BAND = 1
 IS_BREAK_BAND = 4
 # Min/Max dates for S2 files. Use format datetime(2024, 12, 31)
@@ -30,11 +30,11 @@ MIN_DATE = None
 MAX_DATE = datetime(2024, 12, 31)
 
 # Output directory for chips
-OUTPUT_DIR = r"/Users/domwelsh/green_ds/Thesis/BDR_300_artigo/personal_tests/chips"
+OUTPUT_DIR = r"C:\Users\isa127909\Desktop\B2B11_tests\T29TQF_chips"
 
 # Output filename pattern, {} will be filled with the x, y coordinates of the first pixel in the chip
 # '(tile)_(break's start date)_(break's end date)_{}-{}.tif
-OUTPUT_FILENAME = 'BDR300_20180101_20211231_{}-{}.tif'
+OUTPUT_FILENAME = 'T29TQF_20240901_20241031_{}-{}.tif'
 
 # Chip dimensions in pixels
 CHIP_WIDTH = 256
@@ -44,7 +44,7 @@ CHIP_HEIGHT = 256
 OVERLAP = 64
 
 # Percentage in float of DGT pixels that need to have a break date
-PROCESSING_THRESHOLD = 0.8
+PROCESSING_THRESHOLD = 0.1
 
 # S2 image folder paths (two separate collections)
 S2_IMAGES_FOLDER_B2_B11 = r"C:/Users/Public/Documents/s2_images_B2_B11/"
@@ -105,12 +105,13 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates):
     for fname in tif_names:
         da = rioxarray.open_rasterio(
             os.path.join(s2_folder, tile, fname),
-            chunks={'x': CHIP_WIDTH, 'y': CHIP_HEIGHT, 'band': -1}
+            chunks={'x': -1, 'y': -1, 'band': -1}
         )
         tifs_xr.append(da)
 
     # Concatenate along time dimension
-    geotiffs_da = xr.concat(tifs_xr, dim=time_var)
+    geotiffs_da = xr.concat(tifs_xr, dim=time_var, join='outer')
+    geotiffs_da = geotiffs_da.chunk({'time': 1}) # One chunk per time step
 
     print(f"  Loaded xarray with shape: {geotiffs_da.shape}")
     return geotiffs_da
@@ -390,7 +391,7 @@ if __name__ == "__main__":
     print("Loading 4-band collection...")
     geotiffs_4bands = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_4_BANDS, TILE, bands4_names, bands4_dates)
     print("Combining into one array...")
-    geotiffs_combined = xr.concat([geotiffs_b2b11, geotiffs_4bands], dim='band')
+    geotiffs_combined = xr.concat([geotiffs_b2b11, geotiffs_4bands], dim='band', join='outer')
     print(f"Combined xarray shape: {geotiffs_combined.shape}")
     print("Xarray loading complete!\n")
 
@@ -415,15 +416,18 @@ if __name__ == "__main__":
             # Check if chip meets processing threshold
             processed_proportion = pixel_proportion_check(chip_data, IS_BREAK_BAND - 1)
             if processed_proportion < PROCESSING_THRESHOLD:
+                print("Chip failed processing propotion check")
                 continue
 
             chip_break_date = determine_break_date(chip_data, BREAK_DATE_BAND - 1)
             if chip_break_date == 0:
+                print("Chip has no break date")
                 continue
 
             # Convert break date to ordinal for xarray temporal indexing
             break_ordinal = yyyymmdd_to_ordinal(chip_break_date)
             if break_ordinal is None:
+                print("Chip has no ordinal break date")
                 continue
 
             print(f"\nProcessing chip at ({window.col_off}, {window.row_off}), break date: {chip_break_date}")
@@ -486,7 +490,7 @@ if __name__ == "__main__":
 
             chip_count += 1
             print(f"  Wrote chip: {out_filepath}")
-            if chip_count >= 1:
+            if chip_count >= 10:
                 break
 
         print(f"Successfully created {chip_count} chips in {OUTPUT_DIR}")
