@@ -14,7 +14,7 @@ module_path = os.path.abspath(os.path.join('..'))
 if module_path not in sys.path:
     sys.path.append(module_path)
 from pyccd.shared.read_files import read_tif_files_gee
-from data_exploration.B2B11_extract_raster import yyyymmdd_to_ordinal
+from ccd_results_utils.segment_identification import yyyymmdd_to_ordinal
 
 
 # ============================================================================

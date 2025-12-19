@@ -38,6 +38,7 @@ module_path = os.path.abspath(os.path.join('..'))
 if module_path not in sys.path:
    sys.path.append(module_path)
 from pyccd.shared.read_files import read_tif_files_gee
+from ccd_results_utils.segment_identification import yyyymmdd_to_ordinal
 
 
 ## SCRIPT CONFIGS ##
@@ -203,31 +204,6 @@ def create_dataframe_from_break_dates(break_dates_array, is_break_array, x_coord
     print(f"Created dataframe with {len(df)} pixels with breaks")
 
     return df
-
-
-def yyyymmdd_to_ordinal(yyyymmdd):
-    """
-    Converts date in YYYYMMDD format to ordinal.
-
-    Args:
-        yyyymmdd (int): Date in YYYYMMDD format.
-
-    Returns:
-        int: Date as ordinal, or None if invalid.
-    """
-    if yyyymmdd == 0 or pd.isna(yyyymmdd):
-        return None
-
-    try:
-        date_str = str(int(yyyymmdd))
-        year = int(date_str[:4])
-        month = int(date_str[4:6])
-        day = int(date_str[6:8])
-        date_obj = datetime(year, month, day)
-        return date_obj.toordinal()
-    except (ValueError, IndexError) as e:
-        print(f"Error converting {yyyymmdd} to ordinal: {e}")
-        return None
 
 def get_indices(df, geotiffs_da):
     """
