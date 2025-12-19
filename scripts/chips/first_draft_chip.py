@@ -34,7 +34,7 @@ OUTPUT_DIR = r"C:\Users\isa127909\Desktop\B2B11_tests\T29TQG_chips"
 
 # Output filename pattern, {} will be filled with the x, y coordinates of the first pixel in the chip
 # '(tile)_(break's start date)_(break's end date)_{}-{}.tif
-OUTPUT_FILENAME = 'T29TQG_20180101_20211231_{}-{}.tif'
+OUTPUT_FILENAME = '02_T29TQG_20180101_20211231_{}-{}.tif'
 
 # Chip dimensions in pixels
 CHIP_WIDTH = 256
@@ -134,10 +134,10 @@ def spatial_subset_by_window(xarray_da, window):
         DataArray subset to window extent
     """
     # Convert window pixel coords to xarray slice indices
-    x_slice = slice(window.col_off, window.col_off + window.width)
-    y_slice = slice(window.row_off, window.row_off + window.height)
+    # x_slice = slice(window.col_off, window.col_off + window.width)
+    # y_slice = slice(window.row_off, window.row_off + window.height)
 
-    return xarray_da.isel(x=x_slice, y=y_slice)
+    return xarray_da.rio.isel_window(window)
 
 
 def select_temporal_window_xarray(xarray_da, break_ordinal, window_days=45,
@@ -407,6 +407,11 @@ if __name__ == "__main__":
         print(f"Input image size: {src.meta['width']} x {src.meta['height']}")
         print(f"Number of bands: {src.count}")
         print(f"Band names: {band_names}")
+        print(f"Input TIF transform: {src.transform}")
+        print(f"Input TIF origin (top-left): x={src.transform.c}, y={src.transform.f}")
+        print(f"Input TIF CRS: {src.crs}")
+        print(f"S2 xarray origin: x={geotiffs_combined.x.values[0]}, y={geotiffs_combined.y.values[0]}")
+        print(f"S2 xarray CRS: {geotiffs_combined.rio.crs}")
         print(f"Chip size: {CHIP_WIDTH} x {CHIP_HEIGHT}")
         print(f"Overlap: {OVERLAP} pixels")
         print(f"Output directory: {OUTPUT_DIR}")
@@ -439,9 +444,13 @@ if __name__ == "__main__":
                 continue
 
             print(f"\nProcessing chip at ({window.col_off}, {window.row_off}), break date: {chip_break_date}")
+            print(f"  Window: col_off={window.col_off}, row_off={window.row_off}, width={window.width}, height={window.height}")
 
             # Spatially subset xarray for this chip
             spatial_subset_chip_xr = spatial_subset_by_window(geotiffs_combined, window)
+            print(f"  Subset shape: {spatial_subset_chip_xr.shape}")
+            print(f"  Subset x range: [{spatial_subset_chip_xr.x.values[0]}, {spatial_subset_chip_xr.x.values[-1]}]")
+            print(f"  Subset y range: [{spatial_subset_chip_xr.y.values[0]}, {spatial_subset_chip_xr.y.values[-1]}]")
 
             # Temporal selection using xarray
             pre_selected_chip_xr = select_temporal_window_xarray(
@@ -466,7 +475,7 @@ if __name__ == "__main__":
             # Shape: (band, y, x) -> (6, height, width)
             pre_selected = pre_selected_xr.values.transpose(2, 0, 1)
             post_selected = post_selected_xr.values.transpose(2, 0, 1)
-            
+
             # Reorder to [B2, B3, B4, B8, B11, B12] for output
             pre_bands_reordered = reorder_bands(pre_selected)
             post_bands_reordered = reorder_bands(post_selected)
