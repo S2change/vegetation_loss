@@ -309,6 +309,9 @@ def cascading_selection(image_stack_xr, nodata=65535):
     valid_mask = image_stack_xr < nodata
     all_bands_valid = valid_mask.all(dim='band')
     first_valid_idx = all_bands_valid.argmax(dim='time')
+
+    # Compute the index array (convert from dask to numpy)
+    first_valid_idx = first_valid_idx.compute()
     
     result = image_stack_xr.isel(time=first_valid_idx)
     
@@ -461,9 +464,9 @@ if __name__ == "__main__":
 
             # Convert xarray to numpy for further processing
             # Shape: (band, y, x) -> (6, height, width)
-            pre_selected = pre_selected_xr.values
-            post_selected = post_selected_xr.values
-
+            pre_selected = pre_selected_xr.values.transpose(2, 0, 1)
+            post_selected = post_selected_xr.values.transpose(2, 0, 1)
+            
             # Reorder to [B2, B3, B4, B8, B11, B12] for output
             pre_bands_reordered = reorder_bands(pre_selected)
             post_bands_reordered = reorder_bands(post_selected)
@@ -471,7 +474,7 @@ if __name__ == "__main__":
             # Stack pre/post bands and metadata into 14-band output
             output_bands = np.vstack([
                 pre_bands_reordered,                                                        # Bands 0-5
-                np.full((1, CHIP_HEIGHT, CHIP_WIDTH), chip_break_date, dtype=np.int16),   # Band 6
+                np.full((1, CHIP_HEIGHT, CHIP_WIDTH), chip_break_date, dtype=np.int32),   # Band 6
                 post_bands_reordered,                                                       # Bands 7-12
                 chip_data[IS_BREAK_BAND - 1][np.newaxis]                                    # Band 13
             ])
@@ -480,7 +483,7 @@ if __name__ == "__main__":
             metadata['transform'] = transform
             metadata['width'], metadata['height'] = window.width, window.height
             metadata['count'] = 14  # 14 bands
-            metadata['dtype'] = 'int16'
+            metadata['dtype'] = 'int32'
             metadata['nodata'] = NODATA
 
             # Write output chip
