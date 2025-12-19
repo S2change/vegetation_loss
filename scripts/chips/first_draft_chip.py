@@ -373,6 +373,21 @@ def s2_band_files_identical_check(first_files_names, first_files_dates, second_f
     print(f"Filtered to {len(first_names_filtered)} common dates")
     return first_names_filtered, first_dates_filtered, second_names_filtered, second_dates_filtered
 
+def load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates, S2_IMAGES_FOLDER_4_BANDS, bands4_names, bands4_dates):
+    """
+    Loads the 2 different S2 band files into xarrays and then combines them
+    
+    """
+    print("\nLoading S2 time series into xarray...")
+    print("Loading B2B11 collection...")
+    geotiffs_b2b11 = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates)
+    print("Loading 4-band collection...")
+    geotiffs_4bands = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_4_BANDS, TILE, bands4_names, bands4_dates)
+    print("Combining into one array...")
+    geotiffs_combined = xr.concat([geotiffs_b2b11, geotiffs_4bands], dim='band', join='outer')
+    print(f"Combined xarray shape: {geotiffs_combined.shape}")
+    print("Xarray loading complete!\n")
+    return geotiffs_combined
 
 if __name__ == "__main__":
     ProgressBar().register()
@@ -389,16 +404,7 @@ if __name__ == "__main__":
 
     b2b11_names, b2b11_dates, bands4_names, bands4_dates = s2_band_files_identical_check(tif_names_b2b11, tif_dates_b2b11, tif_names_bands4, tif_dates_bands4)
 
-    # Load xarray time series before processing chips
-    print("\nLoading S2 time series into xarray...")
-    print("Loading B2B11 collection...")
-    geotiffs_b2b11 = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates)
-    print("Loading 4-band collection...")
-    geotiffs_4bands = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_4_BANDS, TILE, bands4_names, bands4_dates)
-    print("Combining into one array...")
-    geotiffs_combined = xr.concat([geotiffs_b2b11, geotiffs_4bands], dim='band', join='outer')
-    print(f"Combined xarray shape: {geotiffs_combined.shape}")
-    print("Xarray loading complete!\n")
+    geotiffs_combined = load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates, S2_IMAGES_FOLDER_4_BANDS, bands4_names, bands4_dates)
 
     with rio.open(INPUT_TIF) as src:
         metadata = src.meta.copy()
