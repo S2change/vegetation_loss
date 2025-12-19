@@ -190,3 +190,27 @@ def combine_parquet_files(parquet_folder, tile=None):
     combined_df = pd.concat(dataframes, ignore_index=True)
 
     return combined_df
+
+def yyyymmdd_to_ordinal(yyyymmdd):
+    """
+    Converts date in YYYYMMDD format to ordinal.
+
+    Args:
+        yyyymmdd (int): Date in YYYYMMDD format.
+
+    Returns:
+        int: Date as ordinal, or None if invalid.
+    """
+    if yyyymmdd == 0 or pd.isna(yyyymmdd):
+        return None
+
+    try:
+        date_str = str(int(yyyymmdd))
+        year = int(date_str[:4])
+        month = int(date_str[4:6])
+        day = int(date_str[6:8])
+        date_obj = datetime(year, month, day)
+        return date_obj.toordinal()
+    except (ValueError, IndexError) as e:
+        print(f"Error converting {yyyymmdd} to ordinal: {e}")
+        return None
