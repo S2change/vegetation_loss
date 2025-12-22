@@ -402,6 +402,24 @@ if __name__ == "__main__":
     )
     print(f"Found {len(tif_names_b2b11)} B2B11 images and {len(tif_names_bands4)} 4-band images")
 
+    print("\nChecking spatial extent of raw S2 files...")
+    if len(tif_names_b2b11) > 0:
+        first_b2b11_path = os.path.join(S2_IMAGES_FOLDER_B2_B11, TILE, tif_names_b2b11[0])
+        with rio.open(first_b2b11_path) as s2_src:
+            print(f"First B2B11 file: {tif_names_b2b11[0]}")
+            print(f"  Transform: {s2_src.transform}")
+            print(f"  Origin (top-left): x={s2_src.transform.c}, y={s2_src.transform.f}")
+            print(f"  Size: {s2_src.width} x {s2_src.height}")
+            print(f"  CRS: {s2_src.crs}")
+            print(f"  Bounds: {s2_src.bounds}")
+
+    if len(tif_names_bands4) > 0:
+        first_4band_path = os.path.join(S2_IMAGES_FOLDER_4_BANDS, TILE, tif_names_bands4[0])
+        with rio.open(first_4band_path) as s2_src:
+            print(f"First 4-band file: {tif_names_bands4[0]}")
+            print(f"  Origin (top-left): x={s2_src.transform.c}, y={s2_src.transform.f}")
+            print(f"  Size: {s2_src.width} x {s2_src.height}")
+
     b2b11_names, b2b11_dates, bands4_names, bands4_dates = s2_band_files_identical_check(tif_names_b2b11, tif_dates_b2b11, tif_names_bands4, tif_dates_bands4)
 
     geotiffs_combined = load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates, S2_IMAGES_FOLDER_4_BANDS, bands4_names, bands4_dates)
