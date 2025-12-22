@@ -102,11 +102,14 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates):
 
     # Load with spatial chunking aligned to chip size for optimal performance
     tifs_xr = []
-    for fname in tif_names:
+    for i, fname in enumerate(tif_names):
         da = rioxarray.open_rasterio(
             os.path.join(s2_folder, tile, fname),
             chunks={'x': -1, 'y': -1, 'band': -1}
         )
+        if i == 0:  # Print first file's coordinates
+            print(f"    First file x range: [{da.x.values[0]}, {da.x.values[-1]}]")
+            print(f"    First file y range: [{da.y.values[0]}, {da.y.values[-1]}]")
         tifs_xr.append(da)
 
     # Concatenate along time dimension
@@ -114,6 +117,8 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates):
     geotiffs_da = geotiffs_da.chunk({'time': 1}) # One chunk per time step
 
     print(f"  Loaded xarray with shape: {geotiffs_da.shape}")
+    print(f"  After time concat x range: [{geotiffs_da.x.values[0]}, {geotiffs_da.x.values[-1]}]")
+    print(f"  After time concat y range: [{geotiffs_da.y.values[0]}, {geotiffs_da.y.values[-1]}]")
     return geotiffs_da
 
 
@@ -376,16 +381,26 @@ def s2_band_files_identical_check(first_files_names, first_files_dates, second_f
 def load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates, S2_IMAGES_FOLDER_4_BANDS, bands4_names, bands4_dates):
     """
     Loads the 2 different S2 band files into xarrays and then combines them
-    
+
     """
     print("\nLoading S2 time series into xarray...")
     print("Loading B2B11 collection...")
     geotiffs_b2b11 = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates)
+    print(f"  B2B11 xarray shape: {geotiffs_b2b11.shape}")
+    print(f"  B2B11 x range: [{geotiffs_b2b11.x.values[0]}, {geotiffs_b2b11.x.values[-1]}]")
+    print(f"  B2B11 y range: [{geotiffs_b2b11.y.values[0]}, {geotiffs_b2b11.y.values[-1]}]")
+
     print("Loading 4-band collection...")
     geotiffs_4bands = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_4_BANDS, TILE, bands4_names, bands4_dates)
+    print(f"  4-band xarray shape: {geotiffs_4bands.shape}")
+    print(f"  4-band x range: [{geotiffs_4bands.x.values[0]}, {geotiffs_4bands.x.values[-1]}]")
+    print(f"  4-band y range: [{geotiffs_4bands.y.values[0]}, {geotiffs_4bands.y.values[-1]}]")
+
     print("Combining into one array...")
     geotiffs_combined = xr.concat([geotiffs_b2b11, geotiffs_4bands], dim='band', join='outer')
     print(f"Combined xarray shape: {geotiffs_combined.shape}")
+    print(f"Combined x range: [{geotiffs_combined.x.values[0]}, {geotiffs_combined.x.values[-1]}]")
+    print(f"Combined y range: [{geotiffs_combined.y.values[0]}, {geotiffs_combined.y.values[-1]}]")
     print("Xarray loading complete!\n")
     return geotiffs_combined
 
@@ -428,13 +443,28 @@ if __name__ == "__main__":
         metadata = src.meta.copy()
         band_names = src.descriptions
 
+        # # Clip S2 xarray to match INPUT_TIF spatial extent
+        # print("\nClipping S2 data to match INPUT_TIF extent...")
+        # bounds = src.bounds
+        # print(f"INPUT_TIF bounds: {bounds}")
+        # geotiffs_combined = geotiffs_combined.rio.clip_box(
+        #     minx=bounds.left,
+        #     miny=bounds.bottom,
+        #     maxx=bounds.right,
+        #     maxy=bounds.top
+        # )
+        # print(f"Clipped S2 xarray shape: {geotiffs_combined.shape}")
+        # print(f"Clipped S2 origin: x={geotiffs_combined.x.values[0]}, y={geotiffs_combined.y.values[0]}")
+
         print(f"Input image size: {src.meta['width']} x {src.meta['height']}")
         print(f"Number of bands: {src.count}")
         print(f"Band names: {band_names}")
         print(f"Input TIF transform: {src.transform}")
         print(f"Input TIF origin (top-left): x={src.transform.c}, y={src.transform.f}")
         print(f"Input TIF CRS: {src.crs}")
-        print(f"S2 xarray origin: x={geotiffs_combined.x.values[0]}, y={geotiffs_combined.y.values[0]}")
+        print(f"S2 xarray origin: x={geotiffs_combined.x.values[0]}, y={geotiffs_combined.y.values[-1]}")
+        print(f"S2 xarray bounds (.rio.bounds): {geotiffs_combined.rio.bounds()}")
+        print(f"S2 xarray transform (.rio.transform): {geotiffs_combined.rio.transform()}")
         print(f"S2 xarray CRS: {geotiffs_combined.rio.crs}")
         print(f"Chip size: {CHIP_WIDTH} x {CHIP_HEIGHT}")
         print(f"Overlap: {OVERLAP} pixels")
