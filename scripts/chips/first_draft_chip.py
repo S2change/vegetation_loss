@@ -142,7 +142,12 @@ def spatial_subset_by_window(xarray_da, window):
     # x_slice = slice(window.col_off, window.col_off + window.width)
     # y_slice = slice(window.row_off, window.row_off + window.height)
 
-    return xarray_da.rio.isel_window(window)
+    print(f"  [spatial_subset_by_window] Input xarray transform: {xarray_da.rio.transform()}")
+    print(f"  [spatial_subset_by_window] Input xarray origin: x={xarray_da.x.values[0]}, y={xarray_da.y.values[0]}")
+    result = xarray_da.rio.isel_window(window)
+    print(f"  [spatial_subset_by_window] Output xarray transform: {result.rio.transform()}")
+    print(f"  [spatial_subset_by_window] Output xarray origin: x={result.x.values[0]}, y={result.y.values[0]}")
+    return result
 
 
 def select_temporal_window_xarray(xarray_da, break_ordinal, window_days=45,
@@ -290,18 +295,18 @@ def determine_break_date(chip_data, break_date_band_index):
 def cascading_selection(image_stack_xr, nodata=65535):
     """
     Apply cascading selection using index-based gathering.
-    
+
     Finds first valid image considering ALL bands together,
     then extracts all bands from that same image to maintain
     spectral consistency.
-    
+
     Parameters:
     -----------
     image_stack_xr : xr.DataArray
         DataArray with dimensions (time, band, y, x)
     nodata : int
         NODATA sentinel value
-    
+
     Returns:
     --------
     xr.DataArray
@@ -309,7 +314,10 @@ def cascading_selection(image_stack_xr, nodata=65535):
     """
     if image_stack_xr is None:
         return None
-    
+
+    print(f"  [cascading_selection] Input transform: {image_stack_xr.rio.transform()}")
+    print(f"  [cascading_selection] Input origin: x={image_stack_xr.x.values[0]}, y={image_stack_xr.y.values[0]}")
+
     # get index of first image where all bands have data
     valid_mask = image_stack_xr < nodata
     all_bands_valid = valid_mask.all(dim='band')
@@ -317,13 +325,16 @@ def cascading_selection(image_stack_xr, nodata=65535):
 
     # Compute the index array (convert from dask to numpy)
     first_valid_idx = first_valid_idx.compute()
-    
+
     result = image_stack_xr.isel(time=first_valid_idx)
-    
+
     # Handle edge case: pixels where NO images have all bands valid
     any_image_all_valid = all_bands_valid.any(dim='time')
     result = result.where(any_image_all_valid, nodata)
-    
+
+    print(f"  [cascading_selection] Output transform: {result.rio.transform()}")
+    print(f"  [cascading_selection] Output origin: x={result.x.values[0]}, y={result.y.values[0]}")
+
     return result
 
 def reorder_bands(bands_combined):
@@ -398,9 +409,15 @@ def load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates
 
     print("Combining into one array...")
     geotiffs_combined = xr.concat([geotiffs_b2b11, geotiffs_4bands], dim='band', join='outer')
+
+    # Fix spatial reference after concat - write_transform ensures coords match actual data extent
+    geotiffs_combined = geotiffs_combined.rio.write_transform()
+    geotiffs_combined = geotiffs_combined.rio.write_crs(geotiffs_b2b11.rio.crs)
+
     print(f"Combined xarray shape: {geotiffs_combined.shape}")
     print(f"Combined x range: [{geotiffs_combined.x.values[0]}, {geotiffs_combined.x.values[-1]}]")
     print(f"Combined y range: [{geotiffs_combined.y.values[0]}, {geotiffs_combined.y.values[-1]}]")
+    print(f"Combined transform after fix: {geotiffs_combined.rio.transform()}")
     print("Xarray loading complete!\n")
     return geotiffs_combined
 
@@ -442,19 +459,6 @@ if __name__ == "__main__":
     with rio.open(INPUT_TIF) as src:
         metadata = src.meta.copy()
         band_names = src.descriptions
-
-        # # Clip S2 xarray to match INPUT_TIF spatial extent
-        # print("\nClipping S2 data to match INPUT_TIF extent...")
-        # bounds = src.bounds
-        # print(f"INPUT_TIF bounds: {bounds}")
-        # geotiffs_combined = geotiffs_combined.rio.clip_box(
-        #     minx=bounds.left,
-        #     miny=bounds.bottom,
-        #     maxx=bounds.right,
-        #     maxy=bounds.top
-        # )
-        # print(f"Clipped S2 xarray shape: {geotiffs_combined.shape}")
-        # print(f"Clipped S2 origin: x={geotiffs_combined.x.values[0]}, y={geotiffs_combined.y.values[0]}")
 
         print(f"Input image size: {src.meta['width']} x {src.meta['height']}")
         print(f"Number of bands: {src.count}")
@@ -525,10 +529,16 @@ if __name__ == "__main__":
                 print("  Warning: Cascading selection failed, skipping chip")
                 continue
 
+            print(f"  [Before numpy conversion] pre_selected_xr transform: {pre_selected_xr.rio.transform()}")
+            print(f"  [Before numpy conversion] pre_selected_xr origin: x={pre_selected_xr.x.values[0]}, y={pre_selected_xr.y.values[0]}")
+            print(f"  [Before numpy conversion] pre_selected_xr shape: {pre_selected_xr.shape}")
+
             # Convert xarray to numpy for further processing
             # Shape: (band, y, x) -> (6, height, width)
             pre_selected = pre_selected_xr.values.transpose(2, 0, 1)
             post_selected = post_selected_xr.values.transpose(2, 0, 1)
+
+            print(f"  [After numpy conversion] pre_selected shape: {pre_selected.shape}")
 
             # Reorder to [B2, B3, B4, B8, B11, B12] for output
             pre_bands_reordered = reorder_bands(pre_selected)
@@ -548,6 +558,10 @@ if __name__ == "__main__":
             metadata['count'] = 14  # 14 bands
             metadata['dtype'] = 'int32'
             metadata['nodata'] = NODATA
+
+            print(f"  [Output chip] Transform being written: {transform}")
+            print(f"  [Output chip] Origin from transform: x={transform.c}, y={transform.f}")
+            print(f"  [Output chip] Window used: {window}")
 
             # Write output chip
             out_filepath = os.path.join(OUTPUT_DIR, OUTPUT_FILENAME.format(window.col_off, window.row_off))
