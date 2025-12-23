@@ -102,15 +102,42 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates):
 
     # Load with spatial chunking aligned to chip size for optimal performance
     tifs_xr = []
+    reference_bounds = None
+    mismatched_files = []
+
     for i, fname in enumerate(tif_names):
         da = rioxarray.open_rasterio(
             os.path.join(s2_folder, tile, fname),
             chunks={'x': -1, 'y': -1, 'band': -1}
         )
-        if i == 0:  # Print first file's coordinates
+
+        current_bounds = (da.x.values[0], da.x.values[-1], da.y.values[0], da.y.values[-1])
+
+        if i == 0:
+            reference_bounds = current_bounds
             print(f"    First file x range: [{da.x.values[0]}, {da.x.values[-1]}]")
             print(f"    First file y range: [{da.y.values[0]}, {da.y.values[-1]}]")
+            print(f"    First file shape: {da.shape}")
+        elif current_bounds != reference_bounds:
+            mismatched_files.append({
+                'index': i,
+                'filename': fname,
+                'bounds': current_bounds,
+                'shape': da.shape
+            })
+
         tifs_xr.append(da)
+
+    if mismatched_files:
+        print(f"    WARNING: Found {len(mismatched_files)} files with different spatial extents!")
+        print(f"    Reference bounds: x=[{reference_bounds[0]}, {reference_bounds[1]}], y=[{reference_bounds[2]}, {reference_bounds[3]}]")
+        for mismatch in mismatched_files[:5]:  # Show first 5 mismatches
+            b = mismatch['bounds']
+            print(f"      File {mismatch['index']} ({mismatch['filename']}): x=[{b[0]}, {b[1]}], y=[{b[2]}, {b[3]}], shape={mismatch['shape']}")
+        if len(mismatched_files) > 5:
+            print(f"      ... and {len(mismatched_files) - 5} more files")
+    else:
+        print(f"    All {len(tif_names)} files have identical spatial extents")
 
     # Concatenate along time dimension
     geotiffs_da = xr.concat(tifs_xr, dim=time_var, join='outer')
