@@ -74,7 +74,7 @@ NODATA = 65535
 # ============================================================================
 
 
-def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates):
+def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates, filter_bounds=None):
     """
     Load full S2 time series into xarray DataArray with chunking for memory efficiency.
 
@@ -88,6 +88,8 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates):
         List of S2 image filenames
     tif_dates : list of datetime
         Corresponding dates for each image
+    filter_bounds : tuple, optional
+        Bounds (minx, miny, maxx, maxy) to filter images. Only images overlapping these bounds will be loaded.
 
     Returns:
     --------
@@ -96,14 +98,20 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates):
     """
     print(f"  Loading {len(tif_names)} images into xarray...")
 
-    # Convert dates to ordinals for time indexing
-    tif_dates_ord = [d.toordinal() for d in tif_dates]
-    time_var = xr.Variable('time', tif_dates_ord)
+    def bounds_overlap(bounds1, bounds2):
+        """Check if two bounding boxes overlap. Bounds format: (minx, maxx, miny, maxy)"""
+        # bounds1/2 format from xarray: (x_min, x_max, y_min, y_max)
+        return not (bounds1[1] < bounds2[0] or  # bounds1 right < bounds2 left
+                    bounds1[0] > bounds2[1] or  # bounds1 left > bounds2 right
+                    bounds1[3] < bounds2[2] or  # bounds1 top < bounds2 bottom
+                    bounds1[2] > bounds2[3])    # bounds1 bottom > bounds2 top
 
     # Load with spatial chunking aligned to chip size for optimal performance
     tifs_xr = []
+    tif_dates_filtered = []
     reference_bounds = None
     mismatched_files = []
+    filtered_out_count = 0
 
     for i, fname in enumerate(tif_names):
         da = rioxarray.open_rasterio(
@@ -111,13 +119,22 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates):
             chunks={'x': -1, 'y': -1, 'band': -1}
         )
 
+        # Current bounds format: (x_min, x_max, y_min, y_max)
         current_bounds = (da.x.values[0], da.x.values[-1], da.y.values[0], da.y.values[-1])
+
+        # Filter check: skip images that don't overlap with filter_bounds
+        if filter_bounds is not None:
+            if not bounds_overlap(current_bounds, filter_bounds):
+                filtered_out_count += 1
+                continue  # Skip this image
 
         if i == 0:
             reference_bounds = current_bounds
             print(f"    First file x range: [{da.x.values[0]}, {da.x.values[-1]}]")
             print(f"    First file y range: [{da.y.values[0]}, {da.y.values[-1]}]")
             print(f"    First file shape: {da.shape}")
+            if filter_bounds is not None:
+                print(f"    Filter bounds: x=[{filter_bounds[0]}, {filter_bounds[1]}], y=[{filter_bounds[2]}, {filter_bounds[3]}]")
         elif current_bounds != reference_bounds:
             mismatched_files.append({
                 'index': i,
@@ -127,6 +144,11 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates):
             })
 
         tifs_xr.append(da)
+        tif_dates_filtered.append(tif_dates[i])
+
+    if filtered_out_count > 0:
+        print(f"    Filtered out {filtered_out_count} images that don't overlap with INPUT_TIF")
+        print(f"    Loading {len(tifs_xr)} images (out of {len(tif_names)} total)")
 
     if mismatched_files:
         print(f"    WARNING: Found {len(mismatched_files)} files with different spatial extents!")
@@ -137,10 +159,14 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates):
         if len(mismatched_files) > 5:
             print(f"      ... and {len(mismatched_files) - 5} more files")
     else:
-        print(f"    All {len(tif_names)} files have identical spatial extents")
+        print(f"    All {len(tifs_xr)} loaded files have identical spatial extents")
+
+    # Convert filtered dates to ordinals for time dimension
+    tif_dates_ord_filtered = [d.toordinal() for d in tif_dates_filtered]
+    time_var_filtered = xr.Variable('time', tif_dates_ord_filtered)
 
     # Concatenate along time dimension
-    geotiffs_da = xr.concat(tifs_xr, dim=time_var, join='outer')
+    geotiffs_da = xr.concat(tifs_xr, dim=time_var_filtered, join='outer')
     geotiffs_da = geotiffs_da.chunk({'time': 1}) # One chunk per time step
 
     print(f"  Loaded xarray with shape: {geotiffs_da.shape}")
@@ -416,20 +442,24 @@ def s2_band_files_identical_check(first_files_names, first_files_dates, second_f
     print(f"Filtered to {len(first_names_filtered)} common dates")
     return first_names_filtered, first_dates_filtered, second_names_filtered, second_dates_filtered
 
-def load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates, S2_IMAGES_FOLDER_4_BANDS, bands4_names, bands4_dates):
+def load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates, S2_IMAGES_FOLDER_4_BANDS, bands4_names, bands4_dates, filter_bounds=None):
     """
     Loads the 2 different S2 band files into xarrays and then combines them
 
+    Parameters:
+    -----------
+    filter_bounds : tuple, optional
+        Bounds (minx, maxx, miny, maxy) to filter images. Only images overlapping these bounds will be loaded.
     """
     print("\nLoading S2 time series into xarray...")
     print("Loading B2B11 collection...")
-    geotiffs_b2b11 = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates)
+    geotiffs_b2b11 = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates, filter_bounds)
     print(f"  B2B11 xarray shape: {geotiffs_b2b11.shape}")
     print(f"  B2B11 x range: [{geotiffs_b2b11.x.values[0]}, {geotiffs_b2b11.x.values[-1]}]")
     print(f"  B2B11 y range: [{geotiffs_b2b11.y.values[0]}, {geotiffs_b2b11.y.values[-1]}]")
 
     print("Loading 4-band collection...")
-    geotiffs_4bands = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_4_BANDS, TILE, bands4_names, bands4_dates)
+    geotiffs_4bands = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_4_BANDS, TILE, bands4_names, bands4_dates, filter_bounds)
     print(f"  4-band xarray shape: {geotiffs_4bands.shape}")
     print(f"  4-band x range: [{geotiffs_4bands.x.values[0]}, {geotiffs_4bands.x.values[-1]}]")
     print(f"  4-band y range: [{geotiffs_4bands.y.values[0]}, {geotiffs_4bands.y.values[-1]}]")
@@ -476,14 +506,23 @@ if __name__ == "__main__":
         first_4band_path = os.path.join(S2_IMAGES_FOLDER_4_BANDS, TILE, tif_names_bands4[0])
         with rio.open(first_4band_path) as s2_src:
             print(f"First 4-band file: {tif_names_bands4[0]}")
+            print(f"  Transform: {s2_src.transform}")
             print(f"  Origin (top-left): x={s2_src.transform.c}, y={s2_src.transform.f}")
             print(f"  Size: {s2_src.width} x {s2_src.height}")
+            print(f"  CRS: {s2_src.crs}")
+            print(f"  Bounds: {s2_src.bounds}")
 
     b2b11_names, b2b11_dates, bands4_names, bands4_dates = s2_band_files_identical_check(tif_names_b2b11, tif_dates_b2b11, tif_names_bands4, tif_dates_bands4)
 
-    geotiffs_combined = load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates, S2_IMAGES_FOLDER_4_BANDS, bands4_names, bands4_dates)
-
+    # Open INPUT_TIF to get bounds for filtering S2 images and for processing
+    print("\nReading INPUT_TIF bounds for filtering S2 images...")
     with rio.open(INPUT_TIF) as src:
+        input_bounds = src.bounds
+        # Convert rasterio BoundingBox to (minx, maxx, miny, maxy) format for xarray
+        filter_bounds = (input_bounds.left, input_bounds.right, input_bounds.bottom, input_bounds.top)
+        print(f"INPUT_TIF bounds: x=[{filter_bounds[0]}, {filter_bounds[1]}], y=[{filter_bounds[2]}, {filter_bounds[3]}]")
+
+        geotiffs_combined = load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates, S2_IMAGES_FOLDER_4_BANDS, bands4_names, bands4_dates, filter_bounds)
         metadata = src.meta.copy()
         band_names = src.descriptions
 
