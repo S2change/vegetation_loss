@@ -120,7 +120,10 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates, filter_boun
         )
 
         # Current bounds format: (x_min, x_max, y_min, y_max)
-        current_bounds = (da.x.values[0], da.x.values[-1], da.y.values[0], da.y.values[-1])
+        # Use min/max to ensure correct ordering since y-coords may be top-to-bottom (decreasing)
+        current_bounds = (da.x.values[0], da.x.values[-1],
+                          min(da.y.values[0], da.y.values[-1]),
+                          max(da.y.values[0], da.y.values[-1]))
 
         # Filter check: skip images that don't overlap with filter_bounds
         if filter_bounds is not None:
@@ -128,7 +131,7 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates, filter_boun
                 filtered_out_count += 1
                 continue  # Skip this image
 
-        if i == 0:
+        if reference_bounds is None:
             reference_bounds = current_bounds
             print(f"    First file x range: [{da.x.values[0]}, {da.x.values[-1]}]")
             print(f"    First file y range: [{da.y.values[0]}, {da.y.values[-1]}]")
