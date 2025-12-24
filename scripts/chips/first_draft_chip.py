@@ -109,8 +109,6 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates, filter_boun
     # Load with spatial chunking aligned to chip size for optimal performance
     tifs_xr = []
     tif_dates_filtered = []
-    reference_bounds = None
-    mismatched_files = []
     filtered_out_count = 0
 
     for i, fname in enumerate(tif_names):
@@ -131,38 +129,8 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates, filter_boun
                 filtered_out_count += 1
                 continue  # Skip this image
 
-        if reference_bounds is None:
-            reference_bounds = current_bounds
-            print(f"    First file x range: [{da.x.values[0]}, {da.x.values[-1]}]")
-            print(f"    First file y range: [{da.y.values[0]}, {da.y.values[-1]}]")
-            print(f"    First file shape: {da.shape}")
-            if filter_bounds is not None:
-                print(f"    Filter bounds: x=[{filter_bounds[0]}, {filter_bounds[1]}], y=[{filter_bounds[2]}, {filter_bounds[3]}]")
-        elif current_bounds != reference_bounds:
-            mismatched_files.append({
-                'index': i,
-                'filename': fname,
-                'bounds': current_bounds,
-                'shape': da.shape
-            })
-
         tifs_xr.append(da)
         tif_dates_filtered.append(tif_dates[i])
-
-    if filtered_out_count > 0:
-        print(f"    Filtered out {filtered_out_count} images that don't overlap with INPUT_TIF")
-        print(f"    Loading {len(tifs_xr)} images (out of {len(tif_names)} total)")
-
-    if mismatched_files:
-        print(f"    WARNING: Found {len(mismatched_files)} files with different spatial extents!")
-        print(f"    Reference bounds: x=[{reference_bounds[0]}, {reference_bounds[1]}], y=[{reference_bounds[2]}, {reference_bounds[3]}]")
-        for mismatch in mismatched_files[:5]:  # Show first 5 mismatches
-            b = mismatch['bounds']
-            print(f"      File {mismatch['index']} ({mismatch['filename']}): x=[{b[0]}, {b[1]}], y=[{b[2]}, {b[3]}], shape={mismatch['shape']}")
-        if len(mismatched_files) > 5:
-            print(f"      ... and {len(mismatched_files) - 5} more files")
-    else:
-        print(f"    All {len(tifs_xr)} loaded files have identical spatial extents")
 
     # Convert filtered dates to ordinals for time dimension
     tif_dates_ord_filtered = [d.toordinal() for d in tif_dates_filtered]
@@ -173,8 +141,7 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates, filter_boun
     geotiffs_da = geotiffs_da.chunk({'time': 1}) # One chunk per time step
 
     print(f"  Loaded xarray with shape: {geotiffs_da.shape}")
-    print(f"  After time concat x range: [{geotiffs_da.x.values[0]}, {geotiffs_da.x.values[-1]}]")
-    print(f"  After time concat y range: [{geotiffs_da.y.values[0]}, {geotiffs_da.y.values[-1]}]")
+    print(f"  Filtered out {filtered_out_count} images due to not overlapping input tif boundary")
     return geotiffs_da
 
 
@@ -198,11 +165,7 @@ def spatial_subset_by_window(xarray_da, window):
     # x_slice = slice(window.col_off, window.col_off + window.width)
     # y_slice = slice(window.row_off, window.row_off + window.height)
 
-    print(f"  [spatial_subset_by_window] Input xarray transform: {xarray_da.rio.transform()}")
-    print(f"  [spatial_subset_by_window] Input xarray origin: x={xarray_da.x.values[0]}, y={xarray_da.y.values[0]}")
     result = xarray_da.rio.isel_window(window)
-    print(f"  [spatial_subset_by_window] Output xarray transform: {result.rio.transform()}")
-    print(f"  [spatial_subset_by_window] Output xarray origin: x={result.x.values[0]}, y={result.y.values[0]}")
     return result
 
 
@@ -457,101 +420,18 @@ def load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates
     print("\nLoading S2 time series into xarray...")
     print("Loading B2B11 collection...")
     geotiffs_b2b11 = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates, filter_bounds)
-    print(f"  B2B11 xarray shape: {geotiffs_b2b11.shape}")
-    print(f"  B2B11 x range: [{geotiffs_b2b11.x.values[0]}, {geotiffs_b2b11.x.values[-1]}]")
-    print(f"  B2B11 y range: [{geotiffs_b2b11.y.values[0]}, {geotiffs_b2b11.y.values[-1]}]")
-    print(f"  B2B11 transform: {geotiffs_b2b11.rio.transform()}")
 
     print("Loading 4-band collection...")
     geotiffs_4bands = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_4_BANDS, TILE, bands4_names, bands4_dates, filter_bounds)
-    print(f"  4-band xarray shape: {geotiffs_4bands.shape}")
-    print(f"  4-band x range: [{geotiffs_4bands.x.values[0]}, {geotiffs_4bands.x.values[-1]}]")
-    print(f"  4-band y range: [{geotiffs_4bands.y.values[0]}, {geotiffs_4bands.y.values[-1]}]")
-    print(f"  4-band transform: {geotiffs_4bands.rio.transform()}")
 
     print("Combining into one array...")
     geotiffs_combined = xr.concat([geotiffs_b2b11, geotiffs_4bands], dim='band', join='outer')
-    print(f"Combined xarray shape: {geotiffs_combined.shape}")
-    print(f"Combined x range: [{geotiffs_combined.x.values[0]}, {geotiffs_combined.x.values[-1]}]")
-    print(f"Combined y range: [{geotiffs_combined.y.values[0]}, {geotiffs_combined.y.values[-1]}]")
-    print(f"Combined transform after fix: {geotiffs_combined.rio.transform()}")
 
     # Ensure CRS is not corrupted from concat
     geotiffs_combined = geotiffs_combined.rio.write_crs(geotiffs_b2b11.rio.crs)
 
-    print(f"Combined rewrite xarray shape: {geotiffs_combined.shape}")
-    print(f"Combined rewrite x range: [{geotiffs_combined.x.values[0]}, {geotiffs_combined.x.values[-1]}]")
-    print(f"Combined rewrite y range: [{geotiffs_combined.y.values[0]}, {geotiffs_combined.y.values[-1]}]")
-    print(f"Combined rewrite transform after fix: {geotiffs_combined.rio.transform()}")
     print("Xarray loading complete!\n")
     return geotiffs_combined
-
-def align_s2_to_reference(s2_xarray, reference_transform, reference_width, reference_height, reference_crs):
-    """
-    Reproject S2 xarray to match the reference raster's exact grid.
-
-    Handles 4D arrays (time, band, y, x) by reprojecting each time slice separately.
-
-    Parameters:
-    -----------
-    s2_xarray : xr.DataArray
-        The S2 xarray to align (shape: time, band, y, x)
-    reference_transform : affine.Affine
-        Transform from the reference raster (INPUT_TIF)
-    reference_width : int
-        Width of reference raster
-    reference_height : int
-        Height of reference raster
-    reference_crs : rasterio.crs.CRS
-        CRS of reference raster
-
-    Returns:
-    --------
-    xr.DataArray
-        Aligned S2 xarray matching reference grid exactly
-    """
-    print("\nAligning S2 xarray to INPUT_TIF grid...")
-    print(f"  Before alignment - S2 transform: {s2_xarray.rio.transform()}")
-    print(f"  Before alignment - S2 shape: {s2_xarray.shape}")
-    print(f"  Target transform: {reference_transform}")
-    print(f"  Target shape: ({reference_height}, {reference_width})")
-
-    # Reproject each time slice separately (rioxarray doesn't support 4D reprojection)
-    aligned_slices = []
-    num_timesteps = s2_xarray.shape[0]
-
-    print(f"  Reprojecting {num_timesteps} time slices...")
-    for t in range(num_timesteps):
-        if t % 100 == 0:
-            print(f"    Processing time slice {t}/{num_timesteps}...")
-
-        # Extract 3D slice (band, y, x)
-        time_slice = s2_xarray.isel(time=t)
-
-        # Reproject this time slice
-        aligned_slice = time_slice.rio.reproject(
-            reference_crs,
-            transform=reference_transform,
-            shape=(reference_height, reference_width),
-            resampling=1  # Bilinear resampling
-        )
-
-        aligned_slices.append(aligned_slice)
-
-    # Recombine time slices
-    print(f"  Combining {len(aligned_slices)} aligned time slices...")
-    aligned_xarray = xr.concat(aligned_slices, dim='time')
-
-    # Restore time coordinates
-    aligned_xarray['time'] = s2_xarray['time']
-
-    print(f"  After alignment - S2 transform: {aligned_xarray.rio.transform()}")
-    print(f"  After alignment - S2 shape: {aligned_xarray.shape}")
-    print(f"  After alignment - S2 x range: [{aligned_xarray.x.values[0]}, {aligned_xarray.x.values[-1]}]")
-    print(f"  After alignment - S2 y range: [{aligned_xarray.y.values[0]}, {aligned_xarray.y.values[-1]}]")
-    print("Alignment complete!\n")
-
-    return aligned_xarray
 
 if __name__ == "__main__":
     ProgressBar().register()
@@ -566,27 +446,6 @@ if __name__ == "__main__":
     )
     print(f"Found {len(tif_names_b2b11)} B2B11 images and {len(tif_names_bands4)} 4-band images")
 
-    print("\nChecking spatial extent of raw S2 files...")
-    if len(tif_names_b2b11) > 0:
-        first_b2b11_path = os.path.join(S2_IMAGES_FOLDER_B2_B11, TILE, tif_names_b2b11[0])
-        with rio.open(first_b2b11_path) as s2_src:
-            print(f"First B2B11 file: {tif_names_b2b11[0]}")
-            print(f"  Transform: {s2_src.transform}")
-            print(f"  Origin (top-left): x={s2_src.transform.c}, y={s2_src.transform.f}")
-            print(f"  Size: {s2_src.width} x {s2_src.height}")
-            print(f"  CRS: {s2_src.crs}")
-            print(f"  Bounds: {s2_src.bounds}")
-
-    if len(tif_names_bands4) > 0:
-        first_4band_path = os.path.join(S2_IMAGES_FOLDER_4_BANDS, TILE, tif_names_bands4[0])
-        with rio.open(first_4band_path) as s2_src:
-            print(f"First 4-band file: {tif_names_bands4[0]}")
-            print(f"  Transform: {s2_src.transform}")
-            print(f"  Origin (top-left): x={s2_src.transform.c}, y={s2_src.transform.f}")
-            print(f"  Size: {s2_src.width} x {s2_src.height}")
-            print(f"  CRS: {s2_src.crs}")
-            print(f"  Bounds: {s2_src.bounds}")
-
     b2b11_names, b2b11_dates, bands4_names, bands4_dates = s2_band_files_identical_check(tif_names_b2b11, tif_dates_b2b11, tif_names_bands4, tif_dates_bands4)
 
     # Open INPUT_TIF to get bounds for filtering S2 images and for processing
@@ -599,28 +458,12 @@ if __name__ == "__main__":
 
         geotiffs_combined = load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates, S2_IMAGES_FOLDER_4_BANDS, bands4_names, bands4_dates, filter_bounds)
 
-        # # Align S2 xarray to INPUT_TIF's exact grid
-        # geotiffs_combined = align_s2_to_reference(
-        #     geotiffs_combined,
-        #     src.transform,
-        #     src.width,
-        #     src.height,
-        #     src.crs
-        # )
-
         metadata = src.meta.copy()
         band_names = src.descriptions
 
         print(f"Input image size: {src.meta['width']} x {src.meta['height']}")
         print(f"Number of bands: {src.count}")
         print(f"Band names: {band_names}")
-        print(f"Input TIF transform: {src.transform}")
-        print(f"Input TIF origin (top-left): x={src.transform.c}, y={src.transform.f}")
-        print(f"Input TIF CRS: {src.crs}")
-        print(f"S2 xarray origin: x={geotiffs_combined.x.values[0]}, y={geotiffs_combined.y.values[-1]}")
-        print(f"S2 xarray bounds (.rio.bounds): {geotiffs_combined.rio.bounds()}")
-        print(f"S2 xarray transform (.rio.transform): {geotiffs_combined.rio.transform()}")
-        print(f"S2 xarray CRS: {geotiffs_combined.rio.crs}")
         print(f"Chip size: {CHIP_WIDTH} x {CHIP_HEIGHT}")
         print(f"Overlap: {OVERLAP} pixels")
         print(f"Output directory: {OUTPUT_DIR}")
@@ -680,16 +523,10 @@ if __name__ == "__main__":
                 print("  Warning: Cascading selection failed, skipping chip")
                 continue
 
-            print(f"  [Before numpy conversion] pre_selected_xr transform: {pre_selected_xr.rio.transform()}")
-            print(f"  [Before numpy conversion] pre_selected_xr origin: x={pre_selected_xr.x.values[0]}, y={pre_selected_xr.y.values[0]}")
-            print(f"  [Before numpy conversion] pre_selected_xr shape: {pre_selected_xr.shape}")
-
             # Convert xarray to numpy for further processing
             # Shape: (band, y, x) -> (6, height, width)
             pre_selected = pre_selected_xr.values.transpose(2, 0, 1)
             post_selected = post_selected_xr.values.transpose(2, 0, 1)
-
-            print(f"  [After numpy conversion] pre_selected shape: {pre_selected.shape}")
 
             # Reorder to [B2, B3, B4, B8, B11, B12] for output
             pre_bands_reordered = reorder_bands(pre_selected)
@@ -709,10 +546,6 @@ if __name__ == "__main__":
             metadata['count'] = 14  # 14 bands
             metadata['dtype'] = 'int32'
             metadata['nodata'] = NODATA
-
-            print(f"  [Output chip] Transform being written: {transform}")
-            print(f"  [Output chip] Origin from transform: x={transform.c}, y={transform.f}")
-            print(f"  [Output chip] Window used: {window}")
 
             # Write output chip
             out_filepath = os.path.join(OUTPUT_DIR, OUTPUT_FILENAME.format(window.col_off, window.row_off))
