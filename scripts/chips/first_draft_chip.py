@@ -30,11 +30,11 @@ MIN_DATE = None
 MAX_DATE = datetime(2024, 12, 31)
 
 # Output directory for chips
-OUTPUT_DIR = r"C:\Users\isa127909\Desktop\B2B11_tests\T29TQG_chips"
+OUTPUT_DIR = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG\processed_outputs\chips"
 
 # Output filename pattern, {} will be filled with the x, y coordinates of the first pixel in the chip
 # '(tile)_(break's start date)_(break's end date)_{}-{}.tif
-OUTPUT_FILENAME = '08_T29TQG_20180101_20211231_{}-{}.tif'
+OUTPUT_FILENAME = 'T29TQG_20180101_20211231_{}-{}.tif'
 
 # Chip dimensions in pixels
 CHIP_WIDTH = 256
@@ -334,9 +334,6 @@ def cascading_selection(image_stack_xr, nodata=65535):
     if image_stack_xr is None:
         return None
 
-    print(f"  [cascading_selection] Input transform: {image_stack_xr.rio.transform()}")
-    print(f"  [cascading_selection] Input origin: x={image_stack_xr.x.values[0]}, y={image_stack_xr.y.values[0]}")
-
     # get index of first image where all bands have data
     valid_mask = image_stack_xr < nodata
     all_bands_valid = valid_mask.all(dim='band')
@@ -350,9 +347,6 @@ def cascading_selection(image_stack_xr, nodata=65535):
     # Handle edge case: pixels where NO images have all bands valid
     any_image_all_valid = all_bands_valid.any(dim='time')
     result = result.where(any_image_all_valid, nodata)
-
-    print(f"  [cascading_selection] Output transform: {result.rio.transform()}")
-    print(f"  [cascading_selection] Output origin: x={result.x.values[0]}, y={result.y.values[0]}")
 
     return result
 
@@ -559,7 +553,7 @@ if __name__ == "__main__":
 
             chip_count += 1
             print(f"  Wrote chip: {out_filepath}")
-            if chip_count >= 1:
+            if chip_count >= 10:
                 break
 
         print(f"Successfully created {chip_count} chips in {OUTPUT_DIR}")
