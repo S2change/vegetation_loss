@@ -481,6 +481,50 @@ def load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates
     print("Xarray loading complete!\n")
     return geotiffs_combined
 
+def align_s2_to_reference(s2_xarray, reference_transform, reference_width, reference_height, reference_crs):
+    """
+    Reproject S2 xarray to match the reference raster's exact grid.
+
+    Parameters:
+    -----------
+    s2_xarray : xr.DataArray
+        The S2 xarray to align
+    reference_transform : affine.Affine
+        Transform from the reference raster (INPUT_TIF)
+    reference_width : int
+        Width of reference raster
+    reference_height : int
+        Height of reference raster
+    reference_crs : rasterio.crs.CRS
+        CRS of reference raster
+
+    Returns:
+    --------
+    xr.DataArray
+        Aligned S2 xarray matching reference grid exactly
+    """
+    print("\nAligning S2 xarray to INPUT_TIF grid...")
+    print(f"  Before alignment - S2 transform: {s2_xarray.rio.transform()}")
+    print(f"  Before alignment - S2 shape: {s2_xarray.shape}")
+    print(f"  Target transform: {reference_transform}")
+    print(f"  Target shape: ({reference_height}, {reference_width})")
+
+    # Reproject to match the reference grid exactly
+    aligned_xarray = s2_xarray.rio.reproject(
+        reference_crs,
+        transform=reference_transform,
+        shape=(reference_height, reference_width),
+        resampling=1  # Bilinear resampling
+    )
+
+    print(f"  After alignment - S2 transform: {aligned_xarray.rio.transform()}")
+    print(f"  After alignment - S2 shape: {aligned_xarray.shape}")
+    print(f"  After alignment - S2 x range: [{aligned_xarray.x.values[0]}, {aligned_xarray.x.values[-1]}]")
+    print(f"  After alignment - S2 y range: [{aligned_xarray.y.values[0]}, {aligned_xarray.y.values[-1]}]")
+    print("Alignment complete!\n")
+
+    return aligned_xarray
+
 if __name__ == "__main__":
     ProgressBar().register()
 
@@ -526,6 +570,16 @@ if __name__ == "__main__":
         print(f"INPUT_TIF bounds: x=[{filter_bounds[0]}, {filter_bounds[1]}], y=[{filter_bounds[2]}, {filter_bounds[3]}]")
 
         geotiffs_combined = load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates, S2_IMAGES_FOLDER_4_BANDS, bands4_names, bands4_dates, filter_bounds)
+
+        # Align S2 xarray to INPUT_TIF's exact grid
+        geotiffs_combined = align_s2_to_reference(
+            geotiffs_combined,
+            src.transform,
+            src.width,
+            src.height,
+            src.crs
+        )
+
         metadata = src.meta.copy()
         band_names = src.descriptions
 
