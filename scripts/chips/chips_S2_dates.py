@@ -93,8 +93,9 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates, filter_boun
 
     Returns:
     --------
-    xr.DataArray
-        DataArray with dimensions (time, band, y, x) where time is in ordinal format
+    tuple of (xr.DataArray, dict)
+        First element: DataArray with dimensions (time, band, y, x) where time is in ordinal format
+        Second element: Dictionary mapping ordinal dates to Unix timestamps in milliseconds
     """
     print(f"  Loading {len(tif_names)} images into xarray...")
 
@@ -109,6 +110,7 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates, filter_boun
     # Load with spatial chunking aligned to chip size for optimal performance
     tifs_xr = []
     tif_dates_filtered = []
+    tif_names_filtered = []
     filtered_out_count = 0
 
     for i, fname in enumerate(tif_names):
@@ -131,10 +133,20 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates, filter_boun
 
         tifs_xr.append(da)
         tif_dates_filtered.append(tif_dates[i])
+        tif_names_filtered.append(fname)
 
     # Convert filtered dates to ordinals for time dimension
     tif_dates_ord_filtered = [d.toordinal() for d in tif_dates_filtered]
     time_var_filtered = xr.Variable('time', tif_dates_ord_filtered)
+
+    # Extract Unix timestamps from filenames and create ordinal -> unix_timestamp mapping
+    ordinal_to_unix_ms = {}
+    timestamp_pattern = re.compile(r'S2SR_image_(\d{13})')
+    for fname, ordinal in zip(tif_names_filtered, tif_dates_ord_filtered):
+        match = timestamp_pattern.search(fname)
+        if match:
+            unix_timestamp_ms = int(match.group(1))
+            ordinal_to_unix_ms[ordinal] = unix_timestamp_ms
 
     # Concatenate along time dimension
     geotiffs_da = xr.concat(tifs_xr, dim=time_var_filtered, join='outer')
@@ -142,7 +154,7 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates, filter_boun
 
     print(f"  Loaded xarray with shape: {geotiffs_da.shape}")
     print(f"  Filtered out {filtered_out_count} images due to not overlapping input tif boundary")
-    return geotiffs_da
+    return geotiffs_da, ordinal_to_unix_ms
 
 
 def spatial_subset_by_window(xarray_da, window):
@@ -382,6 +394,38 @@ def reorder_bands(bands_combined):
         bands_combined[5]   # B12
     ])
 
+def ordinal_to_unix_timestamp(ordinal_array, ordinal_to_unix_map, nodata=65535):
+    """
+    Convert array of ordinal dates to Unix timestamps in milliseconds using a mapping.
+
+    Parameters:
+    -----------
+    ordinal_array : numpy.ndarray
+        Array containing ordinal date values
+    ordinal_to_unix_map : dict
+        Dictionary mapping ordinal dates to Unix timestamps in milliseconds
+    nodata : int
+        NODATA sentinel value that should be preserved
+
+    Returns:
+    --------
+    numpy.ndarray
+        Array with ordinal values converted to Unix timestamps (nodata preserved)
+    """
+    result = np.full_like(ordinal_array, nodata, dtype=np.int64)
+
+    # Get unique ordinal values (excluding nodata)
+    unique_ordinals = np.unique(ordinal_array)
+    unique_ordinals = unique_ordinals[unique_ordinals != nodata]
+
+    # Convert each ordinal to Unix timestamp
+    for ordinal in unique_ordinals:
+        if ordinal in ordinal_to_unix_map:
+            mask = ordinal_array == ordinal
+            result[mask] = ordinal_to_unix_map[ordinal]
+
+    return result
+
 def s2_band_files_identical_check(first_files_names, first_files_dates, second_files_names, second_files_dates):
     """
     Safety check that S2 tif files have identical dates for combining the 2 bands with the 4 bands files
@@ -419,13 +463,19 @@ def load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates
     -----------
     filter_bounds : tuple, optional
         Bounds (minx, maxx, miny, maxy) to filter images. Only images overlapping these bounds will be loaded.
+
+    Returns:
+    --------
+    tuple of (xr.DataArray, dict)
+        First element: Combined DataArray with all bands
+        Second element: Dictionary mapping ordinal dates to Unix timestamps in milliseconds
     """
     print("\nLoading S2 time series into xarray...")
     print("Loading B2B11 collection...")
-    geotiffs_b2b11 = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates, filter_bounds)
+    geotiffs_b2b11, timestamp_map_b2b11 = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates, filter_bounds)
 
     print("Loading 4-band collection...")
-    geotiffs_4bands = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_4_BANDS, TILE, bands4_names, bands4_dates, filter_bounds)
+    geotiffs_4bands, timestamp_map_4bands = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_4_BANDS, TILE, bands4_names, bands4_dates, filter_bounds)
 
     print("Combining into one array...")
     geotiffs_combined = xr.concat([geotiffs_b2b11, geotiffs_4bands], dim='band', join='outer')
@@ -433,8 +483,11 @@ def load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates
     # Ensure CRS is not corrupted from concat
     geotiffs_combined = geotiffs_combined.rio.write_crs(geotiffs_b2b11.rio.crs)
 
+    # Merge timestamp mappings (they should be identical since files are filtered to common dates)
+    timestamp_map_combined = {**timestamp_map_b2b11, **timestamp_map_4bands}
+
     print("Xarray loading complete!\n")
-    return geotiffs_combined
+    return geotiffs_combined, timestamp_map_combined
 
 if __name__ == "__main__":
     ProgressBar().register()
@@ -459,7 +512,7 @@ if __name__ == "__main__":
         filter_bounds = (input_bounds.left, input_bounds.right, input_bounds.bottom, input_bounds.top)
         print(f"INPUT_TIF bounds: x=[{filter_bounds[0]}, {filter_bounds[1]}], y=[{filter_bounds[2]}, {filter_bounds[3]}]")
 
-        geotiffs_combined = load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates, S2_IMAGES_FOLDER_4_BANDS, bands4_names, bands4_dates, filter_bounds)
+        geotiffs_combined, timestamp_mapping = load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates, S2_IMAGES_FOLDER_4_BANDS, bands4_names, bands4_dates, filter_bounds)
 
         metadata = src.meta.copy()
         band_names = src.descriptions
@@ -539,14 +592,18 @@ if __name__ == "__main__":
             pre_bands_reordered = reorder_bands(pre_selected)
             post_bands_reordered = reorder_bands(post_selected)
 
+            # Convert ordinal timestamps to Unix timestamps in milliseconds
+            pre_timestamps_unix = ordinal_to_unix_timestamp(pre_timestamps, timestamp_mapping, NODATA)
+            post_timestamps_unix = ordinal_to_unix_timestamp(post_timestamps, timestamp_mapping, NODATA)
+
             # Stack pre/post bands and metadata into 16-band output
             output_bands = np.vstack([
                 pre_bands_reordered,                                                        # Bands 0-5
                 np.full((1, CHIP_HEIGHT, CHIP_WIDTH), chip_break_date, dtype=np.int32),   # Band 6
                 post_bands_reordered,                                                       # Bands 7-12
                 chip_data[IS_BREAK_BAND - 1][np.newaxis],                                   # Band 13
-                pre_timestamps[np.newaxis],                                                 # Band 14
-                post_timestamps[np.newaxis]                                                 # Band 15
+                pre_timestamps_unix[np.newaxis],                                            # Band 14
+                post_timestamps_unix[np.newaxis]                                            # Band 15
             ])
 
             # Update metadata for output
