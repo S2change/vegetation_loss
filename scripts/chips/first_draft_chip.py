@@ -485,10 +485,12 @@ def align_s2_to_reference(s2_xarray, reference_transform, reference_width, refer
     """
     Reproject S2 xarray to match the reference raster's exact grid.
 
+    Handles 4D arrays (time, band, y, x) by reprojecting each time slice separately.
+
     Parameters:
     -----------
     s2_xarray : xr.DataArray
-        The S2 xarray to align
+        The S2 xarray to align (shape: time, band, y, x)
     reference_transform : affine.Affine
         Transform from the reference raster (INPUT_TIF)
     reference_width : int
@@ -509,13 +511,34 @@ def align_s2_to_reference(s2_xarray, reference_transform, reference_width, refer
     print(f"  Target transform: {reference_transform}")
     print(f"  Target shape: ({reference_height}, {reference_width})")
 
-    # Reproject to match the reference grid exactly
-    aligned_xarray = s2_xarray.rio.reproject(
-        reference_crs,
-        transform=reference_transform,
-        shape=(reference_height, reference_width),
-        resampling=1  # Bilinear resampling
-    )
+    # Reproject each time slice separately (rioxarray doesn't support 4D reprojection)
+    aligned_slices = []
+    num_timesteps = s2_xarray.shape[0]
+
+    print(f"  Reprojecting {num_timesteps} time slices...")
+    for t in range(num_timesteps):
+        if t % 100 == 0:
+            print(f"    Processing time slice {t}/{num_timesteps}...")
+
+        # Extract 3D slice (band, y, x)
+        time_slice = s2_xarray.isel(time=t)
+
+        # Reproject this time slice
+        aligned_slice = time_slice.rio.reproject(
+            reference_crs,
+            transform=reference_transform,
+            shape=(reference_height, reference_width),
+            resampling=1  # Bilinear resampling
+        )
+
+        aligned_slices.append(aligned_slice)
+
+    # Recombine time slices
+    print(f"  Combining {len(aligned_slices)} aligned time slices...")
+    aligned_xarray = xr.concat(aligned_slices, dim='time')
+
+    # Restore time coordinates
+    aligned_xarray['time'] = s2_xarray['time']
 
     print(f"  After alignment - S2 transform: {aligned_xarray.rio.transform()}")
     print(f"  After alignment - S2 shape: {aligned_xarray.shape}")
