@@ -460,24 +460,30 @@ def load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates
     print(f"  B2B11 xarray shape: {geotiffs_b2b11.shape}")
     print(f"  B2B11 x range: [{geotiffs_b2b11.x.values[0]}, {geotiffs_b2b11.x.values[-1]}]")
     print(f"  B2B11 y range: [{geotiffs_b2b11.y.values[0]}, {geotiffs_b2b11.y.values[-1]}]")
+    print(f"  B2B11 transform: {geotiffs_b2b11.rio.transform()}")
 
     print("Loading 4-band collection...")
     geotiffs_4bands = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_4_BANDS, TILE, bands4_names, bands4_dates, filter_bounds)
     print(f"  4-band xarray shape: {geotiffs_4bands.shape}")
     print(f"  4-band x range: [{geotiffs_4bands.x.values[0]}, {geotiffs_4bands.x.values[-1]}]")
     print(f"  4-band y range: [{geotiffs_4bands.y.values[0]}, {geotiffs_4bands.y.values[-1]}]")
+    print(f"  4-band transform: {geotiffs_4bands.rio.transform()}")
 
     print("Combining into one array...")
     geotiffs_combined = xr.concat([geotiffs_b2b11, geotiffs_4bands], dim='band', join='outer')
+    print(f"Combined xarray shape: {geotiffs_combined.shape}")
+    print(f"Combined x range: [{geotiffs_combined.x.values[0]}, {geotiffs_combined.x.values[-1]}]")
+    print(f"Combined y range: [{geotiffs_combined.y.values[0]}, {geotiffs_combined.y.values[-1]}]")
+    print(f"Combined transform after fix: {geotiffs_combined.rio.transform()}")
 
     # Fix spatial reference after concat - write_transform ensures coords match actual data extent
     geotiffs_combined = geotiffs_combined.rio.write_transform()
     geotiffs_combined = geotiffs_combined.rio.write_crs(geotiffs_b2b11.rio.crs)
 
-    print(f"Combined xarray shape: {geotiffs_combined.shape}")
-    print(f"Combined x range: [{geotiffs_combined.x.values[0]}, {geotiffs_combined.x.values[-1]}]")
-    print(f"Combined y range: [{geotiffs_combined.y.values[0]}, {geotiffs_combined.y.values[-1]}]")
-    print(f"Combined transform after fix: {geotiffs_combined.rio.transform()}")
+    print(f"Combined rewrite xarray shape: {geotiffs_combined.shape}")
+    print(f"Combined rewrite x range: [{geotiffs_combined.x.values[0]}, {geotiffs_combined.x.values[-1]}]")
+    print(f"Combined rewrite y range: [{geotiffs_combined.y.values[0]}, {geotiffs_combined.y.values[-1]}]")
+    print(f"Combined rewrite transform after fix: {geotiffs_combined.rio.transform()}")
     print("Xarray loading complete!\n")
     return geotiffs_combined
 
@@ -594,14 +600,14 @@ if __name__ == "__main__":
 
         geotiffs_combined = load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates, S2_IMAGES_FOLDER_4_BANDS, bands4_names, bands4_dates, filter_bounds)
 
-        # Align S2 xarray to INPUT_TIF's exact grid
-        geotiffs_combined = align_s2_to_reference(
-            geotiffs_combined,
-            src.transform,
-            src.width,
-            src.height,
-            src.crs
-        )
+        # # Align S2 xarray to INPUT_TIF's exact grid
+        # geotiffs_combined = align_s2_to_reference(
+        #     geotiffs_combined,
+        #     src.transform,
+        #     src.width,
+        #     src.height,
+        #     src.crs
+        # )
 
         metadata = src.meta.copy()
         band_names = src.descriptions
