@@ -34,7 +34,7 @@ OUTPUT_DIR = r"C:\Users\isa127909\Desktop\B2B11_tests\T29TQG_chips"
 
 # Output filename pattern, {} will be filled with the x, y coordinates of the first pixel in the chip
 # '(tile)_(break's start date)_(break's end date)_{}-{}.tif
-OUTPUT_FILENAME = '02_T29TQG_20180101_20211231_{}-{}.tif'
+OUTPUT_FILENAME = '08_T29TQG_20180101_20211231_{}-{}.tif'
 
 # Chip dimensions in pixels
 CHIP_WIDTH = 256
@@ -476,8 +476,7 @@ def load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates
     print(f"Combined y range: [{geotiffs_combined.y.values[0]}, {geotiffs_combined.y.values[-1]}]")
     print(f"Combined transform after fix: {geotiffs_combined.rio.transform()}")
 
-    # Fix spatial reference after concat - write_transform ensures coords match actual data extent
-    geotiffs_combined = geotiffs_combined.rio.write_transform()
+    # Ensure CRS is not corrupted from concat
     geotiffs_combined = geotiffs_combined.rio.write_crs(geotiffs_b2b11.rio.crs)
 
     print(f"Combined rewrite xarray shape: {geotiffs_combined.shape}")
