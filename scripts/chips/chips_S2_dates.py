@@ -27,14 +27,14 @@ BREAK_DATE_BAND = 1
 IS_BREAK_BAND = 3
 # Min/Max dates for S2 files. Use format datetime(2024, 12, 31)
 MIN_DATE = None
-MAX_DATE = datetime(2024, 12, 31)
+MAX_DATE = datetime(2022, 3, 1)
 
 # Output directory for chips
-OUTPUT_DIR = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG\processed_outputs\chips"
+OUTPUT_DIR = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG\processed_outputs\chips_s2_dates"
 
 # Output filename pattern, {} will be filled with the x, y coordinates of the first pixel in the chip
 # '(tile)_(break's start date)_(break's end date)_{}-{}.tif
-OUTPUT_FILENAME = 'T29TQG_20180101_20211231_{}-{}.tif'
+OUTPUT_FILENAME = '03_T29TQG_20180101_20211231_{}-{}.tif'
 
 # Chip dimensions in pixels
 CHIP_WIDTH = 256
@@ -163,11 +163,13 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates, filter_boun
     if len(spatial_info) > 0:
         reference = spatial_info[0]
         misaligned = []
-        for info in spatial_info[1:]:
+        misaligned_indices = []
+        for i, info in enumerate(spatial_info[1:], start=1):
             if (info['bounds'] != reference['bounds'] or
                 info['transform'] != reference['transform'] or
                 info['shape'] != reference['shape']):
                 misaligned.append(info['filename'])
+                misaligned_indices.append(i)
 
         if misaligned:
             print(f"  ⚠️  WARNING: Found {len(misaligned)} files with different spatial extents!")
@@ -183,6 +185,32 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates, filter_boun
                 print(f"      Bounds: {info['bounds']}")
                 print(f"      Transform: {info['transform']}")
                 print(f"      Shape: {info['shape']}")
+
+            # FILTER OUT MISALIGNED FILES BEFORE CONCATENATION
+            print(f"  🔧 Filtering out {len(misaligned)} misaligned files BEFORE concat...")
+            # Create new lists excluding misaligned files
+            tifs_xr_aligned = [tifs_xr[i] for i in range(len(tifs_xr)) if i not in misaligned_indices]
+            tif_names_aligned = [tif_names_filtered[i] for i in range(len(tif_names_filtered)) if i not in misaligned_indices]
+            tif_dates_aligned = [tif_dates_filtered[i] for i in range(len(tif_dates_filtered)) if i not in misaligned_indices]
+            tif_dates_ord_aligned = [tif_dates_ord_filtered[i] for i in range(len(tif_dates_ord_filtered)) if i not in misaligned_indices]
+
+            # Update the filtered lists
+            tifs_xr = tifs_xr_aligned
+            tif_names_filtered = tif_names_aligned
+            tif_dates_filtered = tif_dates_aligned
+            tif_dates_ord_filtered = tif_dates_ord_aligned
+            time_var_filtered = xr.Variable('time', tif_dates_ord_aligned)
+
+            # Update ordinal to unix mapping
+            ordinal_to_unix_ms = {}
+            for fname, ordinal in zip(tif_names_filtered, tif_dates_ord_filtered):
+                match = timestamp_pattern.search(fname)
+                if match:
+                    unix_timestamp_ms = int(match.group(1))
+                    ordinal_to_unix_ms[ordinal] = unix_timestamp_ms
+
+            print(f"  ✅ Filtered! New count: {len(tifs_xr)} files (was {len(tifs_xr) + len(misaligned)})")
+
 
     # DEBUG: Check spatial properties before concat
     print(f"  DEBUG: Spatial properties of first 3 files before concat:")
@@ -546,6 +574,45 @@ def load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates
         print(f"  Files: {list(only_in_bands4)[:3]}..." if len(only_in_bands4) > 3 else f"  Files: {list(only_in_bands4)}")
     print("="*60 + "\n")
 
+    # FILTER OUT FILES THAT ARE MISALIGNED IN ONE COLLECTION BUT NOT THE OTHER
+    files_to_exclude = only_in_b2b11 | only_in_bands4
+    if files_to_exclude:
+        print(f"🔧 FIXING SPATIAL ALIGNMENT: Filtering out {len(files_to_exclude)} problematic files...")
+        print(f"   Files to exclude: {list(files_to_exclude)}")
+
+        # Get ordinals from filenames to filter time dimension
+        timestamp_pattern = re.compile(r'S2SR_image_(\d{13})')
+        ordinals_to_exclude = set()
+
+        # Find ordinals for files to exclude
+        for fname in files_to_exclude:
+            match = timestamp_pattern.search(fname)
+            if match:
+                unix_ts = int(match.group(1))
+                # Find corresponding ordinal in timestamp mappings
+                for ordinal, ts in timestamp_map_b2b11.items():
+                    if ts == unix_ts:
+                        ordinals_to_exclude.add(ordinal)
+                        break
+
+        print(f"   Excluding {len(ordinals_to_exclude)} time steps (ordinals): {ordinals_to_exclude}")
+
+        # Filter both collections by excluding these time steps using boolean indexing
+        # Create boolean mask for time steps to keep (True = keep, False = exclude)
+        keep_mask_b2b11 = np.array([t not in ordinals_to_exclude for t in geotiffs_b2b11.time.values])
+        keep_mask_4bands = np.array([t not in ordinals_to_exclude for t in geotiffs_4bands.time.values])
+
+        # Use isel with boolean indexing to filter
+        geotiffs_b2b11_filtered = geotiffs_b2b11.isel(time=keep_mask_b2b11)
+        geotiffs_4bands_filtered = geotiffs_4bands.isel(time=keep_mask_4bands)
+
+        print(f"   B2B11 shape before filter: {geotiffs_b2b11.shape}, after: {geotiffs_b2b11_filtered.shape}")
+        print(f"   4-bands shape before filter: {geotiffs_4bands.shape}, after: {geotiffs_4bands_filtered.shape}")
+        print(f"✅ Spatial alignment fixed!\n")
+
+        geotiffs_b2b11 = geotiffs_b2b11_filtered
+        geotiffs_4bands = geotiffs_4bands_filtered
+
     print("Combining into one array...")
     geotiffs_combined = xr.concat([geotiffs_b2b11, geotiffs_4bands], dim='band', join='outer')
 
@@ -689,7 +756,7 @@ if __name__ == "__main__":
             # Stack pre/post bands and metadata into 16-band output
             output_bands = np.vstack([
                 pre_bands_reordered,                                                        # Bands 0-5
-                np.full((1, CHIP_HEIGHT, CHIP_WIDTH), chip_break_date, dtype=np.int32),   # Band 6
+                np.full((1, CHIP_HEIGHT, CHIP_WIDTH), chip_break_date, dtype=np.int64),   # Band 6
                 post_bands_reordered,                                                       # Bands 7-12
                 chip_data[IS_BREAK_BAND - 1][np.newaxis],                                   # Band 13
                 pre_timestamps_unix[np.newaxis],                                            # Band 14
@@ -700,7 +767,7 @@ if __name__ == "__main__":
             metadata['transform'] = transform
             metadata['width'], metadata['height'] = window.width, window.height
             metadata['count'] = 16  # 16 bands
-            metadata['dtype'] = 'int32'
+            metadata['dtype'] = 'int64'
             metadata['nodata'] = NODATA
 
             # Write output chip
@@ -716,7 +783,7 @@ if __name__ == "__main__":
 
             chip_count += 1
             print(f"  Wrote chip: {out_filepath}")
-            if chip_count >= 10:
+            if chip_count >= 1:
                 break
 
         print(f"Successfully created {chip_count} chips in {OUTPUT_DIR}")
