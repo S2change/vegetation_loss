@@ -113,6 +113,9 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates, filter_boun
     tif_names_filtered = []
     filtered_out_count = 0
 
+    # DEBUG: Track spatial properties of each file
+    spatial_info = []
+
     for i, fname in enumerate(tif_names):
         da = rioxarray.open_rasterio(
             os.path.join(s2_folder, tile, fname),
@@ -131,6 +134,14 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates, filter_boun
                 filtered_out_count += 1
                 continue  # Skip this image
 
+        # DEBUG: Store spatial info for this file BEFORE appending to list
+        spatial_info.append({
+            'filename': fname,
+            'bounds': da.rio.bounds(),
+            'transform': da.rio.transform(),
+            'shape': da.shape
+        })
+
         tifs_xr.append(da)
         tif_dates_filtered.append(tif_dates[i])
         tif_names_filtered.append(fname)
@@ -148,13 +159,48 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates, filter_boun
             unix_timestamp_ms = int(match.group(1))
             ordinal_to_unix_ms[ordinal] = unix_timestamp_ms
 
+    # DEBUG: Check which files have different spatial extents
+    if len(spatial_info) > 0:
+        reference = spatial_info[0]
+        misaligned = []
+        for info in spatial_info[1:]:
+            if (info['bounds'] != reference['bounds'] or
+                info['transform'] != reference['transform'] or
+                info['shape'] != reference['shape']):
+                misaligned.append(info['filename'])
+
+        if misaligned:
+            print(f"  ⚠️  WARNING: Found {len(misaligned)} files with different spatial extents!")
+            print(f"  Reference file: {reference['filename']}")
+            print(f"    Bounds: {reference['bounds']}")
+            print(f"    Transform: {reference['transform']}")
+            print(f"    Shape: {reference['shape']}")
+            print(f"  Misaligned files (first 5):")
+            for fname in misaligned[:5]:
+                idx = [i for i, info in enumerate(spatial_info) if info['filename'] == fname][0]
+                info = spatial_info[idx]
+                print(f"    - {fname}")
+                print(f"      Bounds: {info['bounds']}")
+                print(f"      Transform: {info['transform']}")
+                print(f"      Shape: {info['shape']}")
+
+    # DEBUG: Check spatial properties before concat
+    print(f"  DEBUG: Spatial properties of first 3 files before concat:")
+    for i, da in enumerate(tifs_xr[:3]):
+        print(f"    File {i} ({tif_names_filtered[i]}): bounds={da.rio.bounds()}, shape={da.shape}")
+
     # Concatenate along time dimension
     geotiffs_da = xr.concat(tifs_xr, dim=time_var_filtered, join='outer')
     geotiffs_da = geotiffs_da.chunk({'time': 1}) # One chunk per time step
 
+    # DEBUG: Check spatial properties after concat
+    print(f"  DEBUG: After concat: bounds={geotiffs_da.rio.bounds()}, shape={geotiffs_da.shape}")
+
     print(f"  Loaded xarray with shape: {geotiffs_da.shape}")
     print(f"  Filtered out {filtered_out_count} images due to not overlapping input tif boundary")
-    return geotiffs_da, ordinal_to_unix_ms
+
+    # Return misaligned filenames for comparison between collections
+    return geotiffs_da, ordinal_to_unix_ms, [info['filename'] for info in spatial_info if info['filename'] in misaligned]
 
 
 def spatial_subset_by_window(xarray_da, window):
@@ -472,10 +518,33 @@ def load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates
     """
     print("\nLoading S2 time series into xarray...")
     print("Loading B2B11 collection...")
-    geotiffs_b2b11, timestamp_map_b2b11 = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates, filter_bounds)
+    geotiffs_b2b11, timestamp_map_b2b11, misaligned_b2b11 = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates, filter_bounds)
 
     print("Loading 4-band collection...")
-    geotiffs_4bands, timestamp_map_4bands = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_4_BANDS, TILE, bands4_names, bands4_dates, filter_bounds)
+    geotiffs_4bands, timestamp_map_4bands, misaligned_4bands = load_s2_timeseries_xarray(S2_IMAGES_FOLDER_4_BANDS, TILE, bands4_names, bands4_dates, filter_bounds)
+
+    # DEBUG: Compare misaligned files between collections
+    b2b11_set = set(misaligned_b2b11)
+    bands4_set = set(misaligned_4bands)
+    only_in_b2b11 = b2b11_set - bands4_set
+    only_in_bands4 = bands4_set - b2b11_set
+    in_both = b2b11_set & bands4_set
+
+    print("\n" + "="*60)
+    print("MISALIGNMENT COMPARISON BETWEEN COLLECTIONS:")
+    print("="*60)
+    print(f"Misaligned files in BOTH collections: {len(in_both)}")
+    if in_both:
+        print(f"  Files: {list(in_both)[:3]}..." if len(in_both) > 3 else f"  Files: {list(in_both)}")
+    print(f"Misaligned ONLY in B2B11: {len(only_in_b2b11)}")
+    if only_in_b2b11:
+        print(f"  ⚠️  CRITICAL: These files will cause spatial misalignment!")
+        print(f"  Files: {list(only_in_b2b11)[:3]}..." if len(only_in_b2b11) > 3 else f"  Files: {list(only_in_b2b11)}")
+    print(f"Misaligned ONLY in 4-bands: {len(only_in_bands4)}")
+    if only_in_bands4:
+        print(f"  ⚠️  CRITICAL: These files will cause spatial misalignment!")
+        print(f"  Files: {list(only_in_bands4)[:3]}..." if len(only_in_bands4) > 3 else f"  Files: {list(only_in_bands4)}")
+    print("="*60 + "\n")
 
     print("Combining into one array...")
     geotiffs_combined = xr.concat([geotiffs_b2b11, geotiffs_4bands], dim='band', join='outer')
@@ -588,13 +657,34 @@ if __name__ == "__main__":
             pre_timestamps = pre_timestamps_xr.values
             post_timestamps = post_timestamps_xr.values
 
+            # DEBUG: Verify per-pixel band consistency
+            # Check that for a given pixel, all 6 bands come from the same source date
+            valid_mask = pre_timestamps != NODATA
+            if valid_mask.any():
+                valid_indices = np.argwhere(valid_mask)
+                sample_idx = valid_indices[0]  # First valid pixel
+                y, x = sample_idx[0], sample_idx[1]
+
+                print(f"  DEBUG: Per-pixel verification at pixel ({y},{x}):")
+                print(f"    Pre timestamp ordinal: {pre_timestamps[y,x]}")
+                print(f"    Pre band values (before reorder): {pre_selected[:, y, x]}")
+                print(f"    Expected: All 6 bands should come from same S2 file")
+
             # Reorder to [B2, B3, B4, B8, B11, B12] for output
             pre_bands_reordered = reorder_bands(pre_selected)
             post_bands_reordered = reorder_bands(post_selected)
 
             # Convert ordinal timestamps to Unix timestamps in milliseconds
+            print(f"  DEBUG: Pre-timestamps unique ordinals: {np.unique(pre_timestamps)}")
+            print(f"  DEBUG: Post-timestamps unique ordinals: {np.unique(post_timestamps)}")
+            print(f"  DEBUG: Timestamp mapping has {len(timestamp_mapping)} entries")
+            print(f"  DEBUG: Sample mapping entries: {list(timestamp_mapping.items())[:3]}")
+
             pre_timestamps_unix = ordinal_to_unix_timestamp(pre_timestamps, timestamp_mapping, NODATA)
             post_timestamps_unix = ordinal_to_unix_timestamp(post_timestamps, timestamp_mapping, NODATA)
+
+            print(f"  DEBUG: Pre-timestamps Unix unique values: {np.unique(pre_timestamps_unix)}")
+            print(f"  DEBUG: Post-timestamps Unix unique values: {np.unique(post_timestamps_unix)}")
 
             # Stack pre/post bands and metadata into 16-band output
             output_bands = np.vstack([
