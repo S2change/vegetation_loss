@@ -716,13 +716,32 @@ if __name__ == "__main__":
                 continue
 
             # Convert xarray to numpy for further processing
+            # DEBUG: Check dimensions before and after transpose
+            print(f"  DEBUG TRANSPOSE:")
+            print(f"    pre_selected_xr.shape: {pre_selected_xr.shape}")
+            print(f"    pre_selected_xr.dims: {pre_selected_xr.dims}")
+            print(f"    pre_selected_xr.values.shape (before transpose): {pre_selected_xr.values.shape}")
+
             # Shape: (band, y, x) -> (6, height, width)
             pre_selected = pre_selected_xr.values.transpose(2, 0, 1)
             post_selected = post_selected_xr.values.transpose(2, 0, 1)
 
+            print(f"    pre_selected.shape (after transpose): {pre_selected.shape}")
+            print(f"    Expected shape: (6, {CHIP_HEIGHT}, {CHIP_WIDTH})")
+            if pre_selected.shape != (6, CHIP_HEIGHT, CHIP_WIDTH):
+                print(f"    ⚠️  ERROR: Shape mismatch! Transpose is WRONG!")
+
+            # Verify what the dimensions actually represent
+            print(f"    Sample pixel values at [band=0, y=0, x=0]:")
+            print(f"      Before transpose: pre_selected_xr.values[0, 0, 0] = {pre_selected_xr.values[0, 0, 0]}")
+            print(f"      After transpose: pre_selected[0, 0, 0] = {pre_selected[0, 0, 0]}")
+
             # Extract timestamp arrays (shape: y, x)
             pre_timestamps = pre_timestamps_xr.values
             post_timestamps = post_timestamps_xr.values
+
+            print(f"    pre_timestamps.shape: {pre_timestamps.shape}")
+            print(f"    Expected timestamps shape: ({CHIP_HEIGHT}, {CHIP_WIDTH})")
 
             # DEBUG: Verify per-pixel band consistency
             # Check that for a given pixel, all 6 bands come from the same source date
