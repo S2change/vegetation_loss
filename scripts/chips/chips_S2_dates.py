@@ -8,6 +8,7 @@ import xarray as xr
 import rioxarray
 from dask.diagnostics import ProgressBar
 import re
+from collections import Counter
 
 # Add parent directory to path to import pyccd modules
 module_path = os.path.abspath(os.path.join('..'))
@@ -34,7 +35,7 @@ OUTPUT_DIR = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG\processed_ou
 
 # Output filename pattern, {} will be filled with the x, y coordinates of the first pixel in the chip
 # '(tile)_(break's start date)_(break's end date)_{}-{}.tif
-OUTPUT_FILENAME = '05_T29TQG_20180101_20211231_{}-{}.tif'
+OUTPUT_FILENAME = '06_T29TQG_20180101_20211231_{}-{}.tif'
 
 # Chip dimensions in pixels
 CHIP_WIDTH = 256
@@ -548,23 +549,104 @@ def load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates
         print(f"  Files: {list(only_in_bands4)[:3]}..." if len(only_in_bands4) > 3 else f"  Files: {list(only_in_bands4)}")
     print("="*60 + "\n")
 
+    # FILTER OUT FILES THAT ARE MISALIGNED IN ONLY ONE COLLECTION
+    # These cause spatial misalignment between bands
+    files_to_remove = only_in_b2b11 | only_in_bands4
+    if files_to_remove:
+        print(f"🔧 REMOVING {len(files_to_remove)} files that are misaligned in only one collection...")
+
+        # Extract timestamps from filenames to find their ordinals
+        import re
+        timestamp_pattern = re.compile(r'S2SR_image_(\d{13})')
+        ordinals_to_remove = set()
+
+        for fname in files_to_remove:
+            match = timestamp_pattern.search(fname)
+            if match:
+                unix_ts = int(match.group(1))
+                # Find the ordinal for this timestamp in both mappings
+                for ordinal, ts in timestamp_map_b2b11.items():
+                    if ts == unix_ts:
+                        ordinals_to_remove.add(ordinal)
+                        break
+                for ordinal, ts in timestamp_map_4bands.items():
+                    if ts == unix_ts:
+                        ordinals_to_remove.add(ordinal)
+                        break
+
+        print(f"  Found {len(ordinals_to_remove)} ordinals to remove: {ordinals_to_remove}")
+
+        # Remove these time steps from both collections
+        if ordinals_to_remove:
+            keep_b2b11 = [t not in ordinals_to_remove for t in geotiffs_b2b11.time.values]
+            keep_4bands = [t not in ordinals_to_remove for t in geotiffs_4bands.time.values]
+            geotiffs_b2b11 = geotiffs_b2b11.isel(time=keep_b2b11)
+            geotiffs_4bands = geotiffs_4bands.isel(time=keep_4bands)
+            print(f"  After removal: B2B11={len(geotiffs_b2b11.time)}, 4-bands={len(geotiffs_4bands.time)}")
+        print()
+
     # Ensure both collections have EXACTLY the same time coordinates
     print("Aligning time coordinates between collections...")
     print(f"  B2B11 time steps: {len(geotiffs_b2b11.time)}")
     print(f"  4-bands time steps: {len(geotiffs_4bands.time)}")
+    
+    # DEBUG: Check for duplicates
+    b2b11_times = geotiffs_b2b11.time.values
+    bands4_times = geotiffs_4bands.time.values
+    b2b11_counts = Counter(b2b11_times)
+    bands4_counts = Counter(bands4_times)
+    b2b11_dups = {k: v for k, v in b2b11_counts.items() if v > 1}
+    bands4_dups = {k: v for k, v in bands4_counts.items() if v > 1}
+
+    print(f"  DEBUG: B2B11 duplicates: {len(b2b11_dups)} ({b2b11_dups if b2b11_dups else 'none'})")
+    print(f"  DEBUG: 4-bands duplicates: {len(bands4_dups)} ({bands4_dups if bands4_dups else 'none'})")
 
     # Find common time steps
-    common_times = set(geotiffs_b2b11.time.values) & set(geotiffs_4bands.time.values)
+    b2b11_unique = set(b2b11_times)
+    bands4_unique = set(bands4_times)
+    common_times = b2b11_unique & bands4_unique
+    only_b2b11 = b2b11_unique - bands4_unique
+    only_bands4 = bands4_unique - b2b11_unique
+
     print(f"  Common time steps: {len(common_times)}")
+    if only_b2b11:
+        print(f"  DEBUG: Times ONLY in B2B11: {only_b2b11}")
+    if only_bands4:
+        print(f"  DEBUG: Times ONLY in 4-bands: {only_bands4}")
 
     if len(common_times) < len(geotiffs_b2b11.time) or len(common_times) < len(geotiffs_4bands.time):
         print(f"  ⚠️  Time coordinates don't match! Filtering to common times...")
-        # Filter both to common times
-        keep_mask_b2b11 = np.array([t in common_times for t in geotiffs_b2b11.time.values])
-        keep_mask_4bands = np.array([t in common_times for t in geotiffs_4bands.time.values])
+
+        # Build masks that filter to common times AND remove duplicates
+        # For each collection, keep only the FIRST occurrence of each time value
+        seen_b2b11 = set()
+        keep_mask_b2b11 = []
+        for t in b2b11_times:
+            if t in common_times and t not in seen_b2b11:
+                keep_mask_b2b11.append(True)
+                seen_b2b11.add(t)
+            else:
+                keep_mask_b2b11.append(False)
+
+        seen_bands4 = set()
+        keep_mask_4bands = []
+        for t in bands4_times:
+            if t in common_times and t not in seen_bands4:
+                keep_mask_4bands.append(True)
+                seen_bands4.add(t)
+            else:
+                keep_mask_4bands.append(False)
+
+        keep_mask_b2b11 = np.array(keep_mask_b2b11)
+        keep_mask_4bands = np.array(keep_mask_4bands)
+
+        print(f"  DEBUG: B2B11 keep_mask True count: {keep_mask_b2b11.sum()} / {len(keep_mask_b2b11)}")
+        print(f"  DEBUG: 4-bands keep_mask True count: {keep_mask_4bands.sum()} / {len(keep_mask_4bands)}")
+
         geotiffs_b2b11 = geotiffs_b2b11.isel(time=keep_mask_b2b11)
         geotiffs_4bands = geotiffs_4bands.isel(time=keep_mask_4bands)
         print(f"  After alignment: B2B11={len(geotiffs_b2b11.time)}, 4-bands={len(geotiffs_4bands.time)}")
+
 
     print("Combining into one array...")
     # Use 'exact' join to ensure no silent misalignment
