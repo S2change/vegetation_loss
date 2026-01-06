@@ -186,32 +186,6 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates, filter_boun
                 print(f"      Transform: {info['transform']}")
                 print(f"      Shape: {info['shape']}")
 
-            # FILTER OUT MISALIGNED FILES BEFORE CONCATENATION
-            print(f"  🔧 Filtering out {len(misaligned)} misaligned files BEFORE concat...")
-            # Create new lists excluding misaligned files
-            tifs_xr_aligned = [tifs_xr[i] for i in range(len(tifs_xr)) if i not in misaligned_indices]
-            tif_names_aligned = [tif_names_filtered[i] for i in range(len(tif_names_filtered)) if i not in misaligned_indices]
-            tif_dates_aligned = [tif_dates_filtered[i] for i in range(len(tif_dates_filtered)) if i not in misaligned_indices]
-            tif_dates_ord_aligned = [tif_dates_ord_filtered[i] for i in range(len(tif_dates_ord_filtered)) if i not in misaligned_indices]
-
-            # Update the filtered lists
-            tifs_xr = tifs_xr_aligned
-            tif_names_filtered = tif_names_aligned
-            tif_dates_filtered = tif_dates_aligned
-            tif_dates_ord_filtered = tif_dates_ord_aligned
-            time_var_filtered = xr.Variable('time', tif_dates_ord_aligned)
-
-            # Update ordinal to unix mapping
-            ordinal_to_unix_ms = {}
-            for fname, ordinal in zip(tif_names_filtered, tif_dates_ord_filtered):
-                match = timestamp_pattern.search(fname)
-                if match:
-                    unix_timestamp_ms = int(match.group(1))
-                    ordinal_to_unix_ms[ordinal] = unix_timestamp_ms
-
-            print(f"  ✅ Filtered! New count: {len(tifs_xr)} files (was {len(tifs_xr) + len(misaligned)})")
-
-
     # DEBUG: Check spatial properties before concat
     print(f"  DEBUG: Spatial properties of first 3 files before concat:")
     for i, da in enumerate(tifs_xr[:3]):
@@ -574,46 +548,7 @@ def load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates
         print(f"  Files: {list(only_in_bands4)[:3]}..." if len(only_in_bands4) > 3 else f"  Files: {list(only_in_bands4)}")
     print("="*60 + "\n")
 
-    # FILTER OUT FILES THAT ARE MISALIGNED IN ONE COLLECTION BUT NOT THE OTHER
-    files_to_exclude = only_in_b2b11 | only_in_bands4
-    if files_to_exclude:
-        print(f"🔧 FIXING SPATIAL ALIGNMENT: Filtering out {len(files_to_exclude)} problematic files...")
-        print(f"   Files to exclude: {list(files_to_exclude)}")
-
-        # Get ordinals from filenames to filter time dimension
-        timestamp_pattern = re.compile(r'S2SR_image_(\d{13})')
-        ordinals_to_exclude = set()
-
-        # Find ordinals for files to exclude
-        for fname in files_to_exclude:
-            match = timestamp_pattern.search(fname)
-            if match:
-                unix_ts = int(match.group(1))
-                # Find corresponding ordinal in timestamp mappings
-                for ordinal, ts in timestamp_map_b2b11.items():
-                    if ts == unix_ts:
-                        ordinals_to_exclude.add(ordinal)
-                        break
-
-        print(f"   Excluding {len(ordinals_to_exclude)} time steps (ordinals): {ordinals_to_exclude}")
-
-        # Filter both collections by excluding these time steps using boolean indexing
-        # Create boolean mask for time steps to keep (True = keep, False = exclude)
-        keep_mask_b2b11 = np.array([t not in ordinals_to_exclude for t in geotiffs_b2b11.time.values])
-        keep_mask_4bands = np.array([t not in ordinals_to_exclude for t in geotiffs_4bands.time.values])
-
-        # Use isel with boolean indexing to filter
-        geotiffs_b2b11_filtered = geotiffs_b2b11.isel(time=keep_mask_b2b11)
-        geotiffs_4bands_filtered = geotiffs_4bands.isel(time=keep_mask_4bands)
-
-        print(f"   B2B11 shape before filter: {geotiffs_b2b11.shape}, after: {geotiffs_b2b11_filtered.shape}")
-        print(f"   4-bands shape before filter: {geotiffs_4bands.shape}, after: {geotiffs_4bands_filtered.shape}")
-        print(f"✅ Spatial alignment fixed!\n")
-
-        geotiffs_b2b11 = geotiffs_b2b11_filtered
-        geotiffs_4bands = geotiffs_4bands_filtered
-
-   # Ensure both collections have EXACTLY the same time coordinates
+    # Ensure both collections have EXACTLY the same time coordinates
     print("Aligning time coordinates between collections...")
     print(f"  B2B11 time steps: {len(geotiffs_b2b11.time)}")
     print(f"  4-bands time steps: {len(geotiffs_4bands.time)}")
