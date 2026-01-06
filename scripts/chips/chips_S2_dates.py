@@ -34,7 +34,7 @@ OUTPUT_DIR = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG\processed_ou
 
 # Output filename pattern, {} will be filled with the x, y coordinates of the first pixel in the chip
 # '(tile)_(break's start date)_(break's end date)_{}-{}.tif
-OUTPUT_FILENAME = '04_T29TQG_20180101_20211231_{}-{}.tif'
+OUTPUT_FILENAME = '05_T29TQG_20180101_20211231_{}-{}.tif'
 
 # Chip dimensions in pixels
 CHIP_WIDTH = 256
@@ -560,8 +560,10 @@ def load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates
     if len(common_times) < len(geotiffs_b2b11.time) or len(common_times) < len(geotiffs_4bands.time):
         print(f"  ⚠️  Time coordinates don't match! Filtering to common times...")
         # Filter both to common times
-        geotiffs_b2b11 = geotiffs_b2b11.sel(time=sorted(common_times))
-        geotiffs_4bands = geotiffs_4bands.sel(time=sorted(common_times))
+        keep_mask_b2b11 = np.array([t in common_times for t in geotiffs_b2b11.time.values])
+        keep_mask_4bands = np.array([t in common_times for t in geotiffs_4bands.time.values])
+        geotiffs_b2b11 = geotiffs_b2b11.isel(time=keep_mask_b2b11)
+        geotiffs_4bands = geotiffs_4bands.isel(time=keep_mask_4bands)
         print(f"  After alignment: B2B11={len(geotiffs_b2b11.time)}, 4-bands={len(geotiffs_4bands.time)}")
 
     print("Combining into one array...")
