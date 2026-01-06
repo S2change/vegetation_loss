@@ -34,7 +34,7 @@ OUTPUT_DIR = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG\processed_ou
 
 # Output filename pattern, {} will be filled with the x, y coordinates of the first pixel in the chip
 # '(tile)_(break's start date)_(break's end date)_{}-{}.tif
-OUTPUT_FILENAME = '03_T29TQG_20180101_20211231_{}-{}.tif'
+OUTPUT_FILENAME = '04_T29TQG_20180101_20211231_{}-{}.tif'
 
 # Chip dimensions in pixels
 CHIP_WIDTH = 256
@@ -613,8 +613,25 @@ def load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates
         geotiffs_b2b11 = geotiffs_b2b11_filtered
         geotiffs_4bands = geotiffs_4bands_filtered
 
+   # Ensure both collections have EXACTLY the same time coordinates
+    print("Aligning time coordinates between collections...")
+    print(f"  B2B11 time steps: {len(geotiffs_b2b11.time)}")
+    print(f"  4-bands time steps: {len(geotiffs_4bands.time)}")
+
+    # Find common time steps
+    common_times = set(geotiffs_b2b11.time.values) & set(geotiffs_4bands.time.values)
+    print(f"  Common time steps: {len(common_times)}")
+
+    if len(common_times) < len(geotiffs_b2b11.time) or len(common_times) < len(geotiffs_4bands.time):
+        print(f"  ⚠️  Time coordinates don't match! Filtering to common times...")
+        # Filter both to common times
+        geotiffs_b2b11 = geotiffs_b2b11.sel(time=sorted(common_times))
+        geotiffs_4bands = geotiffs_4bands.sel(time=sorted(common_times))
+        print(f"  After alignment: B2B11={len(geotiffs_b2b11.time)}, 4-bands={len(geotiffs_4bands.time)}")
+
     print("Combining into one array...")
-    geotiffs_combined = xr.concat([geotiffs_b2b11, geotiffs_4bands], dim='band', join='outer')
+    # Use 'exact' join to ensure no silent misalignment
+    geotiffs_combined = xr.concat([geotiffs_b2b11, geotiffs_4bands], dim='band', join='exact')
 
     # Ensure CRS is not corrupted from concat
     geotiffs_combined = geotiffs_combined.rio.write_crs(geotiffs_b2b11.rio.crs)
@@ -716,32 +733,13 @@ if __name__ == "__main__":
                 continue
 
             # Convert xarray to numpy for further processing
-            # DEBUG: Check dimensions before and after transpose
-            print(f"  DEBUG TRANSPOSE:")
-            print(f"    pre_selected_xr.shape: {pre_selected_xr.shape}")
-            print(f"    pre_selected_xr.dims: {pre_selected_xr.dims}")
-            print(f"    pre_selected_xr.values.shape (before transpose): {pre_selected_xr.values.shape}")
-
             # Shape: (band, y, x) -> (6, height, width)
             pre_selected = pre_selected_xr.values.transpose(2, 0, 1)
             post_selected = post_selected_xr.values.transpose(2, 0, 1)
 
-            print(f"    pre_selected.shape (after transpose): {pre_selected.shape}")
-            print(f"    Expected shape: (6, {CHIP_HEIGHT}, {CHIP_WIDTH})")
-            if pre_selected.shape != (6, CHIP_HEIGHT, CHIP_WIDTH):
-                print(f"    ⚠️  ERROR: Shape mismatch! Transpose is WRONG!")
-
-            # Verify what the dimensions actually represent
-            print(f"    Sample pixel values at [band=0, y=0, x=0]:")
-            print(f"      Before transpose: pre_selected_xr.values[0, 0, 0] = {pre_selected_xr.values[0, 0, 0]}")
-            print(f"      After transpose: pre_selected[0, 0, 0] = {pre_selected[0, 0, 0]}")
-
             # Extract timestamp arrays (shape: y, x)
             pre_timestamps = pre_timestamps_xr.values
             post_timestamps = post_timestamps_xr.values
-
-            print(f"    pre_timestamps.shape: {pre_timestamps.shape}")
-            print(f"    Expected timestamps shape: ({CHIP_HEIGHT}, {CHIP_WIDTH})")
 
             # DEBUG: Verify per-pixel band consistency
             # Check that for a given pixel, all 6 bands come from the same source date
