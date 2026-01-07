@@ -9,6 +9,7 @@ import rioxarray
 from dask.diagnostics import ProgressBar
 import re
 from collections import Counter
+from rasterio.windows import bounds as window_bounds
 
 # Add parent directory to path to import pyccd modules
 module_path = os.path.abspath(os.path.join('..'))
@@ -35,7 +36,7 @@ OUTPUT_DIR = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG\processed_ou
 
 # Output filename pattern, {} will be filled with the x, y coordinates of the first pixel in the chip
 # '(tile)_(break's start date)_(break's end date)_{}-{}.tif
-OUTPUT_FILENAME = '06_T29TQG_20180101_20211231_{}-{}.tif'
+OUTPUT_FILENAME = '07_T29TQG_20180101_20211231_{}-{}.tif'
 
 # Chip dimensions in pixels
 CHIP_WIDTH = 256
@@ -206,7 +207,7 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates, filter_boun
     return geotiffs_da, ordinal_to_unix_ms, [info['filename'] for info in spatial_info if info['filename'] in misaligned]
 
 
-def spatial_subset_by_window(xarray_da, window):
+def spatial_subset_by_window(xarray_da, window, input_transform):
     """
     Extract chip extent from xarray DataArray using rasterio window.
 
@@ -226,7 +227,14 @@ def spatial_subset_by_window(xarray_da, window):
     # x_slice = slice(window.col_off, window.col_off + window.width)
     # y_slice = slice(window.row_off, window.row_off + window.height)
 
-    result = xarray_da.rio.isel_window(window)
+    # result = xarray_da.rio.isel_window(window)
+    # return result
+
+    # Convert window to geographic bounds using INPUT_TIF's transform
+    minx, miny, maxx, maxy = window_bounds(window, input_transform)
+    
+    # Select by geographic coordinates instead of pixel indices
+    result = xarray_da.rio.clip_box(minx=minx, miny=miny, maxx=maxx, maxy=maxy)
     return result
 
 
@@ -686,6 +694,17 @@ if __name__ == "__main__":
 
         geotiffs_combined, timestamp_mapping = load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, TILE, b2b11_names, b2b11_dates, S2_IMAGES_FOLDER_4_BANDS, bands4_names, bands4_dates, filter_bounds)
 
+        # xarray automatically sorts in ascending order, need to reverse Y coordinates to return to descending order
+        geotiffs_combined = geotiffs_combined.reindex(y=geotiffs_combined.y[::-1])
+
+        print(f"\nDEBUG S2 xarray properties:")
+        print(f"  Shape: {geotiffs_combined.shape}")
+        print(f"  X coords: min={geotiffs_combined.x.values.min()}, max={geotiffs_combined.x.values.max()}")
+        print(f"  Y coords: min={geotiffs_combined.y.values.min()}, max={geotiffs_combined.y.values.max()}")
+        print(f"  Y coords order: first={geotiffs_combined.y.values[0]}, last={geotiffs_combined.y.values[-1]}")
+        print(f"  Bounds: {geotiffs_combined.rio.bounds()}")
+        print(f"  Transform: {geotiffs_combined.rio.transform()}")
+
         metadata = src.meta.copy()
         band_names = src.descriptions
 
@@ -727,7 +746,14 @@ if __name__ == "__main__":
             print(f"  Window: col_off={window.col_off}, row_off={window.row_off}, width={window.width}, height={window.height}")
 
             # Spatially subset xarray for this chip
-            spatial_subset_chip_xr = spatial_subset_by_window(geotiffs_combined, window)
+            spatial_subset_chip_xr = spatial_subset_by_window(geotiffs_combined, window, src.transform)
+
+            print(f"  DEBUG: Input TIF transform: {src.transform}")
+            print(f"  DEBUG: S2 xarray transform: {geotiffs_combined.rio.transform()}")
+            print(f"  DEBUG: Subset xarray transform: {spatial_subset_chip_xr.rio.transform()}")
+            print(f"  DEBUG: Window used: {window}")
+            print(f"  DEBUG: Are transforms identical? {src.transform == geotiffs_combined.rio.transform()}")
+
             print(f"  Subset shape: {spatial_subset_chip_xr.shape}")
             print(f"  Subset x range: [{spatial_subset_chip_xr.x.values[0]}, {spatial_subset_chip_xr.x.values[-1]}]")
             print(f"  Subset y range: [{spatial_subset_chip_xr.y.values[0]}, {spatial_subset_chip_xr.y.values[-1]}]")
