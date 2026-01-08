@@ -8,8 +8,8 @@ import xarray as xr
 import rioxarray
 from dask.diagnostics import ProgressBar
 import re
-from collections import Counter
 from rasterio.windows import bounds as window_bounds
+import time
 
 # Add parent directory to path to import pyccd modules
 module_path = os.path.abspath(os.path.join('..'))
@@ -545,6 +545,7 @@ def load_combined_xarray(S2_IMAGES_FOLDER_B2_B11,
     return geotiffs_combined, timestamp_map_combined
 
 if __name__ == "__main__":
+    start = time.time()
     ProgressBar().register()
 
     # Load S2 image file lists for both band collections
@@ -596,6 +597,7 @@ if __name__ == "__main__":
         total_attempts_count = 0
         chip_count = 0
         for window, transform in get_chips(src, CHIP_WIDTH, CHIP_HEIGHT, OVERLAP):
+            chip_start_time = time.time()
             total_attempts_count += 1
             chip_data = src.read(window=window)
 
@@ -691,9 +693,15 @@ if __name__ == "__main__":
                 )
 
             chip_count += 1
+            chip_end_time = time.time()
+            chip_processing_time = chip_end_time - chip_start_time
             print(f"  Wrote chip: {out_filepath}")
+            print(f"  Processing time = {chip_processing_time:.2f} minutes")
             if chip_count >= 1:
                 break
         
+        end = time.time()
+        total_time_minutes = (end - start) / 60
         creation_percent = (chip_count / total_attempts_count) * 100
         print(f"Successfully created {chip_count} chips out of {total_attempts_count} ({creation_percent:.2f}) in {OUTPUT_DIR}")
+        print(f"Process took {total_time_minutes:.2f} minutes")
