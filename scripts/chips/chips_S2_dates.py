@@ -32,11 +32,11 @@ MIN_DATE = None
 MAX_DATE = datetime(2022, 3, 1)
 
 # Output directory for chips
-OUTPUT_DIR = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG\processed_outputs\chips_s2_dates"
+OUTPUT_DIR = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG\processed_outputs\chips"
 
 # Output filename pattern, {} will be filled with the x, y coordinates of the first pixel in the chip
 # '(tile)_(break's start date)_(break's end date)_{}-{}.tif
-OUTPUT_FILENAME = '07_T29TQG_20180101_20211231_{}-{}.tif'
+OUTPUT_FILENAME = 'T29TQG_20180101_20211231_{}-{}.tif'
 
 # Chip dimensions in pixels
 CHIP_WIDTH = 256
@@ -175,30 +175,10 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates, filter_boun
 
         if misaligned:
             print(f"  WARNING: Found {len(misaligned)} files with different spatial extents!")
-            # print(f"  Reference file: {reference['filename']}")
-            # print(f"    Bounds: {reference['bounds']}")
-            # print(f"    Transform: {reference['transform']}")
-            # print(f"    Shape: {reference['shape']}")
-            # print(f"  Misaligned files (first 5):")
-            # for fname in misaligned[:5]:
-            #     idx = [i for i, info in enumerate(spatial_info) if info['filename'] == fname][0]
-            #     info = spatial_info[idx]
-            #     print(f"    - {fname}")
-            #     print(f"      Bounds: {info['bounds']}")
-            #     print(f"      Transform: {info['transform']}")
-            #     print(f"      Shape: {info['shape']}")
-
-    # DEBUG: Check spatial properties before concat
-    # print(f"  DEBUG: Spatial properties of first 3 files before concat:")
-    # for i, da in enumerate(tifs_xr[:3]):
-    #     print(f"    File {i} ({tif_names_filtered[i]}): bounds={da.rio.bounds()}, shape={da.shape}")
 
     # Concatenate along time dimension
     geotiffs_da = xr.concat(tifs_xr, dim=time_var_filtered, join='outer')
     geotiffs_da = geotiffs_da.chunk({'time': 1}) # One chunk per time step
-
-    # DEBUG: Check spatial properties after concat
-    # print(f"  DEBUG: After concat: bounds={geotiffs_da.rio.bounds()}, shape={geotiffs_da.shape}")
 
     print(f"  Loaded xarray with shape: {geotiffs_da.shape}")
     print(f"  Filtered out {filtered_out_count} images due to not overlapping input tif boundary")
@@ -551,128 +531,6 @@ def load_combined_xarray(S2_IMAGES_FOLDER_B2_B11,
                                                                                          filter_bounds
                                                                                          )
 
-    # # DEBUG: Compare misaligned files between collections
-    # b2b11_set = set(misaligned_b2b11)
-    # bands4_set = set(misaligned_4bands)
-    # only_in_b2b11 = b2b11_set - bands4_set
-    # only_in_bands4 = bands4_set - b2b11_set
-    # in_both = b2b11_set & bands4_set
-
-    # print("\n" + "="*60)
-    # print("MISALIGNMENT COMPARISON BETWEEN COLLECTIONS:")
-    # print("="*60)
-    # print(f"Misaligned files in BOTH collections: {len(in_both)}")
-    # if in_both:
-    #     print(f"  Files: {list(in_both)[:3]}..." if len(in_both) > 3 else f"  Files: {list(in_both)}")
-    # print(f"Misaligned ONLY in B2B11: {len(only_in_b2b11)}")
-    # if only_in_b2b11:
-    #     print(f"  ⚠️  CRITICAL: These files will cause spatial misalignment!")
-    #     print(f"  Files: {list(only_in_b2b11)[:3]}..." if len(only_in_b2b11) > 3 else f"  Files: {list(only_in_b2b11)}")
-    # print(f"Misaligned ONLY in 4-bands: {len(only_in_bands4)}")
-    # if only_in_bands4:
-    #     print(f"  ⚠️  CRITICAL: These files will cause spatial misalignment!")
-    #     print(f"  Files: {list(only_in_bands4)[:3]}..." if len(only_in_bands4) > 3 else f"  Files: {list(only_in_bands4)}")
-    # print("="*60 + "\n")
-
-    # # FILTER OUT FILES THAT ARE MISALIGNED IN ONLY ONE COLLECTION
-    # # These cause spatial misalignment between bands
-    # files_to_remove = only_in_b2b11 | only_in_bands4
-    # if files_to_remove:
-    #     print(f"🔧 REMOVING {len(files_to_remove)} files that are misaligned in only one collection...")
-
-    #     # Extract timestamps from filenames to find their ordinals
-    #     import re
-    #     timestamp_pattern = re.compile(r'S2SR_image_(\d{13})')
-    #     ordinals_to_remove = set()
-
-    #     for fname in files_to_remove:
-    #         match = timestamp_pattern.search(fname)
-    #         if match:
-    #             unix_ts = int(match.group(1))
-    #             # Find the ordinal for this timestamp in both mappings
-    #             for ordinal, ts in timestamp_map_b2b11.items():
-    #                 if ts == unix_ts:
-    #                     ordinals_to_remove.add(ordinal)
-    #                     break
-    #             for ordinal, ts in timestamp_map_4bands.items():
-    #                 if ts == unix_ts:
-    #                     ordinals_to_remove.add(ordinal)
-    #                     break
-
-    #     print(f"  Found {len(ordinals_to_remove)} ordinals to remove: {ordinals_to_remove}")
-
-    #     # Remove these time steps from both collections
-    #     if ordinals_to_remove:
-    #         keep_b2b11 = [t not in ordinals_to_remove for t in geotiffs_b2b11.time.values]
-    #         keep_4bands = [t not in ordinals_to_remove for t in geotiffs_4bands.time.values]
-    #         geotiffs_b2b11 = geotiffs_b2b11.isel(time=keep_b2b11)
-    #         geotiffs_4bands = geotiffs_4bands.isel(time=keep_4bands)
-    #         print(f"  After removal: B2B11={len(geotiffs_b2b11.time)}, 4-bands={len(geotiffs_4bands.time)}")
-    #     print()
-
-    # # Ensure both collections have EXACTLY the same time coordinates
-    # print("Aligning time coordinates between collections...")
-    # print(f"  B2B11 time steps: {len(geotiffs_b2b11.time)}")
-    # print(f"  4-bands time steps: {len(geotiffs_4bands.time)}")
-    
-    # # DEBUG: Check for duplicates
-    # b2b11_times = geotiffs_b2b11.time.values
-    # bands4_times = geotiffs_4bands.time.values
-    # b2b11_counts = Counter(b2b11_times)
-    # bands4_counts = Counter(bands4_times)
-    # b2b11_dups = {k: v for k, v in b2b11_counts.items() if v > 1}
-    # bands4_dups = {k: v for k, v in bands4_counts.items() if v > 1}
-
-    # print(f"  DEBUG: B2B11 duplicates: {len(b2b11_dups)} ({b2b11_dups if b2b11_dups else 'none'})")
-    # print(f"  DEBUG: 4-bands duplicates: {len(bands4_dups)} ({bands4_dups if bands4_dups else 'none'})")
-
-    # # Find common time steps
-    # b2b11_unique = set(b2b11_times)
-    # bands4_unique = set(bands4_times)
-    # common_times = b2b11_unique & bands4_unique
-    # only_b2b11 = b2b11_unique - bands4_unique
-    # only_bands4 = bands4_unique - b2b11_unique
-
-    # print(f"  Common time steps: {len(common_times)}")
-    # if only_b2b11:
-    #     print(f"  DEBUG: Times ONLY in B2B11: {only_b2b11}")
-    # if only_bands4:
-    #     print(f"  DEBUG: Times ONLY in 4-bands: {only_bands4}")
-
-    # if len(common_times) < len(geotiffs_b2b11.time) or len(common_times) < len(geotiffs_4bands.time):
-    #     print(f"  ⚠️  Time coordinates don't match! Filtering to common times...")
-
-    #     # Build masks that filter to common times AND remove duplicates
-    #     # For each collection, keep only the FIRST occurrence of each time value
-    #     seen_b2b11 = set()
-    #     keep_mask_b2b11 = []
-    #     for t in b2b11_times:
-    #         if t in common_times and t not in seen_b2b11:
-    #             keep_mask_b2b11.append(True)
-    #             seen_b2b11.add(t)
-    #         else:
-    #             keep_mask_b2b11.append(False)
-
-    #     seen_bands4 = set()
-    #     keep_mask_4bands = []
-    #     for t in bands4_times:
-    #         if t in common_times and t not in seen_bands4:
-    #             keep_mask_4bands.append(True)
-    #             seen_bands4.add(t)
-    #         else:
-    #             keep_mask_4bands.append(False)
-
-    #     keep_mask_b2b11 = np.array(keep_mask_b2b11)
-    #     keep_mask_4bands = np.array(keep_mask_4bands)
-
-    #     print(f"  DEBUG: B2B11 keep_mask True count: {keep_mask_b2b11.sum()} / {len(keep_mask_b2b11)}")
-    #     print(f"  DEBUG: 4-bands keep_mask True count: {keep_mask_4bands.sum()} / {len(keep_mask_4bands)}")
-
-    #     geotiffs_b2b11 = geotiffs_b2b11.isel(time=keep_mask_b2b11)
-    #     geotiffs_4bands = geotiffs_4bands.isel(time=keep_mask_4bands)
-    #     print(f"  After alignment: B2B11={len(geotiffs_b2b11.time)}, 4-bands={len(geotiffs_4bands.time)}")
-
-
     print("Combining into one array...")
     # Use 'exact' join to ensure no silent misalignment
     geotiffs_combined = xr.concat([geotiffs_b2b11, geotiffs_4bands], dim='band', join='exact')
@@ -722,14 +580,6 @@ if __name__ == "__main__":
         # xarray automatically sorts in ascending order, need to reverse Y coordinates to return to descending order
         geotiffs_combined = geotiffs_combined.reindex(y=geotiffs_combined.y[::-1])
 
-        # print(f"\nDEBUG S2 xarray properties:")
-        # print(f"  Shape: {geotiffs_combined.shape}")
-        # print(f"  X coords: min={geotiffs_combined.x.values.min()}, max={geotiffs_combined.x.values.max()}")
-        # print(f"  Y coords: min={geotiffs_combined.y.values.min()}, max={geotiffs_combined.y.values.max()}")
-        # print(f"  Y coords order: first={geotiffs_combined.y.values[0]}, last={geotiffs_combined.y.values[-1]}")
-        # print(f"  Bounds: {geotiffs_combined.rio.bounds()}")
-        # print(f"  Transform: {geotiffs_combined.rio.transform()}")
-
         metadata = src.meta.copy()
         band_names = src.descriptions
 
@@ -770,20 +620,9 @@ if __name__ == "__main__":
                 continue
 
             print(f"\nProcessing chip at ({window.col_off}, {window.row_off}), break date: {chip_break_date}")
-            # print(f"  Window: col_off={window.col_off}, row_off={window.row_off}, width={window.width}, height={window.height}")
 
             # Spatially subset xarray for this chip
             spatial_subset_chip_xr = spatial_subset_by_window(geotiffs_combined, window, src.transform)
-
-            # print(f"  DEBUG: Input TIF transform: {src.transform}")
-            # print(f"  DEBUG: S2 xarray transform: {geotiffs_combined.rio.transform()}")
-            # print(f"  DEBUG: Subset xarray transform: {spatial_subset_chip_xr.rio.transform()}")
-            # print(f"  DEBUG: Window used: {window}")
-            # print(f"  DEBUG: Are transforms identical? {src.transform == geotiffs_combined.rio.transform()}")
-
-            # print(f"  Subset shape: {spatial_subset_chip_xr.shape}")
-            # print(f"  Subset x range: [{spatial_subset_chip_xr.x.values[0]}, {spatial_subset_chip_xr.x.values[-1]}]")
-            # print(f"  Subset y range: [{spatial_subset_chip_xr.y.values[0]}, {spatial_subset_chip_xr.y.values[-1]}]")
 
             # Temporal selection using xarray
             pre_selected_chip_xr = select_temporal_window_xarray(
@@ -813,28 +652,9 @@ if __name__ == "__main__":
             pre_timestamps = pre_timestamps_xr.values
             post_timestamps = post_timestamps_xr.values
 
-            # DEBUG: Verify per-pixel band consistency
-            # Check that for a given pixel, all 6 bands come from the same source date
-            valid_mask = pre_timestamps != NODATA
-            if valid_mask.any():
-                valid_indices = np.argwhere(valid_mask)
-                sample_idx = valid_indices[0]  # First valid pixel
-                y, x = sample_idx[0], sample_idx[1]
-
-                # print(f"  DEBUG: Per-pixel verification at pixel ({y},{x}):")
-                # print(f"    Pre timestamp ordinal: {pre_timestamps[y,x]}")
-                # print(f"    Pre band values (before reorder): {pre_selected[:, y, x]}")
-                # print(f"    Expected: All 6 bands should come from same S2 file")
-
             # Reorder to [B2, B3, B4, B8, B11, B12] for output
             pre_bands_reordered = reorder_bands(pre_selected)
             post_bands_reordered = reorder_bands(post_selected)
-
-            # Convert ordinal timestamps to Unix timestamps in milliseconds
-            # print(f"  DEBUG: Pre-timestamps unique ordinals: {np.unique(pre_timestamps)}")
-            # print(f"  DEBUG: Post-timestamps unique ordinals: {np.unique(post_timestamps)}")
-            # print(f"  DEBUG: Timestamp mapping has {len(timestamp_mapping)} entries")
-            # print(f"  DEBUG: Sample mapping entries: {list(timestamp_mapping.items())[:3]}")
 
             pre_timestamps_unix = ordinal_to_unix_timestamp(pre_timestamps, timestamp_mapping, NODATA)
             post_timestamps_unix = ordinal_to_unix_timestamp(post_timestamps, timestamp_mapping, NODATA)
