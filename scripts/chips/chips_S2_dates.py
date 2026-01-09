@@ -377,12 +377,12 @@ def cascading_selection(image_stack_xr, nodata=65535):
 
     Returns:
     --------
-    xr.DataArray or None
-        DataArray with shape (band+1, y, x) where the last band contains
-        pixel timestamps (ordinal dates). Returns None if input is None.
+    tuple of (xr.DataArray, xr.DataArray)
+        First element: Selected values of shape (band, y, x)
+        Second element: Timestamp (ordinal) of the selected image for each pixel, shape (y, x)
     """
     if image_stack_xr is None:
-        return None
+        return None, None
 
     # get index of first image where all bands have data
     valid_mask = image_stack_xr < nodata
@@ -406,12 +406,7 @@ def cascading_selection(image_stack_xr, nodata=65535):
     # Set timestamp to nodata where no valid images exist
     pixel_timestamps = pixel_timestamps.where(any_image_all_valid, nodata)
 
-    # Combine result bands with timestamps as an additional band
-    # Add a band dimension to timestamps and concatenate
-    pixel_timestamps_expanded = pixel_timestamps.expand_dims(dim={'band': 1})
-    result_with_timestamp = xr.concat([result, pixel_timestamps_expanded], dim='band')
-
-    return result_with_timestamp
+    return result, pixel_timestamps
 
 def reorder_bands(bands_combined):
     """
@@ -643,23 +638,21 @@ if __name__ == "__main__":
                 print("  Warning: Could not find any images in temporal window, skipping chip")
                 continue
 
-            pre_result_xr = cascading_selection(pre_selected_chip_xr, NODATA)
-            post_result_xr = cascading_selection(post_selected_chip_xr, NODATA)
+            pre_selected_xr, pre_timestamps_xr = cascading_selection(pre_selected_chip_xr, NODATA)
+            post_selected_xr, post_timestamps_xr = cascading_selection(post_selected_chip_xr, NODATA)
 
-            if pre_result_xr is None or post_result_xr is None:
+            if pre_selected_xr is None or post_selected_xr is None or pre_timestamps_xr is None or post_timestamps_xr is None:
                 print("  Warning: Cascading selection failed, skipping chip")
                 continue
 
             # Convert xarray to numpy for further processing
-            # Shape: (y, x, band) -> (7, height, width) where last band is timestamps
-            pre_data = pre_result_xr.values.transpose(2, 0, 1)
-            post_data = post_result_xr.values.transpose(2, 0, 1)
+            # Shape: (band, y, x) -> (6, height, width)
+            pre_selected = pre_selected_xr.values.transpose(2, 0, 1)
+            post_selected = post_selected_xr.values.transpose(2, 0, 1)
 
-            pre_selected = pre_data[:6]  # First 6 bands
-            pre_timestamps = pre_data[6]  # Last band (timestamps)
-
-            post_selected = post_data[:6]  # First 6 bands
-            post_timestamps = post_data[6]  # Last band (timestamps)
+            # Extract timestamp arrays (shape: y, x)
+            pre_timestamps = pre_timestamps_xr.values
+            post_timestamps = post_timestamps_xr.values
 
             # Reorder to [B2, B3, B4, B8, B11, B12] for output
             pre_bands_reordered = reorder_bands(pre_selected)
