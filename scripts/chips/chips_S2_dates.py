@@ -71,7 +71,10 @@ TEMPORAL_WINDOW_DAYS = 45
 MAX_IMAGES_PER_PERIOD = 9
 
 # NODATA value for S2 imagery
-NODATA = 65535
+S2_NODATA = 65535
+
+# NODATA value for output raster
+OUTPUT_NODATA = 0
 
 # ============================================================================
 
@@ -360,7 +363,7 @@ def determine_break_date(chip_data, break_date_band_index):
 
     return int(unique_dates[max_count_index])
 
-def cascading_selection(image_stack_xr, nodata=65535):
+def cascading_selection(image_stack_xr, s2_nodata=65535, output_nodata=0):
     """
     Apply cascading selection using index-based gathering.
 
@@ -372,8 +375,10 @@ def cascading_selection(image_stack_xr, nodata=65535):
     -----------
     image_stack_xr : xr.DataArray
         DataArray with dimensions (time, band, y, x)
-    nodata : int
+    s2_nodata : int
         NODATA sentinel value
+    output_nodata : int
+        NODATA value for output tif
 
     Returns:
     --------
@@ -385,7 +390,7 @@ def cascading_selection(image_stack_xr, nodata=65535):
         return None, None
 
     # get index of first image where all bands have data
-    valid_mask = image_stack_xr < nodata
+    valid_mask = image_stack_xr < s2_nodata
     all_bands_valid = valid_mask.all(dim='band')
     first_valid_idx = all_bands_valid.argmax(dim='time')
 
@@ -396,7 +401,7 @@ def cascading_selection(image_stack_xr, nodata=65535):
 
     # Handle edge case: pixels where NO images have all bands valid
     any_image_all_valid = all_bands_valid.any(dim='time')
-    result = result.where(any_image_all_valid, nodata)
+    result = result.where(any_image_all_valid, output_nodata)
 
     # Get the actual timestamp (ordinal) for each pixel using the indices
     # The time coordinate values are the ordinals
@@ -404,7 +409,7 @@ def cascading_selection(image_stack_xr, nodata=65535):
     pixel_timestamps = timestamp_map.isel(time=first_valid_idx)
 
     # Set timestamp to nodata where no valid images exist
-    pixel_timestamps = pixel_timestamps.where(any_image_all_valid, nodata)
+    pixel_timestamps = pixel_timestamps.where(any_image_all_valid, output_nodata)
 
     return result, pixel_timestamps
 
@@ -431,7 +436,7 @@ def reorder_bands(bands_combined):
         bands_combined[5]   # B12
     ])
 
-def ordinal_to_unix_timestamp(ordinal_array, ordinal_to_unix_map, nodata=65535):
+def ordinal_to_unix_timestamp(ordinal_array, ordinal_to_unix_map, output_nodata=0):
     """
     Convert array of ordinal dates to Unix timestamps in milliseconds using a mapping.
 
@@ -449,11 +454,11 @@ def ordinal_to_unix_timestamp(ordinal_array, ordinal_to_unix_map, nodata=65535):
     numpy.ndarray
         Array with ordinal values converted to Unix timestamps (nodata preserved)
     """
-    result = np.full_like(ordinal_array, nodata, dtype=np.int64)
+    result = np.full_like(ordinal_array, output_nodata, dtype=np.int64)
 
     # Get unique ordinal values (excluding nodata)
     unique_ordinals = np.unique(ordinal_array)
-    unique_ordinals = unique_ordinals[unique_ordinals != nodata]
+    unique_ordinals = unique_ordinals[unique_ordinals != output_nodata]
 
     # Convert each ordinal to Unix timestamp
     for ordinal in unique_ordinals:
@@ -638,8 +643,8 @@ if __name__ == "__main__":
                 print("  Warning: Could not find any images in temporal window, skipping chip")
                 continue
 
-            pre_selected_xr, pre_timestamps_xr = cascading_selection(pre_selected_chip_xr, NODATA)
-            post_selected_xr, post_timestamps_xr = cascading_selection(post_selected_chip_xr, NODATA)
+            pre_selected_xr, pre_timestamps_xr = cascading_selection(pre_selected_chip_xr, S2_NODATA, OUTPUT_NODATA)
+            post_selected_xr, post_timestamps_xr = cascading_selection(post_selected_chip_xr, S2_NODATA, OUTPUT_NODATA)
 
             if pre_selected_xr is None or post_selected_xr is None or pre_timestamps_xr is None or post_timestamps_xr is None:
                 print("  Warning: Cascading selection failed, skipping chip")
@@ -658,8 +663,8 @@ if __name__ == "__main__":
             pre_bands_reordered = reorder_bands(pre_selected)
             post_bands_reordered = reorder_bands(post_selected)
 
-            pre_timestamps_unix = ordinal_to_unix_timestamp(pre_timestamps, timestamp_mapping, NODATA)
-            post_timestamps_unix = ordinal_to_unix_timestamp(post_timestamps, timestamp_mapping, NODATA)
+            pre_timestamps_unix = ordinal_to_unix_timestamp(pre_timestamps, timestamp_mapping, OUTPUT_NODATA)
+            post_timestamps_unix = ordinal_to_unix_timestamp(post_timestamps, timestamp_mapping, OUTPUT_NODATA)
 
             print(f"  DEBUG: Pre-timestamps Unix unique values: {np.unique(pre_timestamps_unix)}")
             print(f"  DEBUG: Post-timestamps Unix unique values: {np.unique(post_timestamps_unix)}")
@@ -679,7 +684,7 @@ if __name__ == "__main__":
             metadata['width'], metadata['height'] = window.width, window.height
             metadata['count'] = 16  # 16 bands
             metadata['dtype'] = 'int64'
-            metadata['nodata'] = NODATA
+            metadata['nodata'] = S2_NODATA
 
             # Write output chip
             out_filepath = os.path.join(OUTPUT_DIR, OUTPUT_FILENAME.format(window.col_off, window.row_off))
