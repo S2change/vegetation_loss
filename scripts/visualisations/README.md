@@ -8,8 +8,8 @@ Reads segments in parquet and creates plot
 Merges bimonthly CCD vector outputs into national-scale GeoPackages for each date interval, enabling consolidated spatial analysis across all tiles. *Tile overlaps are not handled in this version.*
 
 Inputs:
-- BASE_FOLDER containing CCD vector outputs (.gpkg) organized by tile and date interval.
-- User-defined START_YEAR and END_YEAR to select target bimonthly intervals.
+- `BASE_FOLDER` containing CCD vector outputs (.gpkg) organized by tile and date interval.
+- User-defined `START_YEAR` and `END_YEAR` to select target bimonthly intervals.
 
 Outputs:
 - One merged GeoPackage (.gpkg) per bimonthly interval, containing all polygons from all tiles for that period, saved in the merged_polygons directory.
