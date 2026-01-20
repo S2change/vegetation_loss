@@ -8,7 +8,7 @@ Inputs:
 - Coordinates of the point of interest (X, Y).
 - NDVI dates as a NumPy array (.npy).
 - NDVI values and coordinates stored in an HDF5 file (.h5).
-- Parquet files containing CCD segments for the area.
+- Parquet files containing CCD segments for the specified point.
 
 Outputs:
 - Time series plot of NDVI with vertical lines for tStart, tBreak, and tEnd.
