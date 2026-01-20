@@ -2,7 +2,17 @@
 For each inputted date range, it creates a geotiff with the last break dates in that range for pixels that have been processed through the CCD model in order to visualize results. Also creates a .qml file to color code break dates by year. A vector file can also be inputted to do spatial filtering.
 
 ### `ccd_plot_one_point.py`
-Reads segments in parquet and creates plot
+Reads CCD segments from Parquet files and plots NDVI time series for a specified point, marking tStart, tBreak, and tEnd events.
+
+Inputs:
+- Coordinates of the point of interest (X, Y).
+- NDVI dates as a NumPy array (.npy).
+- NDVI values and coordinates stored in an HDF5 file (.h5).
+- Parquet files containing CCD segments for the area.
+
+Outputs:
+- Time series plot of NDVI with vertical lines for tStart, tBreak, and tEnd.
+- Shapefile (.shp) containing the point geometry and associated segment dates.
 
 ### `ccd_polygons_to_national_maps.py`
 Merges bimonthly CCD vector outputs into national-scale GeoPackages for each date interval, enabling consolidated spatial analysis across all tiles. *Tile overlaps are not handled in this version.*
