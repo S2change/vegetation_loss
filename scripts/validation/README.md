@@ -1,20 +1,7 @@
 
 ## PyCCD Accuracy Assessment
 
-### `raster_avaliacao_exatidao.py`
-
-Script that conducts accuracy assessment of change detection results from raster data.
-
-Inputs:
-- RASTER_FILE: path to raster file containing change detection dates in YYYYMMDD format
-- REFERENCE_FILE: path to the shapefile/geopackage of the reference dataset used for validation (e.g. DBR_DGT_300)
-
-Outputs:
-- Creates CSV files with accuracy assessment results in a new folder
-- Prints accuracy metrics (F1-score, omission and commission errors) to console
-- Files saved in the same folder as RASTER_FILE, in new directory /{raster_name}_accuracy_assessment
-
-### `validate_ccd_against_icnf.py`
+### `validate_ccd_against_icnf.py` (Sara Caetano; E3.3 – Relatório de validação dos mapas nacionais: E3.3B)
 Cross-references burned area polygons from the ICNF dataset with change detection results from the CCD algorithm (MBPV_v0).
 
 Inputs:
@@ -32,7 +19,20 @@ Outputs:
     - Intersection area between ICNF (inside mask) and MBPV_v0
     - ICNF area (inside mask) not detected by MBPV_v0
 
-### `avaliacao_exatidao_pyccd.py`
+### `raster_avaliacao_exatidao.py` (Dominic Welsh; E3.3 – Relatório de validação dos mapas nacionais: E3.3A)
+
+Script that conducts accuracy assessment of change detection results from raster data.
+
+Inputs:
+- RASTER_FILE: path to raster file containing change detection dates in YYYYMMDD format
+- REFERENCE_FILE: path to the shapefile/geopackage of the reference dataset used for validation (e.g. DBR_DGT_300)
+
+Outputs:
+- Creates CSV files with accuracy assessment results in a new folder
+- Prints accuracy metrics (F1-score, omission and commission errors) to console
+- Files saved in the same folder as RASTER_FILE, in new directory /{raster_name}_accuracy_assessment
+
+### `avaliacao_exatidao_pyccd.py` (Daniel Moraes)
 
 Conducts accuracy assessment of the pyccd results.
 
