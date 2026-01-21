@@ -1,3 +1,5 @@
+# Sara Caetano; E3.3 – Relatório de validação dos mapas nacionais: E3.3B
+
 """
 This script cross-references burned area data provided by ICNF with detections from the CCD algorithm.
 For each ICNF polygon located within the spatial mask (GeoPackage), it searches for spatial intersections
