@@ -1,3 +1,5 @@
+# Dominic Welsh
+
 """
 PURPOSE:
 This script validates that the output raster from ccd_break_filter_to_raster.py contains
