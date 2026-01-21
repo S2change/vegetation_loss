@@ -1,3 +1,5 @@
+# Dominic Welsh; E3.3 – Relatório de validação dos mapas nacionais: E3.3A
+
 """
 Script that conducts accuracy assessment of change detection results from raster data.
 
