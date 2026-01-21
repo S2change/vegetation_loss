@@ -1,3 +1,5 @@
+# Daniel Moraes 2025 (?), foi depois usado para a versão mais recente do Dominic extract_B2B11_start_end.py
+
 """
 
 This script is intended to extract the spectral values before and after the most recent break date identified by pyccd.
