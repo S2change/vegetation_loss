@@ -252,7 +252,7 @@ def select_temporal_window_xarray(xarray_da, break_ordinal, window_days=45,
 
     if pre_break:
         # Find times before break within window
-        mask = (times < break_ordinal) & (times >= break_ordinal - window_days)
+        mask = (times <= break_ordinal) & (times >= break_ordinal - window_days)
         valid_times = times[mask]
         # Sort by proximity (closest to break first)
         valid_times = np.sort(valid_times)[::-1][:max_images]
