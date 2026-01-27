@@ -258,7 +258,7 @@ def select_temporal_window_xarray(xarray_da, break_ordinal, window_days=45,
         valid_times = np.sort(valid_times)[::-1][:max_images]
     else:
         # Find times after break within window
-        mask = (times >= break_ordinal) & (times <= break_ordinal + window_days)
+        mask = (times > break_ordinal) & (times <= break_ordinal + window_days)
         valid_times = times[mask]
         # Sort by proximity (closest to break first)
         valid_times = np.sort(valid_times)[:max_images]
@@ -268,8 +268,12 @@ def select_temporal_window_xarray(xarray_da, break_ordinal, window_days=45,
 
     # Select these time steps from xarray
     indices = [i for i, t in enumerate(xarray_da.time.values) if t in valid_times]
-    return xarray_da.isel(time=indices)
-    # return xarray_da.sel(time=valid_times)
+    result = xarray_da.isel(time=indices)
+
+    if pre_break:
+        return result.sortby('time', ascending=False)
+    else:
+        return result.sortby('time')
 
 
 def get_chips(ds, chip_width, chip_height, overlap):
