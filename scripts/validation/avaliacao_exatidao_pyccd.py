@@ -1,3 +1,5 @@
+# Daniel Moraes
+
 """
 Script that conducts accuracy assessment of pyccd results.
 

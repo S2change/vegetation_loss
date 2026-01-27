@@ -1,3 +1,5 @@
+# script para fazer junção de BDRs (desatualizado)
+
 import geopandas as gpd
 import pandas as pd
 import numpy as np

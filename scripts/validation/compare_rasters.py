@@ -1,3 +1,5 @@
+# Dominic Welsh
+
 """
 ===============================================================================
 Description:
@@ -406,3 +408,4 @@ if __name__ == "__main__":
 
     # Exit with appropriate code
     sys.exit(0 if are_identical else 1)
+

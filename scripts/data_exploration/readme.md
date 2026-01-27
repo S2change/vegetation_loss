@@ -1,3 +1,5 @@
+Move `B2B11_extract_raster.py`to `chips`folder
+
 # Scripts to explore data sets 
 
 ## Data sets (see information in \data_info)
