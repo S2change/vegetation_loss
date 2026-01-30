@@ -8,3 +8,7 @@ scripts/visualisations/flood_algorithm.py
 scripts/visualisations/louvain_comm_raster_to_polygons.py
 scripts/visualisations/raster_polygon_processing.py
 scripts/visualisations/raster_to_polygons.py
+
+scripts/chips/rasterio_draft_chip.py
+scripts/chips/chip_creation.py
+scripts/chips/first_draft_chip.py

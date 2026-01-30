@@ -23,3 +23,34 @@ Inputs:
 
 Outputs:
 - One merged GeoPackage (.gpkg) per bimonthly interval, containing all polygons from all tiles for that period, saved in the merged_polygons directory.
+
+
+# Raster to Polygon Conversions
+The following 3 scripts are different algorithms for clustering pixels with similar break dates together and then converting them to polygons.
+
+### `flood_raster_to_polygons.py`
+Raster to Vector Polygon Converter using Flood Fill Algorithm
+
+Inputs:
+- `input_raster` is a raster where one of the bands contains a break date value in YYYYMMDD format
+
+Outputs:
+- One GeoPackage (.gpkg) which contains polygons that are areas which had pixels whose break dates were within the date_range_days and the polygon area is greater than min_area_ha value
+
+### `graph_raster_to_polygons.py`
+Raster to Vector Polygon Converter using Graph Algorithm
+
+Inputs:
+- `input_raster` is a raster where one of the bands contains a break date value in YYYYMMDD format
+
+Outputs:
+- One GeoPackage (.gpkg) which contains polygons that are areas which had pixels whose break dates were within the date_range_days and the polygon area is greater than min_area_ha value
+
+### `scipy_label_raster_to_polygons.py`
+Raster to Vector Polygon Converter using connected component labeling
+
+Inputs:
+- `input_raster` is a raster where one of the bands contains a break date value in YYYYMMDD format
+
+Outputs:
+- One GeoPackage (.gpkg) which contains polygons that are areas which had pixels whose break dates were within the date_range_days and the polygon area is greater than min_area_ha value
