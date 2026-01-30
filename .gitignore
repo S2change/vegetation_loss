@@ -4,3 +4,7 @@ scripts/pyccd/shared/__pycache__/
 
 scripts/visualisations/raster_identification.py
 scripts/visualisations/raster_polygon_qa.py
+scripts/visualisations/flood_algorithm.py
+scripts/visualisations/louvain_comm_raster_to_polygons.py
+scripts/visualisations/raster_polygon_processing.py
+scripts/visualisations/raster_to_polygons.py
