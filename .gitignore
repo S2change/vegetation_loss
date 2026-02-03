@@ -1,5 +1,5 @@
 **/.DS_Store
-scripts/pyccd/shared/__pycache__/
+**/__pycache__/
 .venv/
 
 scripts/visualisations/raster_identification.py
