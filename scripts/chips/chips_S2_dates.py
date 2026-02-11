@@ -29,6 +29,7 @@ from dask.diagnostics import ProgressBar
 import re
 from rasterio.windows import bounds as window_bounds
 import time
+from functools import wraps
 
 # Add parent directory to path to import pyccd modules
 module_path = os.path.abspath(os.path.join('..'))
@@ -37,6 +38,31 @@ if module_path not in sys.path:
 from pyccd.shared.read_files import read_tif_files_gee
 from ccd_results_utils.segment_identification import yyyymmdd_to_ordinal
 
+
+# ============================================================================
+# TIMING DECORATOR
+# ============================================================================
+
+def timing_decorator(func):
+    """Decorator to measure and print function execution time"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        elapsed = end_time - start_time
+
+        # Format time appropriately
+        if elapsed < 1:
+            time_str = f"{elapsed*1000:.2f} ms"
+        elif elapsed < 60:
+            time_str = f"{elapsed:.2f} seconds"
+        else:
+            time_str = f"{elapsed/60:.2f} minutes ({elapsed:.2f} seconds)"
+
+        print(f"  ⏱️  {func.__name__}: {time_str}")
+        return result
+    return wrapper
 
 # ============================================================================
 # CONFIGURATION
@@ -98,6 +124,7 @@ OUTPUT_NODATA = 0
 # ============================================================================
 
 
+@timing_decorator
 def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates, filter_bounds=None):
     """
     Load full S2 time series into xarray DataArray with chunking for memory efficiency.
@@ -209,6 +236,7 @@ def load_s2_timeseries_xarray(s2_folder, tile, tif_names, tif_dates, filter_boun
     return geotiffs_da, ordinal_to_unix_ms, [info['filename'] for info in spatial_info if info['filename'] in misaligned]
 
 
+@timing_decorator
 def spatial_subset_by_window(xarray_da, window, input_transform):
     """
     Extract chip extent from xarray DataArray using rasterio window.
@@ -240,6 +268,7 @@ def spatial_subset_by_window(xarray_da, window, input_transform):
     return result
 
 
+@timing_decorator
 def select_temporal_window_xarray(xarray_da, break_ordinal, window_days=45,
                                    max_images=9, pre_break=True):
     """
@@ -295,6 +324,7 @@ def select_temporal_window_xarray(xarray_da, break_ordinal, window_days=45,
         return result.sortby('time')
 
 
+@timing_decorator
 def get_chips(ds, chip_width, chip_height, overlap):
     """
     Generate chips from a rasterio dataset with overlap.
@@ -331,6 +361,7 @@ def get_chips(ds, chip_width, chip_height, overlap):
             transform = windows.transform(window, ds.transform)
             yield window, transform
 
+@timing_decorator
 def pixel_proportion_check(chip_data, is_break_band_index):
     """
     Calculate the proportion of processed pixels that have a break
@@ -359,6 +390,7 @@ def pixel_proportion_check(chip_data, is_break_band_index):
 
     return break_count / total_processed
 
+@timing_decorator
 def determine_break_date(chip_data, break_date_band_index):
     """
     Determine most frequent break date in chip
@@ -386,6 +418,7 @@ def determine_break_date(chip_data, break_date_band_index):
 
     return int(unique_dates[max_count_index])
 
+@timing_decorator
 def cascading_selection(image_stack_xr, s2_nodata=65535, output_nodata=0):
     """
     Apply cascading selection using index-based gathering.
@@ -436,6 +469,7 @@ def cascading_selection(image_stack_xr, s2_nodata=65535, output_nodata=0):
 
     return result, pixel_timestamps
 
+@timing_decorator
 def reorder_bands(bands_combined):
     """
     Reorder combined bands from [B2, B11, B3, B4, B8, B12] to [B2, B3, B4, B8, B11, B12]
@@ -459,6 +493,7 @@ def reorder_bands(bands_combined):
         bands_combined[5]   # B12
     ])
 
+@timing_decorator
 def ordinal_to_unix_timestamp(ordinal_array, ordinal_to_unix_map, output_nodata=0):
     """
     Convert array of ordinal dates to Unix timestamps in milliseconds using a mapping.
@@ -491,6 +526,7 @@ def ordinal_to_unix_timestamp(ordinal_array, ordinal_to_unix_map, output_nodata=
 
     return result
 
+@timing_decorator
 def s2_band_files_identical_check(first_files_names, first_files_dates, second_files_names, second_files_dates):
     """
     Safety check that S2 tif files have identical dates for combining the 2 bands with the 4 bands files
@@ -520,13 +556,14 @@ def s2_band_files_identical_check(first_files_names, first_files_dates, second_f
     print(f"Filtered to {len(first_names_filtered)} common dates")
     return first_names_filtered, first_dates_filtered, second_names_filtered, second_dates_filtered
 
-def load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, 
-                         TILE, 
-                         b2b11_names, 
-                         b2b11_dates, 
-                         S2_IMAGES_FOLDER_4_BANDS, 
-                         bands4_names, 
-                         bands4_dates, 
+@timing_decorator
+def load_combined_xarray(S2_IMAGES_FOLDER_B2_B11,
+                         TILE,
+                         b2b11_names,
+                         b2b11_dates,
+                         S2_IMAGES_FOLDER_4_BANDS,
+                         bands4_names,
+                         bands4_dates,
                          filter_bounds=None):
     """
     Loads the 2 different S2 band files into xarrays and then combines them
