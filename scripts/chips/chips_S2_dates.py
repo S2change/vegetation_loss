@@ -40,31 +40,6 @@ from ccd_results_utils.segment_identification import yyyymmdd_to_ordinal
 
 
 # ============================================================================
-# TIMING DECORATOR
-# ============================================================================
-
-def timing_decorator(func):
-    """Decorator to measure and print function execution time"""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        start_time = time.time()
-        result = func(*args, **kwargs)
-        end_time = time.time()
-        elapsed = end_time - start_time
-
-        # Format time appropriately
-        if elapsed < 1:
-            time_str = f"{elapsed*1000:.2f} ms"
-        elif elapsed < 60:
-            time_str = f"{elapsed:.2f} seconds"
-        else:
-            time_str = f"{elapsed/60:.2f} minutes ({elapsed:.2f} seconds)"
-
-        print(f"  ⏱️  {func.__name__}: {time_str}")
-        return result
-    return wrapper
-
-# ============================================================================
 # CONFIGURATION
 # ============================================================================
 
@@ -120,6 +95,31 @@ S2_NODATA = 65535
 
 # NODATA value for output raster
 OUTPUT_NODATA = 0
+
+# ============================================================================
+# TIMING DECORATOR
+# ============================================================================
+
+def timing_decorator(func):
+    """Decorator to measure and print function execution time"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        elapsed = end_time - start_time
+
+        # Format time appropriately
+        if elapsed < 1:
+            time_str = f"{elapsed*1000:.2f} ms"
+        elif elapsed < 60:
+            time_str = f"{elapsed:.2f} seconds"
+        else:
+            time_str = f"{elapsed/60:.2f} minutes ({elapsed:.2f} seconds)"
+
+        print(f"  ⏱️  {func.__name__}: {time_str}")
+        return result
+    return wrapper
 
 # ============================================================================
 
@@ -664,7 +664,11 @@ if __name__ == "__main__":
         for window, transform in get_chips(src, CHIP_WIDTH, CHIP_HEIGHT, OVERLAP):
             chip_start_time = time.time()
             total_attempts_count += 1
+
+            # Timer: Read chip data
+            read_start = time.time()
             chip_data = src.read(window=window)
+            print(f"  ⏱️  read_chip_data: {time.time() - read_start:.2f} seconds")
 
             # Check if chip meets processing threshold
             processed_proportion = pixel_proportion_check(chip_data, IS_BREAK_BAND - 1)
@@ -710,6 +714,8 @@ if __name__ == "__main__":
                 print("  Warning: Cascading selection failed, skipping chip")
                 continue
 
+            # Timer: Convert xarray to numpy
+            numpy_convert_start = time.time()
             # Convert xarray to numpy for further processing
             # Shape: (band, y, x) -> (6, height, width)
             pre_selected = pre_selected_xr.values.transpose(2, 0, 1)
@@ -718,6 +724,7 @@ if __name__ == "__main__":
             # Extract timestamp arrays (shape: y, x)
             pre_timestamps = pre_timestamps_xr.values
             post_timestamps = post_timestamps_xr.values
+            print(f"  ⏱️  xarray_to_numpy_conversion: {time.time() - numpy_convert_start:.2f} seconds")
 
             # Reorder to [B2, B3, B4, B8, B11, B12] for output
             pre_bands_reordered = reorder_bands(pre_selected)
@@ -729,6 +736,8 @@ if __name__ == "__main__":
             print(f"  DEBUG: Pre-timestamps Unix unique values: {np.unique(pre_timestamps_unix)}")
             print(f"  DEBUG: Post-timestamps Unix unique values: {np.unique(post_timestamps_unix)}")
 
+            # Timer: Stack arrays
+            stack_start = time.time()
             # Stack pre/post bands and metadata into 16-band output
             output_bands = np.vstack([
                 pre_bands_reordered,                                                        # Bands 0-5
@@ -738,6 +747,7 @@ if __name__ == "__main__":
                 pre_timestamps_unix[np.newaxis],                                            # Band 14
                 post_timestamps_unix[np.newaxis]                                            # Band 15
             ])
+            print(f"  ⏱️  array_stacking: {time.time() - stack_start:.2f} seconds")
 
             # Update metadata for output
             metadata['transform'] = transform
@@ -746,7 +756,8 @@ if __name__ == "__main__":
             metadata['dtype'] = 'int64'
             metadata['nodata'] = S2_NODATA
 
-            # Write output chip
+            # Timer: Write output chip
+            write_start = time.time()
             out_filepath = os.path.join(OUTPUT_DIR, OUTPUT_FILENAME.format(window.col_off, window.row_off))
 
             with rio.open(out_filepath, 'w', **metadata) as dst:
@@ -756,6 +767,7 @@ if __name__ == "__main__":
                     'B2_post', 'B3_post', 'B4_post', 'B8_post', 'B11_post', 'B12_post', 'is_break',
                     'pre_timestamp', 'post_timestamp'
                 )
+            print(f"  ⏱️  write_output_file: {time.time() - write_start:.2f} seconds")
 
             chip_count += 1
             chip_end_time = time.time()
