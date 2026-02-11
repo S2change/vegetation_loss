@@ -467,6 +467,10 @@ def cascading_selection(image_stack_xr, s2_nodata=65535, output_nodata=0):
     # Set timestamp to nodata where no valid images exist
     pixel_timestamps = pixel_timestamps.where(any_image_all_valid, output_nodata)
 
+    # Force computation of results before returning to avoid deferred execution
+    result = result.compute()
+    pixel_timestamps = pixel_timestamps.compute()
+
     return result, pixel_timestamps
 
 @timing_decorator
