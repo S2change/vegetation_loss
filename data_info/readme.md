@@ -1,5 +1,9 @@
 # Information about our data sets
 
+## Overview/diagram: the main steps of the project
+
+[diagram](https://ulisboa-my.sharepoint.com/:p:/r/personal/mlc_office365_ulisboa_pt/Documents/Documents/investigacao-projectos-reviews-alunos-juris/projetos/DGT-S2CHANGE_2023/partilhado/overview_s2change.pptx?d=w8d41864a55fd482bac2b518cfb2e24a6&csf=1&web=1&e=2SM1V6)
+
 ## Files per S2 tile:
 *TIFF files* → **from Apr 2017 aprox to 2025-11-20, one file per date and S2 tile**<br>
 - TIFFs B3, B4, B8, B12 (downloaded from GEE) —  `D:\s2_images`<br>
