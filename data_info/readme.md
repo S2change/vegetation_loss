@@ -27,8 +27,8 @@ Processing file statistics for 17 tiles: [Tabela de processamento INCD](https://
 - 480 parquet files (480 tasks) per tile
 - What are the variables available for each segment in the parquet files?
 
-   - v1 (**from Apr 2017 aprox to end of 2024, 480 files (tasks) per S2 tile** ): `E:\old_parquets_2017_2024\tabular`<br>
-   - v2 (**from Apr 2017 aprox to ~2025/11/20, one file per S2 tile**): `C:\Users\Public\Documents\new_parquets_2017_2025\tabular`<br>
+   - v1 (**from Apr 2017 aprox to end of 2024, 480 files (tasks) per S2 tile**): `E:\old_parquets_2017_2024\tabular`<br>
+   - v2 (**from Apr 2017 aprox to ~2025/11/20, 480 files (tasks) per S2 tile**): `C:\Users\Public\Documents\new_parquets_2017_2025\tabular`<br>
 
    [Script: process parquets to extract N=10 window around each reference change `data_exploration\Extraction_S2_2N_observations`? ]
 
