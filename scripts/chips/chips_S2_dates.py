@@ -100,6 +100,15 @@ OUTPUT_NODATA = 0
 # Set to False to use original separate processing
 USE_COMBINED_PROCESSING = True
 
+# Use two-stage band loading optimization (load 1 band first, then only required dates for other bands)
+# Set to False to use original approach (load all 6 bands for all dates)
+USE_TWO_STAGE_LOADING = True
+
+# Band index to use for initial cascading selection (0-indexed in the 6-band combined array)
+# 0=B2, 1=B11, 2=B3, 3=B4, 4=B8, 5=B12
+# Recommend using B2 (index 0) or B8 (index 4) as they're typically most reliable
+SELECTION_BAND_INDEX = 0  # B2
+
 # ============================================================================
 # TIMING DECORATOR
 # ============================================================================
@@ -378,6 +387,172 @@ def select_temporal_window_pre_and_post(xarray_da, break_ordinal, window_days=45
     post_result = xarray_da.isel(time=post_indices).sortby('time')
 
     return pre_result, post_result
+
+
+@timing_decorator
+def cascading_selection_single_band_pre_and_post(pre_stack_xr, post_stack_xr, band_index=0, s2_nodata=65535, output_nodata=0):
+    """
+    Apply cascading selection using only a single band to determine required dates.
+
+    This is a lightweight version that identifies which date is needed for each pixel
+    without loading all bands. Use this first, then load remaining bands only for
+    the required dates.
+
+    Parameters:
+    -----------
+    pre_stack_xr : xr.DataArray
+        Pre-break DataArray with dimensions (time, band, y, x)
+    post_stack_xr : xr.DataArray
+        Post-break DataArray with dimensions (time, band, y, x)
+    band_index : int
+        Index of band to use for selection (0-indexed)
+    s2_nodata : int
+        NODATA sentinel value
+    output_nodata : int
+        NODATA value for output
+
+    Returns:
+    --------
+    tuple of (pre_timestamps, post_timestamps, pre_unique_dates, post_unique_dates)
+        pre_timestamps: Ordinal timestamp for each pixel (y, x)
+        post_timestamps: Ordinal timestamp for each pixel (y, x)
+        pre_unique_dates: List of unique ordinal dates needed for pre-break
+        post_unique_dates: List of unique ordinal dates needed for post-break
+    """
+    if pre_stack_xr is None or post_stack_xr is None:
+        return None, None, None, None
+
+    # Select only the specified band for both pre and post
+    pre_single_band = pre_stack_xr.isel(band=band_index)
+    post_single_band = post_stack_xr.isel(band=band_index)
+
+    # PRE-BREAK: Find first valid image for this band
+    pre_valid_mask = pre_single_band < s2_nodata
+    pre_first_valid_idx = pre_valid_mask.argmax(dim='time')
+
+    # POST-BREAK: Find first valid image for this band
+    post_valid_mask = post_single_band < s2_nodata
+    post_first_valid_idx = post_valid_mask.argmax(dim='time')
+
+    # Compute both index arrays together
+    computed_indices = xr.Dataset({
+        'pre_idx': pre_first_valid_idx,
+        'post_idx': post_first_valid_idx
+    }).compute()
+
+    pre_first_valid_idx = computed_indices['pre_idx']
+    post_first_valid_idx = computed_indices['post_idx']
+
+    # Handle edge case: pixels where NO valid images exist
+    pre_any_valid = pre_valid_mask.any(dim='time')
+    post_any_valid = post_valid_mask.any(dim='time')
+
+    # Get timestamps for each pixel
+    pre_timestamp_map = xr.DataArray(pre_stack_xr.time.values, dims=['time'])
+    pre_pixel_timestamps = pre_timestamp_map.isel(time=pre_first_valid_idx)
+    pre_pixel_timestamps = pre_pixel_timestamps.where(pre_any_valid, output_nodata)
+
+    post_timestamp_map = xr.DataArray(post_stack_xr.time.values, dims=['time'])
+    post_pixel_timestamps = post_timestamp_map.isel(time=post_first_valid_idx)
+    post_pixel_timestamps = post_pixel_timestamps.where(post_any_valid, output_nodata)
+
+    # Compute timestamps
+    computed_timestamps = xr.Dataset({
+        'pre_ts': pre_pixel_timestamps,
+        'post_ts': post_pixel_timestamps
+    }).compute()
+
+    pre_timestamps = computed_timestamps['pre_ts'].values
+    post_timestamps = computed_timestamps['post_ts'].values
+
+    # Get unique dates needed (excluding nodata)
+    pre_unique_dates = np.unique(pre_timestamps)
+    pre_unique_dates = pre_unique_dates[pre_unique_dates != output_nodata].tolist()
+
+    post_unique_dates = np.unique(post_timestamps)
+    post_unique_dates = post_unique_dates[post_unique_dates != output_nodata].tolist()
+
+    return pre_timestamps, post_timestamps, pre_unique_dates, post_unique_dates
+
+
+@timing_decorator
+def load_remaining_bands_for_dates(xarray_da, required_dates, band_indices_to_load):
+    """
+    Load specific bands for only the required dates.
+
+    Parameters:
+    -----------
+    xarray_da : xr.DataArray
+        Full DataArray with dimensions (time, band, y, x)
+    required_dates : list
+        List of ordinal dates to load
+    band_indices_to_load : list
+        List of band indices to load (0-indexed)
+
+    Returns:
+    --------
+    xr.DataArray
+        DataArray subset to specified dates and bands
+    """
+    if not required_dates:
+        return None
+
+    # Select only the required time steps
+    time_mask = xarray_da.time.isin(required_dates)
+    subset_times = xarray_da.isel(time=time_mask)
+
+    # Select only the required bands
+    subset_bands = subset_times.isel(band=band_indices_to_load)
+
+    return subset_bands
+
+
+@timing_decorator
+def gather_bands_by_timestamp(timestamp_array, band_data_dict, all_band_indices, output_nodata=0):
+    """
+    Gather all bands for each pixel based on its timestamp using pre-loaded date-specific data.
+
+    Parameters:
+    -----------
+    timestamp_array : numpy.ndarray
+        Array of shape (y, x) containing ordinal dates for each pixel
+    band_data_dict : dict
+        Dictionary mapping ordinal dates to xr.DataArray with shape (band, y, x)
+    all_band_indices : list
+        List of all band indices in output order
+    output_nodata : int
+        NODATA value for output
+
+    Returns:
+    --------
+    xr.DataArray
+        Array of shape (band, y, x) with gathered band values
+    """
+    height, width = timestamp_array.shape
+    n_bands = len(all_band_indices)
+
+    # Initialize output array
+    output = np.full((n_bands, height, width), output_nodata, dtype=np.int64)
+
+    # For each unique date, gather pixels that use that date
+    unique_dates = np.unique(timestamp_array)
+    unique_dates = unique_dates[unique_dates != output_nodata]
+
+    for date in unique_dates:
+        if date not in band_data_dict:
+            continue
+
+        # Get mask of pixels that need this date
+        pixel_mask = (timestamp_array == date)
+
+        # Get band data for this date
+        band_data = band_data_dict[date].values  # Shape: (band, y, x)
+
+        # Assign to output where mask is True
+        for band_idx in range(n_bands):
+            output[band_idx][pixel_mask] = band_data[band_idx][pixel_mask]
+
+    return output
 
 
 @timing_decorator
@@ -840,7 +1015,122 @@ if __name__ == "__main__":
             # Spatially subset xarray for this chip
             spatial_subset_chip_xr = spatial_subset_by_window(geotiffs_combined, window, src.transform)
 
-            if USE_COMBINED_PROCESSING:
+            if USE_TWO_STAGE_LOADING:
+                # TWO-STAGE OPTIMIZED LOADING
+                # Stage 1: Use single band to determine required dates
+                print("  Stage 1: Single-band cascading selection...")
+
+                # Temporal selection for pre and post
+                pre_selected_chip_xr, post_selected_chip_xr = select_temporal_window_pre_and_post(
+                    spatial_subset_chip_xr, break_ordinal, TEMPORAL_WINDOW_DAYS, MAX_IMAGES_PER_PERIOD
+                )
+
+                if pre_selected_chip_xr is None or post_selected_chip_xr is None:
+                    print("  Warning: Could not find any images in temporal window, skipping chip")
+                    continue
+
+                # Single-band cascading selection to determine required dates
+                pre_timestamps, post_timestamps, pre_dates_needed, post_dates_needed = cascading_selection_single_band_pre_and_post(
+                    pre_selected_chip_xr, post_selected_chip_xr, SELECTION_BAND_INDEX, S2_NODATA, OUTPUT_NODATA
+                )
+
+                if pre_timestamps is None or post_timestamps is None or pre_dates_needed is None or post_dates_needed is None:
+                    print("  Warning: Single-band cascading selection failed, skipping chip")
+                    continue
+
+                print(f"  Stage 1 complete: Pre needs {len(pre_dates_needed)} dates, Post needs {len(post_dates_needed)} dates")
+
+                # Stage 2: Load all bands only for required dates
+                print("  Stage 2: Loading remaining bands for required dates...")
+
+                # Get all band indices except the selection band
+                all_band_indices = list(range(6))
+                remaining_band_indices = [i for i in all_band_indices if i != SELECTION_BAND_INDEX]
+
+                # Load remaining bands for pre-break dates
+                pre_remaining_bands = load_remaining_bands_for_dates(
+                    pre_selected_chip_xr, pre_dates_needed, remaining_band_indices
+                )
+
+                # Load remaining bands for post-break dates
+                post_remaining_bands = load_remaining_bands_for_dates(
+                    post_selected_chip_xr, post_dates_needed, remaining_band_indices
+                )
+
+                if pre_remaining_bands is None or post_remaining_bands is None:
+                    print("  Warning: Failed to load remaining bands, skipping chip")
+                    continue
+
+                # Compute remaining bands
+                pre_remaining_bands = pre_remaining_bands.compute()
+                post_remaining_bands = post_remaining_bands.compute()
+
+                # Also load the selection band for the required dates
+                pre_selection_band = load_remaining_bands_for_dates(
+                    pre_selected_chip_xr, pre_dates_needed, [SELECTION_BAND_INDEX]
+                )
+                post_selection_band = load_remaining_bands_for_dates(
+                    post_selected_chip_xr, post_dates_needed, [SELECTION_BAND_INDEX]
+                )
+
+                if pre_selection_band is None or post_selection_band is None:
+                    print("  Warning: Failed to load selection band, skipping chip")
+                    continue
+
+                pre_selection_band = pre_selection_band.compute()
+                post_selection_band = post_selection_band.compute()
+
+                # Create dictionaries mapping dates to band data
+                # For pre-break
+                pre_band_dict = {}
+                for i, date in enumerate(pre_dates_needed):
+                    # Combine selection band with remaining bands
+                    sel_band_data = pre_selection_band.isel(time=i)  # Shape: (1, y, x)
+                    rem_band_data = pre_remaining_bands.isel(time=i)  # Shape: (n_remaining_bands, y, x)
+
+                    # Stack bands in original order
+                    if SELECTION_BAND_INDEX == 0:
+                        # Selection band is first
+                        combined = xr.concat([sel_band_data, rem_band_data], dim='band')
+                    elif SELECTION_BAND_INDEX == 5:
+                        # Selection band is last
+                        combined = xr.concat([rem_band_data, sel_band_data], dim='band')
+                    else:
+                        # Selection band is in the middle - need to reconstruct proper order
+                        bands_before = rem_band_data.isel(band=slice(0, SELECTION_BAND_INDEX))
+                        bands_after = rem_band_data.isel(band=slice(SELECTION_BAND_INDEX, None))
+                        combined = xr.concat([bands_before, sel_band_data, bands_after], dim='band')
+
+                    pre_band_dict[date] = combined
+
+                # For post-break
+                post_band_dict = {}
+                for i, date in enumerate(post_dates_needed):
+                    sel_band_data = post_selection_band.isel(time=i)
+                    rem_band_data = post_remaining_bands.isel(time=i)
+
+                    if SELECTION_BAND_INDEX == 0:
+                        combined = xr.concat([sel_band_data, rem_band_data], dim='band')
+                    elif SELECTION_BAND_INDEX == 5:
+                        combined = xr.concat([rem_band_data, sel_band_data], dim='band')
+                    else:
+                        bands_before = rem_band_data.isel(band=slice(0, SELECTION_BAND_INDEX))
+                        bands_after = rem_band_data.isel(band=slice(SELECTION_BAND_INDEX, None))
+                        combined = xr.concat([bands_before, sel_band_data, bands_after], dim='band')
+
+                    post_band_dict[date] = combined
+
+                # Gather all bands for each pixel based on timestamp
+                # These are already numpy arrays in the correct format: (band, y, x)
+                pre_selected = gather_bands_by_timestamp(pre_timestamps, pre_band_dict, all_band_indices, OUTPUT_NODATA)
+                post_selected = gather_bands_by_timestamp(post_timestamps, post_band_dict, all_band_indices, OUTPUT_NODATA)
+
+                # pre_timestamps and post_timestamps are already numpy arrays: (y, x)
+                # No need to wrap in DataArray since we'll use them directly
+
+                print("  Stage 2 complete: All bands gathered")
+
+            elif USE_COMBINED_PROCESSING:
                 # Combined temporal selection for both pre and post
                 pre_selected_chip_xr, post_selected_chip_xr = select_temporal_window_pre_and_post(
                     spatial_subset_chip_xr, break_ordinal, TEMPORAL_WINDOW_DAYS, MAX_IMAGES_PER_PERIOD
@@ -880,16 +1170,18 @@ if __name__ == "__main__":
                     continue
 
             # Timer: Convert xarray to numpy
-            numpy_convert_start = time.time()
-            # Convert xarray to numpy for further processing
-            # Shape: (band, y, x) -> (6, height, width)
-            pre_selected = pre_selected_xr.values.transpose(2, 0, 1)
-            post_selected = post_selected_xr.values.transpose(2, 0, 1)
-
-            # Extract timestamp arrays (shape: y, x)
-            pre_timestamps = pre_timestamps_xr.values
-            post_timestamps = post_timestamps_xr.values
-            print(f"  ⏱️  xarray_to_numpy_conversion: {time.time() - numpy_convert_start:.2f} seconds")
+            if not USE_TWO_STAGE_LOADING:
+                # Only need conversion for non-two-stage paths
+                numpy_convert_start = time.time()
+                # Convert xarray to numpy for further processing
+                # Original path needs transposition: (band, y, x) -> (6, height, width)
+                pre_selected = pre_selected_xr.values.transpose(2, 0, 1)
+                post_selected = post_selected_xr.values.transpose(2, 0, 1)
+                # Extract timestamp arrays (shape: y, x)
+                pre_timestamps = pre_timestamps_xr.values
+                post_timestamps = post_timestamps_xr.values
+                print(f"  ⏱️  xarray_to_numpy_conversion: {time.time() - numpy_convert_start:.2f} seconds")
+            # else: two-stage path already has pre_selected, post_selected, pre_timestamps, post_timestamps as numpy arrays
 
             # Reorder to [B2, B3, B4, B8, B11, B12] for output
             pre_bands_reordered = reorder_bands(pre_selected)
