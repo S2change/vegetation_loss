@@ -48,7 +48,7 @@ INPUT_TIF = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG\processed_out
 BREAK_DATE_BAND = 1
 IS_BREAK_BAND = 3
 # Min/Max dates for S2 files. Use format datetime(2024, 12, 31)
-MIN_DATE = None
+MIN_DATE = datetime(2017, 10, 1)
 MAX_DATE = datetime(2022, 3, 1)
 
 # Output directory for chips
@@ -95,13 +95,6 @@ S2_NODATA = 65535
 
 # NODATA value for output raster
 OUTPUT_NODATA = 0
-
-# Add jitter to B11 and B12 bands to break up 2x2 identical pixel blocks
-# Set to True to enable, False to disable
-ADD_B11_B12_JITTER = True
-
-# Jitter magnitude as percentage of pixel value (e.g., 0.01 = 1% variance)
-JITTER_PERCENTAGE = 0.01
 
 # ============================================================================
 # TIMING DECORATOR
@@ -505,49 +498,6 @@ def reorder_bands(bands_combined):
     ])
 
 @timing_decorator
-def apply_jitter_to_20m_bands(bands_array, jitter_percentage=0.01, output_nodata=0):
-    """
-    Add subtle random variance to B11 (band index 4) and B12 (band index 5) to break up
-    2x2 identical pixel blocks caused by 20m->10m upsampling.
-
-    The jitter is applied as a percentage of the pixel value to maintain relative scale.
-    Valid pixels (non-nodata) receive uniform random jitter in range [-jitter%, +jitter%].
-
-    Parameters:
-    -----------
-    bands_array : numpy.ndarray
-        Array of shape (6, height, width) with bands in order [B2, B3, B4, B8, B11, B12]
-    jitter_percentage : float
-        Jitter magnitude as fraction of pixel value (e.g., 0.01 = 1% variance)
-    output_nodata : int
-        NODATA value to preserve (pixels with this value won't be jittered)
-
-    Returns:
-    --------
-    numpy.ndarray
-        Array with jitter applied to B11 and B12 bands
-    """
-    jittered = bands_array.copy()
-
-    # Apply jitter to B11 (index 4) and B12 (index 5)
-    for band_idx in [4, 5]:
-        band = jittered[band_idx]
-        valid_mask = band != output_nodata
-
-        # Generate uniform random jitter: range [-jitter%, +jitter%] of pixel value
-        # Using uniform distribution centered at 0
-        jitter = np.random.uniform(-jitter_percentage, jitter_percentage, band.shape)
-
-        # Apply jitter only to valid pixels
-        # Multiply jitter by pixel value to make it proportional
-        jittered_values = band + (band * jitter)
-
-        # Apply jitter only where pixels are valid, preserve nodata elsewhere
-        jittered[band_idx] = np.where(valid_mask, jittered_values, band)
-
-    return jittered
-
-@timing_decorator
 def ordinal_to_unix_timestamp(ordinal_array, ordinal_to_unix_map, output_nodata=0):
     """
     Convert array of ordinal dates to Unix timestamps in milliseconds using a mapping.
@@ -783,11 +733,6 @@ if __name__ == "__main__":
             # Reorder to [B2, B3, B4, B8, B11, B12] for output
             pre_bands_reordered = reorder_bands(pre_selected)
             post_bands_reordered = reorder_bands(post_selected)
-
-            # Apply jitter to B11 and B12 bands if enabled
-            if ADD_B11_B12_JITTER:
-                pre_bands_reordered = apply_jitter_to_20m_bands(pre_bands_reordered, JITTER_PERCENTAGE, OUTPUT_NODATA)
-                post_bands_reordered = apply_jitter_to_20m_bands(post_bands_reordered, JITTER_PERCENTAGE, OUTPUT_NODATA)
 
             pre_timestamps_unix = ordinal_to_unix_timestamp(pre_timestamps, timestamp_mapping, OUTPUT_NODATA)
             post_timestamps_unix = ordinal_to_unix_timestamp(post_timestamps, timestamp_mapping, OUTPUT_NODATA)
