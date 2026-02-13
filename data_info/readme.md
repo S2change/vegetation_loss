@@ -15,17 +15,20 @@ Processing file statistics for 17 tiles: [Tabela de processamento INCD](https://
 
    [Script: Add link script to convert TIFF into HDF5]
 
-*HDF5 files* → **from Apr 2017 aprox to end of 2024, one file per S2 tile**<br>
-- HDF5 for B3, B4, B8, B12 ( shape: (dates, bands, n_points) ) — `E:\outputs_ROI\hdf5`<br> Add note about copying these files to HPC (was it necessary to copy/remove each tile?)
-- HDF5 for B2 and B11 — directory doesn't exist yet.
+*HDF5 files* 
+- HDF5 for B3, B4, B8, B12 ( shape: (dates, bands, n_points) ) - Add note about copying these files to HPC (was it necessary to copy/remove each tile? yes)<br> 
+   - v1 (**from Apr 2017 aprox to end of 2024, one file per S2 tile**): `E:\outputs_ROI\hdf5\T29SMD\s2_images-NDVI_XX999YM1NOBS6LDA2ITER1000_START20170408_END20241229_ROINAV.h5`<br>
+   - v2 (**from Apr 2017 aprox to ~2025/11/20, one file per S2 tile**): `E:\outputs_ROI\hdf5\T29SMD\s2_images-NDVI_XX999YM1NOBS6LDA2ITER1000_START20170408_END20251117_ROI_DGT_mask.h5`
 
    [Script: Add link script to create parquets from HDF5]
 
-*Parquets PyCCD outputs* → **from Apr 2017 aprox to end of 2024, 480 files (tasks) per S2 tile** (2 versions?)
+*Parquets PyCCD outputs*
 - Parameters: chisq = 0.999 / alpha = 2 / lasso_iter = 1000<br>
-- `C:\Users\Public\Documents\outputs_ROI\tabular`<br>
 - 480 parquet files (480 tasks) per tile
 - What are the variables available for each segment in the parquet files?
+
+   - v1 (**from Apr 2017 aprox to end of 2024, 480 files (tasks) per S2 tile** ): `E:\old_parquets_2017_2024\tabular`<br>
+   - v2 (**from Apr 2017 aprox to ~2025/11/20, one file per S2 tile**): `C:\Users\Public\Documents\new_parquets_2017_2025\tabular`<br>
 
    [Script: process parquets to extract N=10 window around each reference change `data_exploration\Extraction_S2_2N_observations`? ]
 
@@ -34,11 +37,11 @@ Processing file statistics for 17 tiles: [Tabela de processamento INCD](https://
 
    [Script: to convert Parquets into rasters: `ccd_to_raster.py`]​
 
-*Rasters and polygons generated from PyCCD parquet outputs* → **bimonthly from 2023-01-01 to 2024-12-31**<br>
+*Rasters and polygons generated from PyCCD parquet outputs* → **bimonthly from 2023-01-01 to ~2025-11-20**<br>
 - Parameters: tol = 10 days / min_area = 0.5 ha / connectivity = 8<br>
-- Rasters (organized per tile) — `C:\Users\Public\Documents\outputs_ROI\tabular\T29SMD\processed_outputs\rasters`<br>
-- Polygons (organized per tile) — `C:\Users\Public\Documents\outputs_ROI\tabular\T29SMD\processed_outputs\vectors`<br>
-- Polygons also available as a single polygon map for forest and shrubland areas across mainland Portugal (rasters not available at this scale) — `C:\Users\Public\Documents\outputs_ROI\tabular\MBPV_v1`
+- Rasters (organized per tile) — `C:\Users\Public\Documents\new_parquets_2017_2025\tabular\T29SMD\processed_outputs\rasters`<br>
+- Polygons (organized per tile) — `C:\Users\Public\Documents\new_parquets_2017_2025\tabular\T29SMD\processed_outputs\vectors`<br>
+- Polygons also available as a single polygon map for forest and shrubland areas across mainland Portugal (rasters not available at this scale) — `C:\Users\Public\Documents\outputs_ROI\tabular\MBPV`
 
 ## Reference data (available in oneDrive, folder ref_datasets)
 1. BDR-DGT-300
