@@ -28,7 +28,7 @@
 *dates, bands, for N=10 window around each reference change for BDR-DGT-300,  ICNF 2020--2024, and BDR_NVG*<br>
 - `C:\Users\Public\Documents\ref_datasets\amostras_por_pixel`<br>
 
-   [Script: to convert Parquets into rasters: `ccd_to_raster.py`/ `data_exploration\temp_extract_B2B11_start_end.py`, `data_exploration\B2B11_extract_raster.py`]​
+   [Script: to convert Parquets into rasters: `ccd_to_raster.py`]​
 
 *Rasters and polygons generated from PyCCD parquet outputs* → **bimonthly from 2023-01-01 to 2024-12-31**<br>
 - Parameters: tol = 10 days / min_area = 0.5 ha / connectivity = 8<br>
