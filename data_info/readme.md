@@ -16,9 +16,12 @@ Processing file statistics for 17 tiles: [Tabela de processamento INCD](https://
    [Script: Add link script to convert TIFF into HDF5]
 
 *HDF5 files* 
-- HDF5 for B3, B4, B8, B12 ( shape: (dates, bands, n_points) ) - Add note about copying these files to HPC (was it necessary to copy/remove each tile? yes)<br> 
+- HDF5 for B3, B4, B8, B12 ( shape: (dates, bands, n_points)<br> 
    - v1 (**from Apr 2017 aprox to end of 2024, one file per S2 tile**): `E:\outputs_ROI\hdf5\T29SMD\s2_images-NDVI_XX999YM1NOBS6LDA2ITER1000_START20170408_END20241229_ROINAV.h5`<br>
-   - v2 (**from Apr 2017 aprox to ~2025/11/20, one file per S2 tile**): `E:\outputs_ROI\hdf5\T29SMD\s2_images-NDVI_XX999YM1NOBS6LDA2ITER1000_START20170408_END20251117_ROI_DGT_mask.h5`
+   - v2 (**from Apr 2017 aprox to ~2025/11/20, one file per S2 tile**): `E:\outputs_ROI\hdf5\T29SMD\s2_images-NDVI_XX999YM1NOBS6LDA2ITER1000_START20170408_END20251117_ROI_DGT_mask.h5`<br>
+
+⚠️ HPC Workflow Note ⚠️<br>
+Due to storage constraints on the HPC system, HDF5 files were copied in small batches (typically up to 3 S2 tiles at a time) before processing. After processing, the corresponding files were removed from the HPC storage to free disk space.
 
    [Script: Add link script to create parquets from HDF5]
 
