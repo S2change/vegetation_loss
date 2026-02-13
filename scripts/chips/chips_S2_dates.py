@@ -96,6 +96,10 @@ S2_NODATA = 65535
 # NODATA value for output raster
 OUTPUT_NODATA = 0
 
+# Use combined processing for pre and post (faster, but newer implementation)
+# Set to False to use original separate processing
+USE_COMBINED_PROCESSING = True
+
 # ============================================================================
 # TIMING DECORATOR
 # ============================================================================
@@ -322,6 +326,142 @@ def select_temporal_window_xarray(xarray_da, break_ordinal, window_days=45,
         return result.sortby('time', ascending=False)
     else:
         return result.sortby('time')
+
+
+@timing_decorator
+def select_temporal_window_pre_and_post(xarray_da, break_ordinal, window_days=45, max_images=9):
+    """
+    Select temporal windows for both pre and post break in a single operation.
+
+    Parameters:
+    -----------
+    xarray_da : xr.DataArray
+        DataArray with time dimension in ordinals
+    break_ordinal : int
+        Break date as ordinal
+    window_days : int
+        Temporal window in days
+    max_images : int
+        Maximum number of images to return per period
+
+    Returns:
+    --------
+    tuple of (xr.DataArray, xr.DataArray) or (None, None)
+        First element: Pre-break DataArray (shape: n_images, band, y, x)
+        Second element: Post-break DataArray (shape: n_images, band, y, x)
+        Returns (None, None) if either period has no images
+    """
+    if break_ordinal is None:
+        return None, None
+
+    times = xarray_da.time.values
+
+    # Pre-break selection
+    pre_mask = (times <= break_ordinal) & (times >= break_ordinal - window_days)
+    pre_valid_times = times[pre_mask]
+    pre_valid_times = np.sort(pre_valid_times)[::-1][:max_images]
+
+    # Post-break selection
+    post_mask = (times > break_ordinal) & (times <= break_ordinal + window_days)
+    post_valid_times = times[post_mask]
+    post_valid_times = np.sort(post_valid_times)[:max_images]
+
+    # Check if both have data
+    if len(pre_valid_times) == 0 or len(post_valid_times) == 0:
+        return None, None
+
+    # Select time steps for both
+    pre_indices = [i for i, t in enumerate(times) if t in pre_valid_times]
+    post_indices = [i for i, t in enumerate(times) if t in post_valid_times]
+
+    pre_result = xarray_da.isel(time=pre_indices).sortby('time', ascending=False)
+    post_result = xarray_da.isel(time=post_indices).sortby('time')
+
+    return pre_result, post_result
+
+
+@timing_decorator
+def cascading_selection_pre_and_post(pre_stack_xr, post_stack_xr, s2_nodata=65535, output_nodata=0):
+    """
+    Apply cascading selection to both pre and post stacks in a single optimized operation.
+
+    Parameters:
+    -----------
+    pre_stack_xr : xr.DataArray
+        Pre-break DataArray with dimensions (time, band, y, x)
+    post_stack_xr : xr.DataArray
+        Post-break DataArray with dimensions (time, band, y, x)
+    s2_nodata : int
+        NODATA sentinel value
+    output_nodata : int
+        NODATA value for output
+
+    Returns:
+    --------
+    tuple of (pre_result, pre_timestamps, post_result, post_timestamps)
+        All four arrays computed in a single operation
+    """
+    if pre_stack_xr is None or post_stack_xr is None:
+        return None, None, None, None
+
+    # PRE-BREAK PROCESSING
+    # Get index of first image where all bands have data
+    pre_valid_mask = pre_stack_xr < s2_nodata
+    pre_all_bands_valid = pre_valid_mask.all(dim='band')
+    pre_first_valid_idx = pre_all_bands_valid.argmax(dim='time')
+
+    # POST-BREAK PROCESSING
+    # Get index of first image where all bands have data
+    post_valid_mask = post_stack_xr < s2_nodata
+    post_all_bands_valid = post_valid_mask.all(dim='band')
+    post_first_valid_idx = post_all_bands_valid.argmax(dim='time')
+
+    # Compute both index arrays together (convert from dask to numpy)
+    computed_indices = xr.Dataset({
+        'pre_idx': pre_first_valid_idx,
+        'post_idx': post_first_valid_idx
+    }).compute()
+
+    pre_first_valid_idx = computed_indices['pre_idx']
+    post_first_valid_idx = computed_indices['post_idx']
+
+    # PRE-BREAK: Select using computed indices
+    pre_result = pre_stack_xr.isel(time=pre_first_valid_idx)
+
+    # Handle edge case: pixels where NO images have all bands valid
+    pre_any_image_all_valid = pre_all_bands_valid.any(dim='time')
+    pre_result = pre_result.where(pre_any_image_all_valid, output_nodata)
+
+    # Get timestamps for pre-break
+    pre_timestamp_map = xr.DataArray(pre_stack_xr.time.values, dims=['time'])
+    pre_pixel_timestamps = pre_timestamp_map.isel(time=pre_first_valid_idx)
+    pre_pixel_timestamps = pre_pixel_timestamps.where(pre_any_image_all_valid, output_nodata)
+
+    # POST-BREAK: Select using computed indices
+    post_result = post_stack_xr.isel(time=post_first_valid_idx)
+
+    # Handle edge case: pixels where NO images have all bands valid
+    post_any_image_all_valid = post_all_bands_valid.any(dim='time')
+    post_result = post_result.where(post_any_image_all_valid, output_nodata)
+
+    # Get timestamps for post-break
+    post_timestamp_map = xr.DataArray(post_stack_xr.time.values, dims=['time'])
+    post_pixel_timestamps = post_timestamp_map.isel(time=post_first_valid_idx)
+    post_pixel_timestamps = post_pixel_timestamps.where(post_any_image_all_valid, output_nodata)
+
+    # Compute all results together in a single operation
+    # This allows Dask to optimize the entire computation graph
+    computed_results = xr.Dataset({
+        'pre_result': pre_result,
+        'pre_timestamps': pre_pixel_timestamps,
+        'post_result': post_result,
+        'post_timestamps': post_pixel_timestamps
+    }).compute()
+
+    return (computed_results['pre_result'],
+            computed_results['pre_timestamps'],
+            computed_results['post_result'],
+            computed_results['post_timestamps'])
 
 
 @timing_decorator
@@ -659,6 +799,7 @@ if __name__ == "__main__":
         print(f"Chip size: {CHIP_WIDTH} x {CHIP_HEIGHT}")
         print(f"Overlap: {OVERLAP} pixels")
         print(f"Output directory: {OUTPUT_DIR}")
+        print(f"Processing mode: {'COMBINED' if USE_COMBINED_PROCESSING else 'ORIGINAL'}")
 
         # Create output directory if it doesn't exist
         os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -699,24 +840,44 @@ if __name__ == "__main__":
             # Spatially subset xarray for this chip
             spatial_subset_chip_xr = spatial_subset_by_window(geotiffs_combined, window, src.transform)
 
-            # Temporal selection using xarray
-            pre_selected_chip_xr = select_temporal_window_xarray(
-                spatial_subset_chip_xr, break_ordinal, TEMPORAL_WINDOW_DAYS, MAX_IMAGES_PER_PERIOD, pre_break=True
-            )
-            post_selected_chip_xr = select_temporal_window_xarray(
-                spatial_subset_chip_xr, break_ordinal, TEMPORAL_WINDOW_DAYS, MAX_IMAGES_PER_PERIOD, pre_break=False
-            )
+            if USE_COMBINED_PROCESSING:
+                # Combined temporal selection for both pre and post
+                pre_selected_chip_xr, post_selected_chip_xr = select_temporal_window_pre_and_post(
+                    spatial_subset_chip_xr, break_ordinal, TEMPORAL_WINDOW_DAYS, MAX_IMAGES_PER_PERIOD
+                )
 
-            if pre_selected_chip_xr is None or post_selected_chip_xr is None:
-                print("  Warning: Could not find any images in temporal window, skipping chip")
-                continue
+                if pre_selected_chip_xr is None or post_selected_chip_xr is None:
+                    print("  Warning: Could not find any images in temporal window, skipping chip")
+                    continue
 
-            pre_selected_xr, pre_timestamps_xr = cascading_selection(pre_selected_chip_xr, S2_NODATA, OUTPUT_NODATA)
-            post_selected_xr, post_timestamps_xr = cascading_selection(post_selected_chip_xr, S2_NODATA, OUTPUT_NODATA)
+                # Combined cascading selection for both pre and post
+                pre_selected_xr, pre_timestamps_xr, post_selected_xr, post_timestamps_xr = cascading_selection_pre_and_post(
+                    pre_selected_chip_xr, post_selected_chip_xr, S2_NODATA, OUTPUT_NODATA
+                )
 
-            if pre_selected_xr is None or post_selected_xr is None or pre_timestamps_xr is None or post_timestamps_xr is None:
-                print("  Warning: Cascading selection failed, skipping chip")
-                continue
+                if pre_selected_xr is None or post_selected_xr is None or pre_timestamps_xr is None or post_timestamps_xr is None:
+                    print("  Warning: Cascading selection failed, skipping chip")
+                    continue
+            else:
+                # Original separate processing for pre and post
+                # Temporal selection using xarray
+                pre_selected_chip_xr = select_temporal_window_xarray(
+                    spatial_subset_chip_xr, break_ordinal, TEMPORAL_WINDOW_DAYS, MAX_IMAGES_PER_PERIOD, pre_break=True
+                )
+                post_selected_chip_xr = select_temporal_window_xarray(
+                    spatial_subset_chip_xr, break_ordinal, TEMPORAL_WINDOW_DAYS, MAX_IMAGES_PER_PERIOD, pre_break=False
+                )
+
+                if pre_selected_chip_xr is None or post_selected_chip_xr is None:
+                    print("  Warning: Could not find any images in temporal window, skipping chip")
+                    continue
+
+                pre_selected_xr, pre_timestamps_xr = cascading_selection(pre_selected_chip_xr, S2_NODATA, OUTPUT_NODATA)
+                post_selected_xr, post_timestamps_xr = cascading_selection(post_selected_chip_xr, S2_NODATA, OUTPUT_NODATA)
+
+                if pre_selected_xr is None or post_selected_xr is None or pre_timestamps_xr is None or post_timestamps_xr is None:
+                    print("  Warning: Cascading selection failed, skipping chip")
+                    continue
 
             # Timer: Convert xarray to numpy
             numpy_convert_start = time.time()
