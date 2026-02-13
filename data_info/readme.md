@@ -4,6 +4,10 @@
 
 [diagram](https://ulisboa-my.sharepoint.com/:p:/r/personal/mlc_office365_ulisboa_pt/Documents/Documents/investigacao-projectos-reviews-alunos-juris/projetos/DGT-S2CHANGE_2023/partilhado/overview_s2change.pptx?d=w8d41864a55fd482bac2b518cfb2e24a6&csf=1&web=1&e=2SM1V6)
 
+## Statistics for INCD and local machine for all tiles
+
+Processing file statistics for 17 tiles: [Tabela de processamento INCD](https://ulisboa-my.sharepoint.com/:x:/r/personal/mlc_office365_ulisboa_pt/_layouts/15/Doc.aspx?sourcedoc=%7BE6821FD1-3EA3-4430-8AFD-FE1853792839%7D&file=tiles_incd.xlsx&action=default&mobileredirect=true). See https://github.com/S2change/vegetation_loss/tree/main/documents/HPC_resources
+
 ## Files per S2 tile:
 *TIFF files* → **from Apr 2017 aprox to 2025-11-20, one file per date and S2 tile**<br>
 - TIFFs B3, B4, B8, B12 (downloaded from GEE) —  `D:\s2_images`<br>
