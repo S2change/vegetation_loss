@@ -1,3 +1,5 @@
+UPDATE THIS README (feb 2026): the main functionality was moved to `chips`?
+
 Move `B2B11_extract_raster.py`to `chips`folder
 
 # Scripts to explore data sets 
