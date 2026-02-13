@@ -25,10 +25,37 @@ Processing file statistics for 17 tiles: [Tabela de processamento INCD](https://
 *Parquets PyCCD outputs*
 - Parameters: chisq = 0.999 / alpha = 2 / lasso_iter = 1000<br>
 - 480 parquet files (480 tasks) per tile
-- What are the variables available for each segment in the parquet files?
-
    - v1 (**from Apr 2017 aprox to end of 2024, 480 files (tasks) per S2 tile**): `E:\old_parquets_2017_2024\tabular`<br>
    - v2 (**from Apr 2017 aprox to ~2025/11/20, 480 files (tasks) per S2 tile**): `C:\Users\Public\Documents\new_parquets_2017_2025\tabular`<br>
+- Each segment in the parquet files contains the following attributes:
+
+   | Variable | Type | Description |
+   |----------|--------|--------------------------------------------------|
+   | tStart | int64 | Segment start time (timestamp in milliseconds) |
+   | tEnd | int64 | Segment end time (timestamp in milliseconds) |
+   | tBreak | int64 | Change detection time (timestamp in milliseconds) |
+   | changeProb | int | Change detection probability |
+   | x_coord | int | X coordinate (projected CRS) |
+   | y_coord | int | Y coordinate (projected CRS) |
+   | coeficientes | array[float] | Harmonic regression coefficients |
+   | intercept_values | float | Model intercept value |
+   | greenStart | float | Green band fitted value at segment start |
+   | greenStart2 | float | Green band second-to-last fitted value at segment start |
+   | greenEnd | float | Green band fitted value at segment end |
+   | greenEnd2 | float | Green band second-to-last fitted value at segment end |
+   | redStart | float | Red band fitted value at segment start |
+   | redStart2 | float | Red band second-to-last fitted value at segment start |
+   | redEnd | float | Red band fitted value at segment end |
+   | redEnd2 | float | Red band second-to-last fitted value at segment end |
+   | nirStart | float | NIR band fitted value at segment start |
+   | nirStart2 | float | NIR band second-to-last fitted value at segment start |
+   | nirEnd | float | NIR band fitted value at segment end |
+   | nirEnd2 | float | NIR band second-to-last fitted value at segment end |
+   | swir2Start | float | SWIR2 band fitted value at segment start |
+   | swir2Start2 | float | SWIR2 band second-to-last fitted value at segment start |
+   | swir2End | float | SWIR2 band fitted value at segment end |
+   | swir2End2 | float | SWIR2 band second-to-last fitted value at segment end |
+   
 
    [Script: process parquets to extract N=10 window around each reference change `data_exploration\Extraction_S2_2N_observations`? ]
 
