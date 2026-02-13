@@ -44,7 +44,7 @@ from ccd_results_utils.segment_identification import yyyymmdd_to_ordinal
 # ============================================================================
 
 # Input TIF file path and relevant bands
-INPUT_TIF = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG\processed_outputs\output_raster_ccd_20180101_to_20211231.tif"
+INPUT_TIF = r"C:\Users\Public\Documents\new_parquets_2017_2025\tabular\T29TQG\processed_outputs\rasters\output_raster_ccd_20180101_to_20211231.tif"
 BREAK_DATE_BAND = 1
 IS_BREAK_BAND = 3
 # Min/Max dates for S2 files. Use format datetime(2024, 12, 31)
@@ -52,11 +52,11 @@ MIN_DATE = datetime(2017, 10, 1)
 MAX_DATE = datetime(2022, 3, 1)
 
 # Output directory for chips
-OUTPUT_DIR = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG\processed_outputs\chips"
+OUTPUT_DIR = r"E:\T29TQG\combined_process_test_chips"
 
 # Output filename pattern, {} will be filled with the x, y coordinates of the first pixel in the chip
 # '(tile)_(break's start date)_(break's end date)_{}-{}.tif
-OUTPUT_FILENAME = 'T29TQG_20180101_20211231_{}-{}.tif'
+OUTPUT_FILENAME = 'combined_test_T29TQG_20180101_20211231_{}-{}.tif'
 
 # Chip dimensions in pixels
 CHIP_WIDTH = 256
@@ -452,9 +452,9 @@ def cascading_selection_pre_and_post(pre_stack_xr, post_stack_xr, s2_nodata=6553
     # Compute all results together in a single operation
     # This allows Dask to optimize the entire computation graph
     computed_results = xr.Dataset({
-        'pre_result': pre_result,
+        'pre_result': pre_result.drop_vars('time', errors='ignore'),
         'pre_timestamps': pre_pixel_timestamps,
-        'post_result': post_result,
+        'post_result': post_result.drop_vars('time', errors='ignore'),
         'post_timestamps': post_pixel_timestamps
     }).compute()
 
@@ -939,7 +939,7 @@ if __name__ == "__main__":
             chip_processing_time = (chip_end_time - chip_start_time) / 60
             print(f"  Wrote chip: {out_filepath}")
             print(f"  Processing time = {chip_processing_time:.2f} minutes")
-            if chip_count >= 1:
+            if chip_count >= 10:
                 break
         
         end = time.time()
