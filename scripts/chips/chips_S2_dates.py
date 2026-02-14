@@ -1065,10 +1065,6 @@ if __name__ == "__main__":
                 pre_remaining_bands = pre_remaining_bands.compute()
                 post_remaining_bands = post_remaining_bands.compute()
 
-                # DEBUG: Check time ordering after loading
-                print(f"  DEBUG: Pre remaining bands time values: {pre_remaining_bands.time.values}")
-                print(f"  DEBUG: Pre dates_needed list: {pre_dates_needed}")
-
                 # Also load the selection band for the required dates
                 pre_selection_band = load_remaining_bands_for_dates(
                     pre_selected_chip_xr, pre_dates_needed, [SELECTION_BAND_INDEX]
@@ -1083,8 +1079,6 @@ if __name__ == "__main__":
 
                 pre_selection_band = pre_selection_band.compute()
                 post_selection_band = post_selection_band.compute()
-
-                print(f"  DEBUG: Pre selection band time values: {pre_selection_band.time.values}")
 
                 # Create dictionaries mapping dates to band data
                 # For pre-break
@@ -1128,12 +1122,6 @@ if __name__ == "__main__":
                     post_band_dict[date] = combined
 
                 # Gather all bands for each pixel based on timestamp
-                # These are already numpy arrays in the correct format: (band, y, x)
-                print(f"  DEBUG: Pre band_dict keys (available dates): {list(pre_band_dict.keys())}")
-                print(f"  DEBUG: Post band_dict keys (available dates): {list(post_band_dict.keys())}")
-                print(f"  DEBUG: Pre timestamps unique (requested dates): {np.unique(pre_timestamps)}")
-                print(f"  DEBUG: Post timestamps unique (requested dates): {np.unique(post_timestamps)}")
-
                 pre_selected = gather_bands_by_timestamp(pre_timestamps, pre_band_dict, all_band_indices, OUTPUT_NODATA)
                 post_selected = gather_bands_by_timestamp(post_timestamps, post_band_dict, all_band_indices, OUTPUT_NODATA)
 
@@ -1199,15 +1187,8 @@ if __name__ == "__main__":
             pre_bands_reordered = reorder_bands(pre_selected)
             post_bands_reordered = reorder_bands(post_selected)
 
-            # DEBUG: Check ordinal timestamps before conversion
-            print(f"  DEBUG: Pre-timestamps ORDINAL unique values: {np.unique(pre_timestamps)}")
-            print(f"  DEBUG: Post-timestamps ORDINAL unique values: {np.unique(post_timestamps)}")
-
             pre_timestamps_unix = ordinal_to_unix_timestamp(pre_timestamps, timestamp_mapping, OUTPUT_NODATA)
             post_timestamps_unix = ordinal_to_unix_timestamp(post_timestamps, timestamp_mapping, OUTPUT_NODATA)
-
-            print(f"  DEBUG: Pre-timestamps Unix unique values: {np.unique(pre_timestamps_unix)}")
-            print(f"  DEBUG: Post-timestamps Unix unique values: {np.unique(post_timestamps_unix)}")
 
             # Timer: Stack arrays
             stack_start = time.time()
