@@ -20,6 +20,8 @@ Processing file statistics for 17 tiles: [Tabela de processamento INCD](https://
    - v1 (**from Apr 2017 aprox to end of 2024, one file per S2 tile**): `E:\outputs_ROI\hdf5\T29SMD\s2_images-NDVI_XX999YM1NOBS6LDA2ITER1000_START20170408_END20241229_ROINAV.h5`<br>
    - v2 (**from Apr 2017 aprox to ~2025/11/20, one file per S2 tile**): `E:\outputs_ROI\hdf5\T29SMD\s2_images-NDVI_XX999YM1NOBS6LDA2ITER1000_START20170408_END20251117_ROI_DGT_mask.h5`<br>
 
+   Questions: in each folder tile, there is also a `tif_dates_ord.npy` file. This needs to be copied to the HPC, too? But there is only one file enven if the dates are different for V1 and v2.
+
 ⚠️ HPC Workflow Note ⚠️<br>
 Due to storage constraints on the HPC system, HDF5 files were copied in small batches (typically up to 3 S2 tiles at a time) before processing. After processing, the corresponding files were removed from the HPC storage to free disk space.
 
