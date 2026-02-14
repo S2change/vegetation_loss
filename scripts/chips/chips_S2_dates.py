@@ -52,18 +52,18 @@ MIN_DATE = datetime(2017, 10, 1)
 MAX_DATE = datetime(2022, 3, 1)
 
 # Output directory for chips
-OUTPUT_DIR = r"E:\T29TQG\combined_process_test_chips"
+OUTPUT_DIR = r"E:\T29TQG\testing_single_band_validation"
 
 # Output filename pattern, {} will be filled with the x, y coordinates of the first pixel in the chip
 # '(tile)_(break's start date)_(break's end date)_{}-{}.tif
-OUTPUT_FILENAME = 'combined_test_T29TQG_20180101_20211231_{}-{}.tif'
+OUTPUT_FILENAME = 'fixed_ordering_T29TQG_20180101_20211231_{}-{}.tif'
 
 # Chip dimensions in pixels
 CHIP_WIDTH = 256
 CHIP_HEIGHT = 256
 
 # Overlap between adjacent chips in pixels
-OVERLAP = 64
+OVERLAP = 128
 
 # Percentage in float of DGT pixels that need to have a break date
 PROCESSING_THRESHOLD = 0.0
@@ -107,7 +107,7 @@ USE_TWO_STAGE_LOADING = True
 # Band index to use for initial cascading selection (0-indexed in the 6-band combined array)
 # 0=B2, 1=B11, 2=B3, 3=B4, 4=B8, 5=B12
 # Recommend using B2 (index 0) or B8 (index 4) as they're typically most reliable
-SELECTION_BAND_INDEX = 0  # B2
+SELECTION_BAND_INDEX = 0
 
 # ============================================================================
 # TIMING DECORATOR
@@ -1065,6 +1065,10 @@ if __name__ == "__main__":
                 pre_remaining_bands = pre_remaining_bands.compute()
                 post_remaining_bands = post_remaining_bands.compute()
 
+                # DEBUG: Check time ordering after loading
+                print(f"  DEBUG: Pre remaining bands time values: {pre_remaining_bands.time.values}")
+                print(f"  DEBUG: Pre dates_needed list: {pre_dates_needed}")
+
                 # Also load the selection band for the required dates
                 pre_selection_band = load_remaining_bands_for_dates(
                     pre_selected_chip_xr, pre_dates_needed, [SELECTION_BAND_INDEX]
@@ -1080,13 +1084,15 @@ if __name__ == "__main__":
                 pre_selection_band = pre_selection_band.compute()
                 post_selection_band = post_selection_band.compute()
 
+                print(f"  DEBUG: Pre selection band time values: {pre_selection_band.time.values}")
+
                 # Create dictionaries mapping dates to band data
                 # For pre-break
                 pre_band_dict = {}
-                for i, date in enumerate(pre_dates_needed):
-                    # Combine selection band with remaining bands
-                    sel_band_data = pre_selection_band.isel(time=i)  # Shape: (1, y, x)
-                    rem_band_data = pre_remaining_bands.isel(time=i)  # Shape: (n_remaining_bands, y, x)
+                for date in pre_dates_needed:
+                    # Select by date VALUE, not by index position
+                    sel_band_data = pre_selection_band.sel(time=date)  # Shape: (1, y, x)
+                    rem_band_data = pre_remaining_bands.sel(time=date)  # Shape: (n_remaining_bands, y, x)
 
                     # Stack bands in original order
                     if SELECTION_BAND_INDEX == 0:
@@ -1105,9 +1111,10 @@ if __name__ == "__main__":
 
                 # For post-break
                 post_band_dict = {}
-                for i, date in enumerate(post_dates_needed):
-                    sel_band_data = post_selection_band.isel(time=i)
-                    rem_band_data = post_remaining_bands.isel(time=i)
+                for date in post_dates_needed:
+                    # Select by date VALUE, not by index position
+                    sel_band_data = post_selection_band.sel(time=date)
+                    rem_band_data = post_remaining_bands.sel(time=date)
 
                     if SELECTION_BAND_INDEX == 0:
                         combined = xr.concat([sel_band_data, rem_band_data], dim='band')
@@ -1122,6 +1129,11 @@ if __name__ == "__main__":
 
                 # Gather all bands for each pixel based on timestamp
                 # These are already numpy arrays in the correct format: (band, y, x)
+                print(f"  DEBUG: Pre band_dict keys (available dates): {list(pre_band_dict.keys())}")
+                print(f"  DEBUG: Post band_dict keys (available dates): {list(post_band_dict.keys())}")
+                print(f"  DEBUG: Pre timestamps unique (requested dates): {np.unique(pre_timestamps)}")
+                print(f"  DEBUG: Post timestamps unique (requested dates): {np.unique(post_timestamps)}")
+
                 pre_selected = gather_bands_by_timestamp(pre_timestamps, pre_band_dict, all_band_indices, OUTPUT_NODATA)
                 post_selected = gather_bands_by_timestamp(post_timestamps, post_band_dict, all_band_indices, OUTPUT_NODATA)
 
@@ -1187,6 +1199,10 @@ if __name__ == "__main__":
             pre_bands_reordered = reorder_bands(pre_selected)
             post_bands_reordered = reorder_bands(post_selected)
 
+            # DEBUG: Check ordinal timestamps before conversion
+            print(f"  DEBUG: Pre-timestamps ORDINAL unique values: {np.unique(pre_timestamps)}")
+            print(f"  DEBUG: Post-timestamps ORDINAL unique values: {np.unique(post_timestamps)}")
+
             pre_timestamps_unix = ordinal_to_unix_timestamp(pre_timestamps, timestamp_mapping, OUTPUT_NODATA)
             post_timestamps_unix = ordinal_to_unix_timestamp(post_timestamps, timestamp_mapping, OUTPUT_NODATA)
 
@@ -1231,7 +1247,7 @@ if __name__ == "__main__":
             chip_processing_time = (chip_end_time - chip_start_time) / 60
             print(f"  Wrote chip: {out_filepath}")
             print(f"  Processing time = {chip_processing_time:.2f} minutes")
-            if chip_count >= 10:
+            if chip_count >= 5:
                 break
         
         end = time.time()
