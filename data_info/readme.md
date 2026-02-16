@@ -69,7 +69,7 @@ Due to storage constraints on the HPC system, HDF5 files were copied in small ba
 
    [Script: to convert Parquets into rasters: `ccd_to_raster.py`]​
 
-*Rasters and polygons generated from PyCCD parquet outputs* → **bimonthly from 2023-01-01 to ~2025-11-20**<br>
+*Rasters and polygons generated from PyCCD parquet outputs* → **bimonthly from 2023-01-01 to 2024-12-31**<br>
 - Parameters: tol = 10 days / min_area = 0.5 ha / connectivity = 8<br>
 - Rasters (organized per tile) — `C:\Users\Public\Documents\new_parquets_2017_2025\tabular\T29SMD\processed_outputs\rasters`<br>
 - Polygons (organized per tile) — `C:\Users\Public\Documents\new_parquets_2017_2025\tabular\T29SMD\processed_outputs\vectors`<br>
