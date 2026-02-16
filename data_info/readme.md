@@ -73,7 +73,7 @@ Due to storage constraints on the HPC system, HDF5 files were copied in small ba
 - Parameters: tol = 10 days / min_area = 0.5 ha / connectivity = 8<br>
 - Rasters (organized per tile) — `C:\Users\Public\Documents\new_parquets_2017_2025\tabular\T29SMD\processed_outputs\rasters`<br>
 - Polygons (organized per tile) — `C:\Users\Public\Documents\new_parquets_2017_2025\tabular\T29SMD\processed_outputs\vectors`<br>
-- Polygons also available as a single polygon map for forest and shrubland areas across mainland Portugal (rasters not available at this scale) — `C:\Users\Public\Documents\outputs_ROI\tabular\MBPV`
+- Polygons also available as a single polygon map for forest and shrubland areas across mainland Portugal (rasters not available at this scale) — `C:\Users\Public\Documents\outputs_ROI\tabular\MBPV` (⚠️ Tile overlaps have not yet been processed)
 
 ## Reference data (available in oneDrive, folder ref_datasets)
 1. BDR-DGT-300
