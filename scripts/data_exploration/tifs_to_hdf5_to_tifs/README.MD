@@ -10,7 +10,7 @@ This project consolidates Sentinel-2 spectral bands into HDF5 format and reconst
 - **reconstructed_tifs/**: Output unified 6-band GeoTIFFs.
 
 ```
-└── test_tif_to_hdf5/
+└── tifs_to_hdf5_to_tifs/
     ├── satellite_data_6bands.h5           # Central HDF5 storage (B2, B3, B4, B8, B11, B12)
     ├── 2bands/                            # Original source files (B11, B12)
     │   ├── S2_2b_1491651247967.tif
