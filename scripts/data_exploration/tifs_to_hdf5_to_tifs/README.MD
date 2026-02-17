@@ -11,7 +11,7 @@ This project consolidates Sentinel-2 spectral bands into HDF5 format and reconst
 
 ```
 └── tifs_to_hdf5_to_tifs/
-    ├── satellite_data_6bands.h5           # Central HDF5 storage (B2, B11, B3, B4, B8, B12) HDF5 contais labels of bands, so the order is irrelevant
+    ├── satellite_data_6bands.h5           # Central HDF5 storage (B2, B11, B3, B4, B8, B12); HDF5 keeps track of the band names
     ├── 2bands/                            # Original source files (B2, B11)
     │   ├── S2SR_image_1491651247967.tif
     │   └── ... 
