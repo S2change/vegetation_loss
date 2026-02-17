@@ -33,13 +33,13 @@ Consolidates .tif files into one HDF5 archive. Matches files using a 13-digit ti
 * **Spatial Fix:** Uses `offset='ul'` (Upper-Left) to prevent the half-pixel shift.
 
 ### 2. TIFF Reconstruction
-Generates 6-band GeoTIFFs from the HDF5.
+Generates 6-band GeoTIFFs from the HDF5. [reconstruct_tifs.py](reconstruct_tifs.py)
 * **Band Order:** B2, B3, B4, B8, B11, B12.
 * **NoData:** Sets value to **65535** in the file header for correct transparency.
 
 ### 3. QGIS Visualization
-Python script for the QGIS Console to verify results.
-* **Symbology:** Sets RGB 8-4-3 False Color.
+Python script for the QGIS Console to verify results. [qgis_vis_comparison.py](qgis_vis_comparison.py)
+* **Symbology:** Sets RGB 8-4-3 False Color for reconstructed GeoTIFF.
 * **Stretch:** Automatically ignores 65535 for clear rendering.
 
 ---
