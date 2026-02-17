@@ -29,7 +29,7 @@ This project consolidates Sentinel-2 spectral bands into HDF5 format and reconst
 ## 🚀 Usage Guide
 
 ### 1. HDF5 Creation
-Consolidates .tif files into one HDF5 archive. Matches files using a 13-digit timestamp.
+Consolidates .tif files into one HDF5 archive. Matches files using a 13-digit timestamp. (tif_to_hdf5.py)
 * **Spatial Fix:** Uses `offset='ul'` (Upper-Left) to prevent the half-pixel shift.
 
 ### 2. TIFF Reconstruction
