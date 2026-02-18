@@ -16,9 +16,9 @@ Key Steps:
 '''
 
 folder_path = r'C:\Users\mlc\OneDrive - Universidade de Lisboa\Documents\temp\test_tif_to_hdf5'
-folder_path_4bands = os.path.join(folder_path, '4bands')
-folder_path_2bands = os.path.join(folder_path, '2bands')
-h5_filename = os.path.join(folder_path, 'satellite_data_6bands.h5')
+folder_path_4bands = r"D:\s2_images\T29TQG"
+folder_path_2bands = r"C:\Users\Public\Documents\s2_images_B2_B11\T29TQG"
+h5_filename = os.path.join(r"E:\T29TQG", 'T29TQG_6bands.h5')
 
 # Define the band order based on the stacking logic below
 # Folder '4bands' (B3, B4, B8, B12) followed by Folder '2bands' (B2, B11)
@@ -45,18 +45,53 @@ file_metadata.sort(key=lambda x: x['ordinal'])
 sorted_files = [m['filename'] for m in file_metadata]
 
 # 2. Find the Common Intersection Bounding Box
-# (Assuming all bands across both folders cover the same spatial extent)
+# First, collect all bounds and detect outliers
 print("Calculating common intersection...")
-lefts, bottoms, rights, tops = [], [], [], []
+bounds_list = []
 
 for f in sorted_files:
     with rasterio.open(os.path.join(folder_path_4bands, f)) as src:
-        b = src.bounds
-        lefts.append(b.left); bottoms.append(b.bottom)
-        rights.append(b.right); tops.append(b.top)
+        bounds_list.append({
+            'filename': f,
+            'bounds': src.bounds,
+            'transform': src.transform,
+            'shape': src.shape
+        })
 
-inter_left, inter_bottom = max(lefts), max(bottoms)
-inter_right, inter_top = min(rights), min(tops)
+# Use the first file as reference and detect files with different spatial properties
+reference = bounds_list[0]
+misaligned_files = []
+aligned_bounds = []
+
+for item in bounds_list:
+    # Check for EXACT match of bounds, transform, and shape
+    # Any difference means pixels don't align and will cause errors
+    if (item['bounds'] != reference['bounds'] or
+        item['transform'] != reference['transform'] or
+        item['shape'] != reference['shape']):
+        misaligned_files.append(item['filename'])
+    else:
+        aligned_bounds.append(item)
+
+if misaligned_files:
+    print(f"WARNING: Found {len(misaligned_files)} files with different spatial extents!")
+    print(f"These files will be EXCLUDED from processing:")
+    for fname in misaligned_files[:5]:  # Show first 5
+        print(f"  - {fname}")
+    if len(misaligned_files) > 5:
+        print(f"  ... and {len(misaligned_files) - 5} more")
+
+    # Update sorted_files to exclude misaligned files
+    sorted_files = [item['filename'] for item in aligned_bounds]
+    file_metadata = [m for m in file_metadata if m['filename'] in sorted_files]
+    print(f"Continuing with {len(sorted_files)} aligned files")
+
+# Calculate intersection from aligned bounds only
+# Since all aligned files have identical bounds, just use the reference
+inter_left = reference['bounds'].left
+inter_bottom = reference['bounds'].bottom
+inter_right = reference['bounds'].right
+inter_top = reference['bounds'].top
 
 # 3. Get Dimensions and Coordinates
 with rasterio.open(os.path.join(folder_path_4bands, sorted_files[0])) as src:
