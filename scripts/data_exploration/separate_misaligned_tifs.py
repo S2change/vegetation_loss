@@ -19,17 +19,17 @@ Misaligned files are copied (not moved) to preserve originals.
 # ============================================================================
 
 # Base folder containing the TIF files
-folder_path = r'C:\Users\mlc\OneDrive - Universidade de Lisboa\Documents\temp\test_tif_to_hdf5'
+output_path = r"E:\T29TQG\misaligned_files"
 
 # Subfolders with the two band collections
-folder_path_4bands = os.path.join(folder_path, '4bands')
-folder_path_2bands = os.path.join(folder_path, '2bands')
+folder_path_4bands = r"D:\s2_images\T29TQG"
+folder_path_2bands = r"C:\Users\Public\Documents\s2_images_B2_B11\T29TQG"
 
 # Output directories for misaligned files
-misaligned_dir_4bands = os.path.join(folder_path, 'misaligned_4bands')
-misaligned_dir_2bands = os.path.join(folder_path, 'misaligned_2bands')
-file_mismatch_dir_4bands = os.path.join(folder_path, 'file_mismatch', '4bands')
-file_mismatch_dir_2bands = os.path.join(folder_path, 'file_mismatch', '2bands')
+misaligned_dir_4bands = os.path.join(output_path, 'misaligned_4bands')
+misaligned_dir_2bands = os.path.join(output_path, 'misaligned_2bands')
+file_mismatch_dir_4bands = os.path.join(output_path, 'file_mismatch', '4bands')
+file_mismatch_dir_2bands = os.path.join(output_path, 'file_mismatch', '2bands')
 
 # ============================================================================
 # MAIN SCRIPT
@@ -161,7 +161,7 @@ def main():
     print(f"\nFiles will be COPIED (not moved) to:")
     print(f"  4bands internally misaligned: {misaligned_dir_4bands}")
     print(f"  2bands internally misaligned: {misaligned_dir_2bands}")
-    print(f"  Mismatched between folders: {os.path.join(folder_path, 'file_mismatch')}")
+    print(f"  Mismatched between folders: {os.path.join(output_path, 'file_mismatch')}")
     response = input("\nProceed with copying? (yes/no): ").strip().lower()
 
     if response != 'yes':
@@ -181,7 +181,7 @@ def main():
     # Copy 4bands internally misaligned files
     for filename in misaligned_4bands_only:
         src = os.path.join(folder_path_4bands, filename)
-        dst = os.path.join(misaligned_dir_4bands, filename)
+        dst = os.path.join(misaligned_dir_4bands, f"4bands_{filename}")
         if os.path.exists(src):
             shutil.copy2(src, dst)
             copied_count += 1
@@ -189,7 +189,7 @@ def main():
     # Copy 2bands internally misaligned files
     for filename in misaligned_2bands_only:
         src = os.path.join(folder_path_2bands, filename)
-        dst = os.path.join(misaligned_dir_2bands, filename)
+        dst = os.path.join(misaligned_dir_2bands, f"2bands_{filename}")
         if os.path.exists(src):
             shutil.copy2(src, dst)
             copied_count += 1
@@ -198,14 +198,14 @@ def main():
     for filename in mismatched_set:
         # Copy from 4bands folder to file_mismatch/4bands
         src_4bands = os.path.join(folder_path_4bands, filename)
-        dst_4bands = os.path.join(file_mismatch_dir_4bands, filename)
+        dst_4bands = os.path.join(file_mismatch_dir_4bands, f"mismatch_4bands_{filename}")
         if os.path.exists(src_4bands):
             shutil.copy2(src_4bands, dst_4bands)
             copied_count += 1
 
         # Copy from 2bands folder to file_mismatch/2bands
         src_2bands = os.path.join(folder_path_2bands, filename)
-        dst_2bands = os.path.join(file_mismatch_dir_2bands, filename)
+        dst_2bands = os.path.join(file_mismatch_dir_2bands, f"mismatch_2bands_{filename}")
         if os.path.exists(src_2bands):
             shutil.copy2(src_2bands, dst_2bands)
             copied_count += 1
