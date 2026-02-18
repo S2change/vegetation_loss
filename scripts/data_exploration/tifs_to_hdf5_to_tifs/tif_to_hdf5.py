@@ -45,33 +45,67 @@ file_metadata.sort(key=lambda x: x['ordinal'])
 sorted_files = [m['filename'] for m in file_metadata]
 
 # 2. Find the Common Intersection Bounding Box
-# First, collect all bounds and detect outliers
+# Check BOTH folders for spatial alignment
 print("Calculating common intersection...")
-bounds_list = []
+print("Checking 4-band files...")
+bounds_list_4bands = []
 
 for f in sorted_files:
     with rasterio.open(os.path.join(folder_path_4bands, f)) as src:
-        bounds_list.append({
+        bounds_list_4bands.append({
             'filename': f,
             'bounds': src.bounds,
             'transform': src.transform,
             'shape': src.shape
         })
 
-# Use the first file as reference and detect files with different spatial properties
-reference = bounds_list[0]
-misaligned_files = []
-aligned_bounds = []
+print("Checking 2-band files...")
+bounds_list_2bands = []
 
-for item in bounds_list:
-    # Check for EXACT match of bounds, transform, and shape
-    # Any difference means pixels don't align and will cause errors
-    if (item['bounds'] != reference['bounds'] or
-        item['transform'] != reference['transform'] or
-        item['shape'] != reference['shape']):
-        misaligned_files.append(item['filename'])
+for f in sorted_files:
+    with rasterio.open(os.path.join(folder_path_2bands, f)) as src:
+        bounds_list_2bands.append({
+            'filename': f,
+            'bounds': src.bounds,
+            'transform': src.transform,
+            'shape': src.shape
+        })
+
+# Use the first file as reference for BOTH folders
+reference_4bands = bounds_list_4bands[0]
+reference_2bands = bounds_list_2bands[0]
+misaligned_files = []
+aligned_files = []
+
+for i, filename in enumerate(sorted_files):
+    item_4bands = bounds_list_4bands[i]
+    item_2bands = bounds_list_2bands[i]
+
+    # Check if either folder's file is misaligned OR if the two folders don't match each other
+    is_misaligned = False
+
+    # Check 4bands against its reference
+    if (item_4bands['bounds'] != reference_4bands['bounds'] or
+        item_4bands['transform'] != reference_4bands['transform'] or
+        item_4bands['shape'] != reference_4bands['shape']):
+        is_misaligned = True
+
+    # Check 2bands against its reference
+    if (item_2bands['bounds'] != reference_2bands['bounds'] or
+        item_2bands['transform'] != reference_2bands['transform'] or
+        item_2bands['shape'] != reference_2bands['shape']):
+        is_misaligned = True
+
+    # Check that 4bands and 2bands match each other
+    if (item_4bands['bounds'] != item_2bands['bounds'] or
+        item_4bands['transform'] != item_2bands['transform'] or
+        item_4bands['shape'] != item_2bands['shape']):
+        is_misaligned = True
+
+    if is_misaligned:
+        misaligned_files.append(filename)
     else:
-        aligned_bounds.append(item)
+        aligned_files.append(filename)
 
 if misaligned_files:
     print(f"WARNING: Found {len(misaligned_files)} files with different spatial extents!")
@@ -81,17 +115,17 @@ if misaligned_files:
     if len(misaligned_files) > 5:
         print(f"  ... and {len(misaligned_files) - 5} more")
 
-    # Update sorted_files to exclude misaligned files
-    sorted_files = [item['filename'] for item in aligned_bounds]
-    file_metadata = [m for m in file_metadata if m['filename'] in sorted_files]
+    # Update sorted_files and file_metadata to exclude misaligned files
+    sorted_files = aligned_files
+    file_metadata = [m for m in file_metadata if m['filename'] in aligned_files]
     print(f"Continuing with {len(sorted_files)} aligned files")
 
 # Calculate intersection from aligned bounds only
 # Since all aligned files have identical bounds, just use the reference
-inter_left = reference['bounds'].left
-inter_bottom = reference['bounds'].bottom
-inter_right = reference['bounds'].right
-inter_top = reference['bounds'].top
+inter_left = reference_4bands['bounds'].left
+inter_bottom = reference_4bands['bounds'].bottom
+inter_right = reference_4bands['bounds'].right
+inter_top = reference_4bands['bounds'].top
 
 # 3. Get Dimensions and Coordinates
 with rasterio.open(os.path.join(folder_path_4bands, sorted_files[0])) as src:
