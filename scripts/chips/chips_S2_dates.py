@@ -30,6 +30,8 @@ import re
 from rasterio.windows import bounds as window_bounds
 import time
 from functools import wraps
+import h5py
+from affine import Affine
 
 # Add parent directory to path to import pyccd modules
 module_path = os.path.abspath(os.path.join('..'))
@@ -42,6 +44,19 @@ from ccd_results_utils.segment_identification import yyyymmdd_to_ordinal
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
+
+# S2 DATA SOURCE: Choose 'hdf5' or 'tif'
+S2_DATA_SOURCE = 'tif'  # Options: 'hdf5' or 'tif'
+
+# If using HDF5:
+# HDF5 file should contain: values (time, band, pixels), xs, ys, ts, original_timestamps
+# Expected band order in HDF5: [B3, B4, B8, B12, B2, B11] (will be reordered automatically)
+S2_HDF5_FILE = r"E:\T29TQG\T29TQG_6bands.h5"  # Path to combined HDF5 file
+
+# If using TIF:
+# S2 image folder paths (two separate collections)
+S2_IMAGES_FOLDER_B2_B11 = r"C:/Users/Public/Documents/s2_images_B2_B11/"
+S2_IMAGES_FOLDER_4_BANDS = r"D:/s2_images/"
 
 # Input TIF file path and relevant bands
 INPUT_TIF = r"C:\Users\Public\Documents\new_parquets_2017_2025\tabular\T29TQG\processed_outputs\rasters\output_raster_ccd_20180101_to_20211231.tif"
@@ -68,10 +83,6 @@ OVERLAP = 128
 # Percentage in float of DGT pixels that need to have a break date
 PROCESSING_THRESHOLD = 0.0
 
-# S2 image folder paths (two separate collections)
-S2_IMAGES_FOLDER_B2_B11 = r"C:/Users/Public/Documents/s2_images_B2_B11/"
-S2_IMAGES_FOLDER_4_BANDS = r"D:/s2_images/"
-
 # Automatically extract tile from INPUT_TIF path
 # Looks for pattern like T29TQF, T29TQG, etc. in the path
 # Update fallback to set default if no tile is in path
@@ -96,10 +107,7 @@ S2_NODATA = 65535
 # NODATA value for output raster
 OUTPUT_NODATA = 0
 
-# Use combined processing for pre and post (faster, but newer implementation)
 # Band index to use for initial cascading selection (0-indexed in the 6-band combined array)
-# 0=B2, 1=B11, 2=B3, 3=B4, 4=B8, 5=B12
-# Recommend using B2 (index 0) or B8 (index 4) as they're typically most reliable
 SELECTION_BAND_INDEX = 0
 
 # ============================================================================
@@ -128,6 +136,157 @@ def timing_decorator(func):
     return wrapper
 
 # ============================================================================
+
+
+@timing_decorator
+def load_hdf5_as_xarray(hdf5_path, filter_bounds=None):
+    """
+    Load HDF5 file and convert to xarray DataArray compatible with chips_S2_dates.py workflow.
+
+    The HDF5 file structure:
+    - values: (time, band, pixels) - flattened pixel array
+    - xs, ys: (pixels,) - coordinate arrays
+    - ts: (time,) - ordinal dates
+    - original_timestamps: (time,) - unix timestamps in milliseconds
+    - band_names attribute: ['B3', 'B4', 'B8', 'B12', 'B2', 'B11']
+
+    Parameters:
+    -----------
+    hdf5_path : str
+        Path to HDF5 file
+    filter_bounds : tuple, optional
+        Bounds (minx, maxx, miny, maxy) to filter spatially. Only pixels within these bounds will be loaded.
+
+    Returns:
+    --------
+    tuple of (xr.DataArray, dict)
+        First element: DataArray with dimensions (time, band, y, x) with bands in order [B2, B11, B3, B4, B8, B12]
+        Second element: Dictionary mapping ordinal dates to Unix timestamps in milliseconds
+    """
+    print(f"  Loading HDF5 file: {hdf5_path}")
+
+    with h5py.File(hdf5_path, 'r') as h5f:
+        # Load datasets
+        values = h5f['values']  # Shape: (time, band, pixels)
+        xs = h5f['xs'][:]
+        ys = h5f['ys'][:]
+        ts = h5f['ts'][:]
+        original_timestamps = h5f['original_timestamps'][:]
+
+        # Get band names
+        if 'band_names' in h5f.attrs:
+            band_names = [b.decode('ascii') if isinstance(b, bytes) else b for b in h5f.attrs['band_names']]
+            print(f"  HDF5 band order: {band_names}")
+
+        # Determine grid dimensions
+        unique_xs = np.unique(xs)
+        unique_ys = np.unique(ys)
+        width = len(unique_xs)
+        height = len(unique_ys)
+
+        print(f"  Full grid dimensions: {height} x {width}")
+
+        # Apply spatial filtering if bounds provided
+        if filter_bounds is not None:
+            minx, maxx, miny, maxy = filter_bounds
+            # Create mask for pixels within bounds
+            pixel_mask = (xs >= minx) & (xs <= maxx) & (ys >= miny) & (ys <= maxy)
+
+            # Filter coordinates
+            xs_filtered = xs[pixel_mask]
+            ys_filtered = ys[pixel_mask]
+
+            # Recalculate grid dimensions
+            unique_xs = np.unique(xs_filtered)
+            unique_ys = np.unique(ys_filtered)
+            width = len(unique_xs)
+            height = len(unique_ys)
+
+            print(f"  Filtered grid dimensions: {height} x {width}")
+            print(f"  Filtered {np.sum(pixel_mask)} / {len(pixel_mask)} pixels")
+        else:
+            pixel_mask = None
+            xs_filtered = xs
+            ys_filtered = ys
+
+        # Calculate affine transform
+        # Assuming regular grid spacing
+        x_min = unique_xs.min()
+        y_max = unique_ys.max()
+        pixel_width = np.diff(unique_xs).min() if len(unique_xs) > 1 else 10  # Default 10m
+        pixel_height = -np.abs(np.diff(unique_ys).min() if len(unique_ys) > 1 else 10)  # Negative for top-down
+
+        transform = Affine(pixel_width, 0.0, x_min,
+                          0.0, pixel_height, y_max)
+
+        # Create ordinal to unix timestamp mapping
+        ordinal_to_unix_ms = {int(ordinal): int(unix_ms) for ordinal, unix_ms in zip(ts, original_timestamps)}
+
+        # Load values with spatial filtering
+        print(f"  Loading {len(ts)} timesteps...")
+        values_list = []
+        for i in range(len(ts)):
+            if (i + 1) % 100 == 0:
+                print(f"    Loading timestep {i+1}/{len(ts)}")
+
+            # Read this timestep
+            timestep_data = values[i, :, :]  # Shape: (band, pixels)
+
+            # Apply spatial filter if needed
+            if pixel_mask is not None:
+                timestep_data = timestep_data[:, pixel_mask]
+
+            # Reshape from flat to 2D grid
+            # Need to map xs_filtered, ys_filtered back to grid positions
+            grid_data = np.full((timestep_data.shape[0], height, width), 65535, dtype=np.uint16)
+
+            # Create mapping from coordinates to grid indices
+            x_to_col = {x: i for i, x in enumerate(unique_xs)}
+            y_to_row = {y: i for i, y in enumerate(unique_ys)}
+
+            # Fill grid
+            for pixel_idx in range(len(xs_filtered)):
+                col = x_to_col[xs_filtered[pixel_idx]]
+                row = y_to_row[ys_filtered[pixel_idx]]
+                grid_data[:, row, col] = timestep_data[:, pixel_idx]
+
+            values_list.append(grid_data)
+
+        # Stack all timesteps
+        values_array = np.stack(values_list, axis=0)  # Shape: (time, band, y, x)
+
+        print(f"  Loaded array shape: {values_array.shape}")
+
+        # Reorder bands from [B3, B4, B8, B12, B2, B11] to [B2, B11, B3, B4, B8, B12]
+        # HDF5 indices:      [0,  1,  2,   3,  4,  5]
+        # New order indices: [4,  5,  0,   1,  2,  3]
+        print("  Reordering bands from [B3, B4, B8, B12, B2, B11] to [B2, B11, B3, B4, B8, B12]...")
+        band_reorder = [4, 5, 0, 1, 2, 3]
+        values_array = values_array[:, band_reorder, :, :]
+
+        # Convert to xarray DataArray
+        da = xr.DataArray(
+            values_array,
+            dims=['time', 'band', 'y', 'x'],
+            coords={
+                'time': ts,
+                'band': np.arange(6),
+                'y': unique_ys,
+                'x': unique_xs
+            }
+        )
+
+        # Add spatial metadata
+        da = da.rio.write_crs("EPSG:32629")  # Assuming UTM 29N for T29TQG
+        da = da.rio.write_transform(transform)
+
+        # Chunk for performance
+        da = da.chunk({'time': 1, 'band': -1, 'y': -1, 'x': -1})
+
+        print(f"  HDF5 loading complete!")
+        print(f"  Final shape: {da.shape}")
+
+        return da, ordinal_to_unix_ms
 
 
 @timing_decorator
@@ -731,18 +890,6 @@ if __name__ == "__main__":
     start = time.time()
     ProgressBar().register()
 
-    # Load S2 image file lists for both band collections
-    print("Loading S2 image file lists...")
-    tif_names_b2b11, tif_dates_b2b11 = read_tif_files_gee(
-        TILE, os.path.join(S2_IMAGES_FOLDER_B2_B11, TILE), MAX_DATE, MIN_DATE
-    )
-    tif_names_bands4, tif_dates_bands4 = read_tif_files_gee(
-        TILE, os.path.join(S2_IMAGES_FOLDER_4_BANDS, TILE), MAX_DATE, MIN_DATE
-    )
-    print(f"Found {len(tif_names_b2b11)} B2B11 images and {len(tif_names_bands4)} 4-band images")
-
-    b2b11_names, b2b11_dates, bands4_names, bands4_dates = s2_band_files_identical_check(tif_names_b2b11, tif_dates_b2b11, tif_names_bands4, tif_dates_bands4)
-
     # Open INPUT_TIF to get bounds for filtering S2 images and for processing
     print("\nReading INPUT_TIF bounds for filtering S2 images...")
     with rio.open(INPUT_TIF) as src:
@@ -751,15 +898,43 @@ if __name__ == "__main__":
         filter_bounds = (input_bounds.left, input_bounds.right, input_bounds.bottom, input_bounds.top)
         print(f"INPUT_TIF bounds: x=[{filter_bounds[0]}, {filter_bounds[1]}], y=[{filter_bounds[2]}, {filter_bounds[3]}]")
 
-        geotiffs_combined, timestamp_mapping = load_combined_xarray(S2_IMAGES_FOLDER_B2_B11, 
-                                                                    TILE, 
-                                                                    b2b11_names, 
-                                                                    b2b11_dates, 
-                                                                    S2_IMAGES_FOLDER_4_BANDS, 
-                                                                    bands4_names, 
-                                                                    bands4_dates, 
-                                                                    filter_bounds
-                                                                    )
+        # Load S2 data based on configuration
+        if S2_DATA_SOURCE == 'hdf5':
+            print("\n" + "="*60)
+            print("Using HDF5 data source")
+            print("="*60)
+            geotiffs_combined, timestamp_mapping = load_hdf5_as_xarray(S2_HDF5_FILE, filter_bounds)
+
+        elif S2_DATA_SOURCE == 'tif':
+            print("\n" + "="*60)
+            print("Using TIF data source")
+            print("="*60)
+            # Load S2 image file lists for both band collections
+            print("Loading S2 image file lists...")
+            tif_names_b2b11, tif_dates_b2b11 = read_tif_files_gee(
+                TILE, os.path.join(S2_IMAGES_FOLDER_B2_B11, TILE), MAX_DATE, MIN_DATE
+            )
+            tif_names_bands4, tif_dates_bands4 = read_tif_files_gee(
+                TILE, os.path.join(S2_IMAGES_FOLDER_4_BANDS, TILE), MAX_DATE, MIN_DATE
+            )
+            print(f"Found {len(tif_names_b2b11)} B2B11 images and {len(tif_names_bands4)} 4-band images")
+
+            b2b11_names, b2b11_dates, bands4_names, bands4_dates = s2_band_files_identical_check(
+                tif_names_b2b11, tif_dates_b2b11, tif_names_bands4, tif_dates_bands4
+            )
+
+            geotiffs_combined, timestamp_mapping = load_combined_xarray(
+                S2_IMAGES_FOLDER_B2_B11,
+                TILE,
+                b2b11_names,
+                b2b11_dates,
+                S2_IMAGES_FOLDER_4_BANDS,
+                bands4_names,
+                bands4_dates,
+                filter_bounds
+            )
+        else:
+            raise ValueError(f"Invalid S2_DATA_SOURCE: {S2_DATA_SOURCE}. Must be 'hdf5' or 'tif'")
 
         # xarray automatically sorts in ascending order, need to reverse Y coordinates to return to descending order
         geotiffs_combined = geotiffs_combined.reindex(y=geotiffs_combined.y[::-1])

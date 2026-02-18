@@ -13,3 +13,5 @@ scripts/chips/rasterio_draft_chip.py
 scripts/chips/chip_creation.py
 scripts/chips/first_draft_chip.py
 scripts/chips/copy_chips_S2_dates.py
+
+smallfile_T29TQG_6bands.h5
