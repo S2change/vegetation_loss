@@ -20,6 +20,9 @@ import platform
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
 import warnings
+import numpy as np
+from datetime import datetime
+import re
 
 # Third-party libraries
 import pandas as pd
@@ -30,6 +33,7 @@ from tqdm import tqdm
 sys.path.append(str(Path(__file__).parents[1]))
 from shared.processing import runDetectionForPoint, explode_columns
 from shared.preprocessing import check_or_initialize_file
+from shared.utils import apply_max_date_ccd
 
 # Configurations
 from config.config import input_config, preprocessing_config, outputs_config, ccd_config
@@ -37,9 +41,7 @@ from config.config import input_config, preprocessing_config, outputs_config, cc
 # Suppress warnings
 warnings.filterwarnings('ignore')
 #%%
-
 def main(batch_size):
-    # Verificar a existência do arquivo .npy e inicializar ou carregar os dados
     # Create npy/h5 file if "output_file doesn't exist
     # obs: calculation of raster_path should be included in check_or_initialize_file
     tif_dates_ord, N = check_or_initialize_file(
@@ -53,24 +55,46 @@ def main(batch_size):
         preprocessing_config['bandas_desejadas']
         )
     
-    # Carregar os dados numpy para o processamento em lotes
+    # N = 50000  # Set this only if you want to process 50000 pixels
+    print('Number of pixels:', N)
+    
+    # ======================
+    # Apply MAX_DATE_CCD
+    # ======================
+    tif_dates_ord, last_valid_index = apply_max_date_ccd(
+        tif_dates_ord,
+        ccd_config.get('max_date_ccd')
+    )
+
+
     h5_file = h5py.File(outputs_config['output_file'], 'r')
     sel_values = h5_file['values']
     xs = h5_file['xs']
     ys = h5_file['ys']
     
-    # Criar os batches # N is the total number of pixels; 
+    sel_values_cut = sel_values[:last_valid_index, :, :]
+    
     batches = [
-        (sel_values[:, :, start:end], xs[start:end], ys[start:end], tif_dates_ord)
-        for start, end in zip(range(0, N, batch_size), range(batch_size, N + batch_size, batch_size))
+        (
+            sel_values_cut[:last_valid_index, :, start:end],
+            xs[start:end],
+            ys[start:end],
+            tif_dates_ord
+        )
+        for start, end in zip(
+            range(0, N, batch_size),
+            range(batch_size, N + batch_size, batch_size)
+        )
     ]
     
+    print(f"\nTotal de pixels a processar: {N:,}")
+    print(f"Tamanho de cada batch: {batch_size}")
+    print(f"Total de batches criados: {len(batches)}\n")
     
     dfs = []
     with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
         tqdm_bar = tqdm(total=len(batches))
         
-        # Processar os batches paralelamente
         # function process_batch defined below
         for batch_results in executor.map(process_batch, batches):
             dfs.extend(batch_results)  # Adiciona os resultados processados; dataframe or list of dataframes
@@ -84,11 +108,16 @@ def main(batch_size):
         result_df = pd.concat(dfs, ignore_index=True)
         result_df = explode_columns(result_df)
         print(f"Saving the parquet file with {len(result_df)} records.")
-        result_df.to_parquet(outputs_config['folders']['tabular'] / '{}.parquet'.format(ccd_config['filename']), index=False)
-    
-    #if EXECUTAR_PLOT:
-    #    plotFromCSV(FOLDER_PARQUET / '{}.parquet'.format(filename), ROW_INDEX, save_dir=FOLDER_PLOTS / '{}_RowIndex{}.png'.format(filename, ROW_INDEX))
-
+        
+        filename_base = ccd_config['filename']  # ex: "s2_images-NDVI_XX999YM1NOBS6LDA2ITER1000_START20170415_END20251119_ROI_DGT_mask"
+        
+        # Convert max_date_ccd to YYYYMMDD format
+        max_date_str = datetime.strptime(ccd_config['max_date_ccd'], "%Y-%m-%d").strftime("%Y%m%d")
+        # Replace the ENDYYYYMMDD pattern with max_date_ccd
+        filename_parquet = re.sub(r'END\d{8}', f'END{max_date_str}', filename_base) + '.parquet'
+        
+        # Salvar DataFrame
+        result_df.to_parquet(outputs_config['folders']['tabular'] / filename_parquet, index=False)
 
 # Função auxiliar para processar um batch
 def process_batch(args):
@@ -130,3 +159,4 @@ def process_batch(args):
 # Executar o código
 if __name__ == '__main__':
     main(preprocessing_config['batch_size'])
+
