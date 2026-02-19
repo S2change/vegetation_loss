@@ -3,6 +3,53 @@ import numpy as np
 import rasterio
 import datetime as dt
 import os
+from datetime import datetime
+
+def apply_max_date_ccd(tif_dates_ord, max_date_ccd):
+    """
+    Applies a temporal cut to ordinal dates based on max_date_ccd.
+
+    Parameters
+    ----------
+    tif_dates_ord : array-like
+        Array of ordinal dates (int).
+    max_date_ccd : str or None
+        Maximum date in 'YYYY-MM-DD' format. If None, no cut is applied.
+
+    Returns
+    -------
+    tif_dates_cut : np.ndarray
+        Possibly truncated array of ordinal dates.
+    last_valid_index : int
+        Index used to slice the time dimension.
+    """
+
+    tif_dates_ord = np.array(tif_dates_ord)
+
+    if max_date_ccd is None:
+        last_valid_index = len(tif_dates_ord)
+        print(f"MAX_DATE_CCD not defined. Using full time series ({last_valid_index} images).")
+        return tif_dates_ord, len(tif_dates_ord)
+
+    # Converter string para ordinal
+    max_date_ccd_ord = datetime.strptime(
+        max_date_ccd, "%Y-%m-%d"
+    ).toordinal()
+
+    # Encontrar indices validos
+    valid_idx = np.where(tif_dates_ord <= max_date_ccd_ord)[0]
+
+    if len(valid_idx) == 0:
+        raise ValueError("No dates available before MAX_DATE_CCD")
+
+    last_valid_index = valid_idx[-1] + 1 
+
+    print(f"Applying MAX_DATE_CCD = {max_date_ccd}")
+    print(f"Using {last_valid_index} images out of {len(tif_dates_ord)}")
+
+    tif_dates_cut = tif_dates_ord[:last_valid_index]
+
+    return tif_dates_cut, last_valid_index
 
 def fromParamsReturnName(col_name, ccd_params, tifs_info, roi_name, min_year, max_date, output_folder):
     """
