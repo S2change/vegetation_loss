@@ -37,6 +37,8 @@ import platform
 from pathlib import Path
 import warnings
 import time
+import re
+from datetime import datetime
 
 # Third-party libraries
 import pandas as pd
@@ -47,6 +49,7 @@ from mpi4py import MPI
 sys.path.append(str(Path(__file__).parents[1]))
 from shared.processing import runDetectionForPoint, explode_columns
 from shared.preprocessing import check_or_initialize_file
+from shared.utils import apply_max_date_ccd
 from config.config import input_config, preprocessing_config, outputs_config, ccd_config
 
 # Suppress warnings
@@ -69,6 +72,11 @@ def main(batch_size=None):
             preprocessing_config['bandas_desejadas']
         )
         
+        tif_dates_ord, last_valid_index = apply_max_date_ccd(
+            tif_dates_ord,
+            ccd_config.get('max_date_ccd')
+        )
+        
         indices = list(range(0, N, batch_size))
         batches = [(start, min(start + batch_size, N)) for start in indices]
         print(f"[Rank {rank}] Total batches created: {len(batches)}", flush=True)
@@ -76,9 +84,11 @@ def main(batch_size=None):
         batches_per_rank = [batches[i::size] for i in range(size)]
     else:
         tif_dates_ord = None
+        last_valid_index = None
         batches_per_rank = None
 
     tif_dates_ord = comm.bcast(tif_dates_ord, root=0)
+    last_valid_index = comm.bcast(last_valid_index, root=0)
     my_batches = comm.scatter(batches_per_rank, root=0)
     print(f"[Rank {rank}] Received {len(my_batches)} batches", flush=True)
 
@@ -88,7 +98,7 @@ def main(batch_size=None):
     for i, batch in enumerate(my_batches):
         print(f"[Rank {rank}] Starting batch {i+1}/{len(my_batches)}: indices {batch}", flush=True)
         try:
-            result = process_batch(batch, outputs_config['output_file'], tif_dates_ord, rank)
+            result = process_batch(batch, outputs_config['output_file'], tif_dates_ord, last_valid_index, rank)
             if result:
                 local_results.extend(result)
         except Exception as e:
@@ -101,7 +111,13 @@ def main(batch_size=None):
     if local_results:
         result_df = pd.concat(local_results, ignore_index=True)
         result_df = explode_columns(result_df)
-        parquet_path = outputs_config['folders']['tabular'] / f"{ccd_config['filename']}_rank_{rank}.parquet"
+        
+        max_date_str = datetime.strptime(ccd_config['max_date_ccd'], "%Y-%m-%d").strftime("%Y%m%d")
+        filename_parquet = re.sub(r'END\d{8}', f'END{max_date_str}', ccd_config['filename'])
+        filename_parquet = f"{filename_parquet}_rank_{rank}.parquet"
+        
+        parquet_path = outputs_config['folders']['tabular'] / filename_parquet
+
         print(f"[Rank {rank}] Saving results to {parquet_path}", flush=True)
         result_df.to_parquet(parquet_path, index=False, engine='pyarrow')
 #%%
@@ -126,7 +142,7 @@ def process_batch(batch, sel_values_path, tif_dates_ord, rank):
         print(f"[Rank {rank}] Failed to open HDF5 file: {repr(e)}", flush=True)
         return []
 
-    sel_values_block = h5_file['values'][:, :, start:end]
+    sel_values_block = h5_file['values'][:last_valid_index, :, start:end]
     xs_slice = h5_file['xs'][start:end]
     ys_slice = h5_file['ys'][start:end]
 
@@ -145,6 +161,7 @@ def process_batch(batch, sel_values_path, tif_dates_ord, rank):
         for i in range(sel_values_block.shape[2])
     ]
 
+    #print(f"[Rank {rank}] Processing {len(arg_list)} points in current batch", flush=True)
     results = []
     for args in arg_list:
         try:
