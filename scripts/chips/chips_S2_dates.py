@@ -26,6 +26,8 @@ import sys
 import xarray as xr
 import rioxarray
 from dask.diagnostics import ProgressBar
+import dask
+import dask.array as da
 import re
 from rasterio.windows import bounds as window_bounds
 import time
@@ -142,6 +144,7 @@ def timing_decorator(func):
 def load_hdf5_as_xarray(hdf5_path, filter_bounds=None):
     """
     Load HDF5 file and convert to xarray DataArray compatible with chips_S2_dates.py workflow.
+    Uses lazy loading with Dask for memory efficiency.
 
     The HDF5 file structure:
     - values: (time, band, pixels) - flattened pixel array
@@ -163,11 +166,10 @@ def load_hdf5_as_xarray(hdf5_path, filter_bounds=None):
         First element: DataArray with dimensions (time, band, y, x) with bands in order [B2, B11, B3, B4, B8, B12]
         Second element: Dictionary mapping ordinal dates to Unix timestamps in milliseconds
     """
-    print(f"  Loading HDF5 file: {hdf5_path}")
+    print(f"  Loading HDF5 file (lazy mode): {hdf5_path}")
 
     with h5py.File(hdf5_path, 'r') as h5f:
-        # Load datasets
-        values = h5f['values']  # Shape: (time, band, pixels)
+        # Load metadata only (small arrays)
         xs = h5f['xs'][:]
         ys = h5f['ys'][:]
         ts = h5f['ts'][:]
@@ -195,6 +197,7 @@ def load_hdf5_as_xarray(hdf5_path, filter_bounds=None):
             # Filter coordinates
             xs_filtered = xs[pixel_mask]
             ys_filtered = ys[pixel_mask]
+            pixel_indices = np.where(pixel_mask)[0]
 
             # Recalculate grid dimensions
             unique_xs = np.unique(xs_filtered)
@@ -208,13 +211,13 @@ def load_hdf5_as_xarray(hdf5_path, filter_bounds=None):
             pixel_mask = None
             xs_filtered = xs
             ys_filtered = ys
+            pixel_indices = None
 
         # Calculate affine transform
-        # Assuming regular grid spacing
         x_min = unique_xs.min()
         y_max = unique_ys.max()
-        pixel_width = np.diff(unique_xs).min() if len(unique_xs) > 1 else 10  # Default 10m
-        pixel_height = -np.abs(np.diff(unique_ys).min() if len(unique_ys) > 1 else 10)  # Negative for top-down
+        pixel_width = np.diff(unique_xs).min() if len(unique_xs) > 1 else 10
+        pixel_height = -np.abs(np.diff(unique_ys).min() if len(unique_ys) > 1 else 10)
 
         transform = Affine(pixel_width, 0.0, x_min,
                           0.0, pixel_height, y_max)
@@ -222,27 +225,25 @@ def load_hdf5_as_xarray(hdf5_path, filter_bounds=None):
         # Create ordinal to unix timestamp mapping
         ordinal_to_unix_ms = {int(ordinal): int(unix_ms) for ordinal, unix_ms in zip(ts, original_timestamps)}
 
-        # Load values with spatial filtering
-        print(f"  Loading {len(ts)} timesteps...")
-        values_list = []
-        for i in range(len(ts)):
-            if (i + 1) % 100 == 0:
-                print(f"    Loading timestep {i+1}/{len(ts)}")
+        # Create mapping from coordinates to grid indices (computed once)
+        x_to_col = {x: i for i, x in enumerate(unique_xs)}
+        y_to_row = {y: i for i, y in enumerate(unique_ys)}
 
+    # Now create lazy Dask array that will load data on demand
+    # We'll create a function that loads and reshapes a single timestep
+    def load_timestep(time_idx, hdf5_path, pixel_indices, xs_filtered, ys_filtered,
+                      x_to_col, y_to_row, height, width, n_bands):
+        """Load a single timestep from HDF5 and reshape to grid"""
+        with h5py.File(hdf5_path, 'r') as h5f:
             # Read this timestep
-            timestep_data = values[i, :, :]  # Shape: (band, pixels)
+            timestep_data = h5f['values'][time_idx, :, :]  # Shape: (band, pixels)
 
             # Apply spatial filter if needed
-            if pixel_mask is not None:
-                timestep_data = timestep_data[:, pixel_mask]
+            if pixel_indices is not None:
+                timestep_data = timestep_data[:, pixel_indices]
 
             # Reshape from flat to 2D grid
-            # Need to map xs_filtered, ys_filtered back to grid positions
-            grid_data = np.full((timestep_data.shape[0], height, width), 65535, dtype=np.uint16)
-
-            # Create mapping from coordinates to grid indices
-            x_to_col = {x: i for i, x in enumerate(unique_xs)}
-            y_to_row = {y: i for i, y in enumerate(unique_ys)}
+            grid_data = np.full((n_bands, height, width), 65535, dtype=np.uint16)
 
             # Fill grid
             for pixel_idx in range(len(xs_filtered)):
@@ -250,43 +251,56 @@ def load_hdf5_as_xarray(hdf5_path, filter_bounds=None):
                 row = y_to_row[ys_filtered[pixel_idx]]
                 grid_data[:, row, col] = timestep_data[:, pixel_idx]
 
-            values_list.append(grid_data)
+            return grid_data
 
-        # Stack all timesteps
-        values_array = np.stack(values_list, axis=0)  # Shape: (time, band, y, x)
+    # Create list of delayed Dask arrays (one per timestep)
+    print(f"  Creating lazy array structure for {len(ts)} timesteps...")
+    n_bands = 6
+    dask_arrays = []
 
-        print(f"  Loaded array shape: {values_array.shape}")
-
-        # Reorder bands from [B3, B4, B8, B12, B2, B11] to [B2, B11, B3, B4, B8, B12]
-        # HDF5 indices:      [0,  1,  2,   3,  4,  5]
-        # New order indices: [4,  5,  0,   1,  2,  3]
-        print("  Reordering bands from [B3, B4, B8, B12, B2, B11] to [B2, B11, B3, B4, B8, B12]...")
-        band_reorder = [4, 5, 0, 1, 2, 3]
-        values_array = values_array[:, band_reorder, :, :]
-
-        # Convert to xarray DataArray
-        da = xr.DataArray(
-            values_array,
-            dims=['time', 'band', 'y', 'x'],
-            coords={
-                'time': ts,
-                'band': np.arange(6),
-                'y': unique_ys,
-                'x': unique_xs
-            }
+    for i in range(len(ts)):
+        # Create a delayed Dask array for this timestep
+        delayed_array = da.from_delayed(
+            dask.delayed(load_timestep)(i, hdf5_path, pixel_indices, xs_filtered, ys_filtered,
+                                       x_to_col, y_to_row, height, width, n_bands),
+            shape=(n_bands, height, width),
+            dtype=np.uint16
         )
+        dask_arrays.append(delayed_array)
 
-        # Add spatial metadata
-        da = da.rio.write_crs("EPSG:32629")  # Assuming UTM 29N for T29TQG
-        da = da.rio.write_transform(transform)
+    # Stack all timesteps into single Dask array
+    values_dask = da.stack(dask_arrays, axis=0)  # Shape: (time, band, y, x)
 
-        # Chunk for performance
-        da = da.chunk({'time': 1, 'band': -1, 'y': -1, 'x': -1})
+    print(f"  Lazy array shape: {values_dask.shape}")
 
-        print(f"  HDF5 loading complete!")
-        print(f"  Final shape: {da.shape}")
+    # Reorder bands from [B3, B4, B8, B12, B2, B11] to [B2, B11, B3, B4, B8, B12]
+    print("  Setting up band reordering (lazy)...")
+    band_reorder = [4, 5, 0, 1, 2, 3]
+    values_dask = values_dask[:, band_reorder, :, :]
 
-        return da, ordinal_to_unix_ms
+    # Convert to xarray DataArray
+    xr_da = xr.DataArray(
+        values_dask,
+        dims=['time', 'band', 'y', 'x'],
+        coords={
+            'time': ts,
+            'band': np.arange(6),
+            'y': unique_ys,
+            'x': unique_xs
+        }
+    )
+
+    # Add spatial metadata
+    xr_da = xr_da.rio.write_crs("EPSG:32629")  # Assuming UTM 29N for T29TQG
+    xr_da = xr_da.rio.write_transform(transform)
+
+    # Chunk for performance - one timestep at a time
+    xr_da = xr_da.chunk({'time': 1, 'band': -1, 'y': -1, 'x': -1})
+
+    print(f"  HDF5 lazy loading setup complete!")
+    print(f"  Final shape: {xr_da.shape}")
+
+    return xr_da, ordinal_to_unix_ms
 
 
 @timing_decorator
