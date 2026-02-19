@@ -66,7 +66,6 @@ def main(batch_size):
         ccd_config.get('max_date_ccd')
     )
 
-
     h5_file = h5py.File(outputs_config['output_file'], 'r')
     sel_values = h5_file['values']
     xs = h5_file['xs']
@@ -146,17 +145,49 @@ def process_batch(args):
         - list: A list of results from `runDetectionForPoint` for each point in the batch.
     """
     sel_values_block, xs_slice, ys_slice, tif_dates_ord = args
-    arg_list = [
-        (i, sel_values_block, tif_dates_ord, xs_slice, ys_slice, preprocessing_config['nodata_value'],
-         preprocessing_config['max_value_ndvi'], outputs_config['output_path'], preprocessing_config['crs_theia'], 
-         preprocessing_config['wgs84'], preprocessing_config['img_collection'])
-        for i in range(sel_values_block.shape[2])]
-    # Retorna resultados para todos os pontos no batch
-    return [runDetectionForPoint(arg) for arg in arg_list]
+    
+    results = []
+
+    for i in range(sel_values_block.shape[2]):
+        try:
+            arg = (
+                i,
+                sel_values_block,
+                tif_dates_ord,
+                xs_slice,
+                ys_slice,
+                preprocessing_config['nodata_value'],
+                preprocessing_config['max_value_ndvi'],
+                outputs_config['output_path'],
+                preprocessing_config['crs_theia'],
+                preprocessing_config['wgs84'],
+                preprocessing_config['img_collection']
+            )
+
+            pixel_values = sel_values_block[:, :, i]
+
+            # Se só tem NODATA -> ignora
+            if np.all(pixel_values == preprocessing_config['nodata_value']) or \
+               np.all(np.isnan(pixel_values)):
+                
+                print(f"[WARNING] Pixel {i} sem dados validos — ignorado.")
+                continue
+
+            result = runDetectionForPoint(arg)
+
+            if result is not None:
+                results.append(result)
+
+        except Exception as e:
+            print(f"[ERROR] Pixel {i} falhou no batch: {repr(e)}")
+            continue 
+
+    return results
 #%%
 
 #%%
 # Executar o código
 if __name__ == '__main__':
     main(preprocessing_config['batch_size'])
+
 
