@@ -57,7 +57,7 @@ IS_BREAK_BAND = 3
 OUTPUT_DIR = r"E:\T29TQG\01_hdf5_test"
 
 # Output filename pattern
-OUTPUT_FILENAME = 'hdf5_optimized_T29TQG_20180101_20211231_{}-{}.tif'
+OUTPUT_FILENAME = 'hdf5_first_test_T29TQG_20180101_20211231_{}-{}.tif'
 
 # Chip dimensions in pixels
 CHIP_WIDTH = 256
@@ -285,7 +285,9 @@ class HDF5DataLoader:
                 timestep_data = h5f['values'][time_idx, :, global_pixel_indices]
 
                 # Fill into grid using vectorized indexing
-                result[i, :, chip_rows, chip_cols] = timestep_data
+                # Need to loop over bands or use proper broadcasting
+                for band_idx in range(self.n_bands):
+                    result[i, band_idx, chip_rows, chip_cols] = timestep_data[band_idx, :]
 
         # Reorder bands from [B3, B4, B8, B12, B2, B11] to [B2, B11, B3, B4, B8, B12]
         result = result[:, self.band_reorder, :, :]
@@ -421,14 +423,13 @@ def cascading_selection_optimized(pre_data, post_data, pre_ordinals, post_ordina
     post_timestamps = np.full((height, width), output_nodata, dtype=np.int64)
 
     # Gather data using advanced indexing
+    # Create meshgrid for row and column indices
+    row_indices, col_indices = np.meshgrid(np.arange(height), np.arange(width), indexing='ij')
+
     for band_idx in range(n_bands):
         # For each pixel, select the value from its first valid timestep
-        pre_selected[band_idx] = pre_data[pre_first_valid_idx, band_idx,
-                                          np.arange(height)[:, None],
-                                          np.arange(width)]
-        post_selected[band_idx] = post_data[post_first_valid_idx, band_idx,
-                                           np.arange(height)[:, None],
-                                           np.arange(width)]
+        pre_selected[band_idx] = pre_data[pre_first_valid_idx, band_idx, row_indices, col_indices]
+        post_selected[band_idx] = post_data[post_first_valid_idx, band_idx, row_indices, col_indices]
 
     # Get timestamps
     pre_timestamps[:] = pre_ordinals[pre_first_valid_idx]
