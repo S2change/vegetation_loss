@@ -54,10 +54,10 @@ BREAK_DATE_BAND = 1
 IS_BREAK_BAND = 3
 
 # Output directory for chips
-OUTPUT_DIR = r"E:\T29TQG\01_hdf5_test"
+OUTPUT_DIR = r"E:\T29TQG\hdf5_chips"
 
 # Output filename pattern
-OUTPUT_FILENAME = 'hdf5_first_test_T29TQG_20180101_20211231_{}-{}.tif'
+OUTPUT_FILENAME = 'T29TQG_20180101_20211231_{}-{}.tif'
 
 # Chip dimensions in pixels
 CHIP_WIDTH = 256
@@ -228,21 +228,23 @@ class HDF5DataLoader:
         chip_xs = self.xs_filtered[chip_mask]
         chip_ys = self.ys_filtered[chip_mask]
 
-        # Create chip-specific grid
-        chip_unique_xs = np.unique(chip_xs)
-        chip_unique_ys = np.unique(chip_ys)
-        chip_width = len(chip_unique_xs)
-        chip_height = len(chip_unique_ys)
+        # Map pixels to row/col positions within the CHIP_WIDTH x CHIP_HEIGHT output grid
+        # X: ascending (left to right), col 0 = smallest x
+        # Y: descending (top to bottom), row 0 = largest y  <-- critical for correct orientation
+        # Align to the INPUT_TIF pixel grid using the chip window origin
+        # This ensures pixels are placed at their correct position within the 256x256 output
+        pixel_size_x = float(self.unique_xs[1] - self.unique_xs[0]) if len(self.unique_xs) > 1 else 10.0
+        pixel_size_y = float(self.unique_ys[1] - self.unique_ys[0]) if len(self.unique_ys) > 1 else 10.0  # positive, unique_ys is ascending
 
-        # Create mapping from coordinates to chip grid positions
-        chip_x_to_col = {x: i for i, x in enumerate(chip_unique_xs)}
-        chip_y_to_row = {y: i for i, y in enumerate(chip_unique_ys)}
+        # col/row offset of each pixel relative to the chip window top-left corner
+        chip_cols = np.array([int(round((x - minx) / pixel_size_x)) for x in chip_xs])
+        chip_rows = np.array([int(round((maxy - y) / pixel_size_y)) for y in chip_ys])
 
-        # Pre-compute row/col arrays for all pixels in this chip
-        chip_rows = np.array([chip_y_to_row[y] for y in chip_ys])
-        chip_cols = np.array([chip_x_to_col[x] for x in chip_xs])
+        # Clip to valid range in case of floating point edge cases
+        chip_cols = np.clip(chip_cols, 0, CHIP_WIDTH - 1)
+        chip_rows = np.clip(chip_rows, 0, CHIP_HEIGHT - 1)
 
-        return chip_pixel_indices, (chip_height, chip_width), (chip_rows, chip_cols)
+        return chip_pixel_indices, (CHIP_HEIGHT, CHIP_WIDTH), (chip_rows, chip_cols)
 
     @timing_decorator
     def load_timesteps_for_chip(self, chip_pixel_indices, time_indices, chip_grid_shape, chip_row_col):
