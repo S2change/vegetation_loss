@@ -74,7 +74,8 @@ for folder_type in ['hdf5', 'plots', 'tabular', 'shapefiles']:
 #%% CCD/PyCCD Parameters
 ccd_config = {
     'parameters': ccd.parameters.defaults,
-    'alpha': ccd.parameters.defaults['ALPHA']
+    'alpha': ccd.parameters.defaults['ALPHA'],
+    'max_date_ccd': '2018-12-31' # Add extraction of maximum date from HDF5 files for CCD processing
 }
 
 # Build filename
