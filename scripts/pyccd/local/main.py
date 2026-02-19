@@ -184,10 +184,9 @@ def process_batch(args):
 
     return results
 #%%
-
-#%%
 # Executar o código
 if __name__ == '__main__':
     main(preprocessing_config['batch_size'])
+
 
 
