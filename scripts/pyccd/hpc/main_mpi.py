@@ -111,13 +111,21 @@ def main(batch_size=None):
     if local_results:
         result_df = pd.concat(local_results, ignore_index=True)
         result_df = explode_columns(result_df)
-        
-        max_date_str = datetime.strptime(ccd_config['max_date_ccd'], "%Y-%m-%d").strftime("%Y%m%d")
-        filename_parquet = re.sub(r'END\d{8}', f'END{max_date_str}', ccd_config['filename'])
-        filename_parquet = f"{filename_parquet}_rank_{rank}.parquet"
-        
+    
+        filename_base = ccd_config['filename']
+        max_date_ccd = ccd_config.get('max_date_ccd')
+    
+        if max_date_ccd:
+            # Convert max_date_ccd to YYYYMMDD format
+            max_date_str = datetime.strptime(max_date_ccd, "%Y-%m-%d").strftime("%Y%m%d")
+            # Replace ENDYYYYMMDD in filename
+            filename_base = re.sub(r'END\d{8}', f'END{max_date_str}', filename_base)
+        else:
+            print(f"[Rank {rank}] No max_date_ccd defined. Keeping original END date.", flush=True)
+    
+        filename_parquet = f"{filename_base}_rank_{rank}.parquet"
         parquet_path = outputs_config['folders']['tabular'] / filename_parquet
-
+    
         print(f"[Rank {rank}] Saving results to {parquet_path}", flush=True)
         result_df.to_parquet(parquet_path, index=False, engine='pyarrow')
 #%%
