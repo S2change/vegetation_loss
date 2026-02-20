@@ -109,11 +109,16 @@ def main(batch_size):
         print(f"Saving the parquet file with {len(result_df)} records.")
         
         filename_base = ccd_config['filename']  # ex: "s2_images-NDVI_XX999YM1NOBS6LDA2ITER1000_START20170415_END20251119_ROI_DGT_mask"
+        max_date_ccd = ccd_config.get('max_date_ccd')
         
-        # Convert max_date_ccd to YYYYMMDD format
-        max_date_str = datetime.strptime(ccd_config['max_date_ccd'], "%Y-%m-%d").strftime("%Y%m%d")
-        # Replace the ENDYYYYMMDD pattern with max_date_ccd
-        filename_parquet = re.sub(r'END\d{8}', f'END{max_date_str}', filename_base) + '.parquet'
+        if max_date_ccd:
+            # Convert max_date_ccd to YYYYMMDD format
+            max_date_str = datetime.strptime(max_date_ccd, "%Y-%m-%d").strftime("%Y%m%d")
+            # Replace the ENDYYYYMMDD pattern with max_date_ccd
+            filename_parquet = re.sub(r'END\d{8}', f'END{max_date_str}', filename_base)
+        else:
+            print("No max_date_ccd defined. Keeping original END date in filename.")
+            filename_parquet = filename_base
         
         # Salvar DataFrame
         result_df.to_parquet(outputs_config['folders']['tabular'] / filename_parquet, index=False)
@@ -187,6 +192,7 @@ def process_batch(args):
 # Executar o código
 if __name__ == '__main__':
     main(preprocessing_config['batch_size'])
+
 
 
 
