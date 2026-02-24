@@ -8,23 +8,33 @@
 - (18 de junho de 2025) Reunião com DGT/CNCA:
 
   [Presentation (pdf)](Reuniao_DGT_CNCA_ISA_18_junho_2025.pdf)
-  
-  1. Tópicos:
-  - Descrição do problema: deteção de alterações, classificação, validação. Ver [diagrama](https://ulisboa-my.sharepoint.com/:p:/r/personal/mlc_office365_ulisboa_pt/_layouts/15/Doc.aspx?sourcedoc=%7B8D41864A-55FD-482B-AC2B-518CFB2E24A6%7D&file=overview_s2change.pptx&action=edit&mobileredirect=true)
-  - (nov 2024) [Relatório sobre Processamento do PyCCD em plataforma de computação avançada (INCD)](../reports_sub_contracts/Entregavel_2.3.pdf)
-  - (fev 2025) [Relatório sobre Processamento do PyCCD em plataforma de computação avançada (MACC Deucalion)](../reports_sub_contracts/Entregavel_3.1.pdf)
-  - Teste comparativo entre MACC e INCD com as configurações de desempenho ideais para 1 milhão de pixels:
-    ![image](https://github.com/user-attachments/assets/902356a0-bcb9-403f-95d8-2aacd3424379)
-    ![image](https://github.com/user-attachments/assets/8be68233-9168-42fe-b86c-91d99266a37c)
 
-    **Nota**: No INCD, a paralelização dos batches dentro de cada rank (usando ProcessPoolExecutor) não trouxe ganhos significativos de desempenho (testou-se com 5 nodes, 24 ntasks per node e 4 cpus per task e ficou + lento), ao passo que no MACC, este método resultou numa melhoria notável no tempo de execução devido à maior capacidade de CPU por node.
+    <details>
+    
+    <summary>Tópicos e questões</summary>
+    
+      1. Tópicos:
+      - Descrição do problema: deteção de alterações, classificação, validação. Ver [diagrama](https://ulisboa-my.sharepoint.com/:p:/r/personal/mlc_office365_ulisboa_pt/_layouts/15/Doc.aspx?sourcedoc=%7B8D41864A-55FD-482B-AC2B-518CFB2E24A6%7D&file=overview_s2change.pptx&action=edit&mobileredirect=true)
+      - (nov 2024) [Relatório sobre Processamento do PyCCD em plataforma de computação avançada (INCD)](../reports_sub_contracts/Entregavel_2.3.pdf)
+      - (fev 2025) [Relatório sobre Processamento do PyCCD em plataforma de computação avançada (MACC Deucalion)](../reports_sub_contracts/Entregavel_3.1.pdf)
+      - Teste comparativo entre MACC e INCD com as configurações de desempenho ideais para 1 milhão de pixels:
+        ![image](https://github.com/user-attachments/assets/902356a0-bcb9-403f-95d8-2aacd3424379)
+        ![image](https://github.com/user-attachments/assets/8be68233-9168-42fe-b86c-91d99266a37c)
+    
+        **Nota**: No INCD, a paralelização dos batches dentro de cada rank (usando ProcessPoolExecutor) não trouxe ganhos significativos de desempenho (testou-se com 5 nodes, 24 ntasks per node e 4 cpus per task e ficou + lento), ao passo que no MACC, este método resultou numa melhoria notável no tempo de execução devido à maior capacidade de CPU por node.
+    
+        ----> MACC 4x + rápido que INCD (para 1 milhão de pixels).
+    
+      - Recursos computacionais (INCD) para a componente de deteção de alterações com pyCCD. Sentinel-2 tile processing status: see [status per Sentinel-2 tile](https://ulisboa-my.sharepoint.com/my?csf=1&web=1&e=vp9h5C&FolderCTID=0x012000C2AFBA48F7C2154CB26FDFA64A376290&id=%2Fpersonal%2Fmlc%5Foffice365%5Fulisboa%5Fpt%2FDocuments%2FDocuments%2Finvestigacao%2Dprojectos%2Dreviews%2Dalunos%2Djuris%2Fprojetos%2FDGT%2DS2CHANGE%5F2023%2Fpartilhado%2Flog%5Fincd%5Fmacc) incluiding size (# pixels), memory, core-minutes in INCD, output parquet file size.
+    
+        ----> Resources still available in INCD: 12,674,231.63 cores-minutes
+    
+      2. Questões:
+      - acesso a recursos no CNCA
+      - deep learning para classificação: recursos em GPU
+    
+    </details>
 
-    ----> MACC 4x + rápido que INCD (para 1 milhão de pixels).
+- 23 de fevereiro de 2026 (reunião DGT/ISA: ponto situação)
 
-  - Recursos computacionais (INCD) para a componente de deteção de alterações com pyCCD. Sentinel-2 tile processing status: see [status per Sentinel-2 tile](https://ulisboa-my.sharepoint.com/my?csf=1&web=1&e=vp9h5C&FolderCTID=0x012000C2AFBA48F7C2154CB26FDFA64A376290&id=%2Fpersonal%2Fmlc%5Foffice365%5Fulisboa%5Fpt%2FDocuments%2FDocuments%2Finvestigacao%2Dprojectos%2Dreviews%2Dalunos%2Djuris%2Fprojetos%2FDGT%2DS2CHANGE%5F2023%2Fpartilhado%2Flog%5Fincd%5Fmacc) incluiding size (# pixels), memory, core-minutes in INCD, output parquet file size.
-
-    ----> Resources still available in INCD: 12,674,231.63 cores-minutes
-
-  2. Questões:
-  - acesso a recursos no CNCA
-  - deep learning para classificação: recursos em GPU
+  [Apresentação M.Campagnolo](https://ulisboa-my.sharepoint.com/:p:/g/personal/mlc_office365_ulisboa_pt/IQDURNhbmW2SQrFi8nPL0tsBAfloWxbFupcqW0wXhLyQJPk?e=cvkeCb)
