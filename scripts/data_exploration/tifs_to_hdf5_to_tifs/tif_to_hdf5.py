@@ -123,31 +123,29 @@ with rasterio.open(os.path.join(folder_path_4bands, sorted_files[0])) as src:
 
 print(f"Intersection Shape: {win_height}x{win_width} ({total_pixels} pixels)")
 
-# 4. Verify both band files produce compatible shapes after windowing
-print("Pre-scanning file pairs for band shape compatibility...")
-prescan_failed = []
-prescan_passed = []
+# 4. Header-only check: verify 4-band and 2-band files match for each timestamp
+print("Checking 4-band/2-band header compatibility...")
+header_failed = []
+header_passed = []
 for filename in sorted_files:
-    path_4b = os.path.join(folder_path_4bands, filename)
-    path_2b = os.path.join(folder_path_2bands, filename)
-    try:
-        with rasterio.open(path_4b) as src4, rasterio.open(path_2b) as src2:
-            data4 = src4.read(window=inter_window)[:, :win_height, :win_width].reshape(4, -1)
-            data2 = src2.read(window=inter_window)[:, :win_height, :win_width].reshape(2, -1)
-            np.concatenate([data4, data2], axis=0)  # just checks shape compatibility
-        prescan_passed.append(filename)
-    except ValueError as e:
-        print(f"  WARNING: Pre-scan failed for {filename} — {e}")
-        prescan_failed.append(filename)
+    with rasterio.open(os.path.join(folder_path_4bands, filename)) as src4, \
+         rasterio.open(os.path.join(folder_path_2bands, filename)) as src2:
+        if (src4.bounds != src2.bounds or
+                src4.transform != src2.transform or
+                src4.shape != src2.shape):
+            print(f"  WARNING: Header mismatch for {filename}")
+            header_failed.append(filename)
+        else:
+            header_passed.append(filename)
 
-if prescan_failed:
-    print(f"Excluding {len(prescan_failed)} file(s) that failed pre-scan:")
-    for fname in prescan_failed:
+if header_failed:
+    print(f"Excluding {len(header_failed)} file(s) with mismatched headers:")
+    for fname in header_failed:
         print(f"  - {fname}")
 
-sorted_files  = prescan_passed
-file_metadata = [m for m in file_metadata if m['filename'] in set(prescan_passed)]
-print(f"Pre-scan complete. {len(sorted_files)} file(s) ready for HDF5 write.")
+sorted_files  = header_passed
+file_metadata = [m for m in file_metadata if m['filename'] in set(header_passed)]
+print(f"Header check complete. {len(sorted_files)} file(s) ready for HDF5 write.")
 
 # 5. Write to HDF5
 with h5py.File(h5_filename, 'w') as h5f:
