@@ -123,33 +123,59 @@ with rasterio.open(os.path.join(folder_path_4bands, sorted_files[0])) as src:
 
 print(f"Intersection Shape: {win_height}x{win_width} ({total_pixels} pixels)")
 
-# 4. Write to HDF5
+# 4. Verify both band files produce compatible shapes after windowing
+print("Pre-scanning file pairs for band shape compatibility...")
+prescan_failed = []
+prescan_passed = []
+for filename in sorted_files:
+    path_4b = os.path.join(folder_path_4bands, filename)
+    path_2b = os.path.join(folder_path_2bands, filename)
+    try:
+        with rasterio.open(path_4b) as src4, rasterio.open(path_2b) as src2:
+            data4 = src4.read(window=inter_window)[:, :win_height, :win_width].reshape(4, -1)
+            data2 = src2.read(window=inter_window)[:, :win_height, :win_width].reshape(2, -1)
+            np.concatenate([data4, data2], axis=0)  # just checks shape compatibility
+        prescan_passed.append(filename)
+    except ValueError as e:
+        print(f"  WARNING: Pre-scan failed for {filename} — {e}")
+        prescan_failed.append(filename)
+
+if prescan_failed:
+    print(f"Excluding {len(prescan_failed)} file(s) that failed pre-scan:")
+    for fname in prescan_failed:
+        print(f"  - {fname}")
+
+sorted_files  = prescan_passed
+file_metadata = [m for m in file_metadata if m['filename'] in set(prescan_passed)]
+print(f"Pre-scan complete. {len(sorted_files)} file(s) ready for HDF5 write.")
+
+# 5. Write to HDF5
 with h5py.File(h5_filename, 'w') as h5f:
-    dset_values = h5f.create_dataset("values", (len(sorted_files), nbands, total_pixels), 
+    dset_values = h5f.create_dataset("values", (len(sorted_files), nbands, total_pixels),
                                      dtype='uint16', chunks=(1, nbands, 1000000))
-    
+
     # Store band names as a fixed-length string attribute
     h5f.attrs['band_names'] = [n.encode('ascii') for n in band_names]
-    
+
     h5f.create_dataset("xs", data=xs_flat, dtype='int32')
     h5f.create_dataset("ys", data=ys_flat, dtype='int32')
     h5f.create_dataset("ts", data=[m['ordinal'] for m in file_metadata], dtype='int32')
     # Add this new dataset for the raw timestamps
-    h5f.create_dataset("original_timestamps", 
-                       data=[m['timestamp_ms'] for m in file_metadata], 
+    h5f.create_dataset("original_timestamps",
+                       data=[m['timestamp_ms'] for m in file_metadata],
                        dtype='int64') # int64 handles large 13-digit numbers
 
     for i, filename in enumerate(sorted_files):
         print(f"Processing {i+1}/{len(sorted_files)}: {filename}")
-        
+
         path_4b = os.path.join(folder_path_4bands, filename)
         path_2b = os.path.join(folder_path_2bands, filename)
-        
+
         with rasterio.open(path_4b) as src4, rasterio.open(path_2b) as src2:
             # Efficient block reading
             data4 = src4.read(window=inter_window)[:, :win_height, :win_width].reshape(4, -1)
             data2 = src2.read(window=inter_window)[:, :win_height, :win_width].reshape(2, -1)
-            
+
             # Fast concatenation
             dset_values[i, :, :] = np.concatenate([data4, data2], axis=0)
 
