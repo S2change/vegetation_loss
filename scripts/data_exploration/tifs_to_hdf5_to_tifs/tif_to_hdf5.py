@@ -57,6 +57,9 @@ for f in sorted_files:
     with rasterio.open(os.path.join(folder_path_4bands, f)) as src:
         all_bounds[f] = src.bounds
 
+first_b = all_bounds[sorted_files[0]]
+print(f"First file: {sorted_files[0]}  bounds=(left: {first_b.left:.1f}, bottom: {first_b.bottom:.1f}, right: {first_b.right:.1f}, top: {first_b.top:.1f})")
+
 # Step 2b: Compute median extent and filter outliers within tol
 min_xs = np.array([b.left   for b in all_bounds.values()])
 max_xs = np.array([b.right  for b in all_bounds.values()])
