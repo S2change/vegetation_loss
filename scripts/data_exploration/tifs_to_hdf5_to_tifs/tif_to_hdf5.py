@@ -20,6 +20,10 @@ folder_path_4bands = r"D:\s2_images\T29TQG"
 folder_path_2bands = r"C:\Users\Public\Documents\s2_images_B2_B11\T29TQG"
 h5_filename = os.path.join(r"E:\T29TQG", 'T29TQG_6bands.h5')
 
+# Tolerance (in CRS units, i.e. metres) used to filter files whose spatial
+# extent deviates too far from the median extent across all timestamps.
+tol = 1000
+
 # Define the band order based on the stacking logic below
 # Folder '4bands' (B3, B4, B8, B12) followed by Folder '2bands' (B2, B11)
 band_names = ["B3", "B4", "B8", "B12", "B2", "B11"]
@@ -45,87 +49,61 @@ file_metadata.sort(key=lambda x: x['ordinal'])
 sorted_files = [m['filename'] for m in file_metadata]
 
 # 2. Find the Common Intersection Bounding Box
-# Check BOTH folders for spatial alignment
-print("Calculating common intersection...")
-print("Checking 4-band files...")
-bounds_list_4bands = []
 
+# Step 2a: Read all extents (using the 4-band folder as the spatial reference)
+print("Reading extents from all files...")
+all_bounds = {}  # filename -> rasterio BoundingBox
 for f in sorted_files:
     with rasterio.open(os.path.join(folder_path_4bands, f)) as src:
-        bounds_list_4bands.append({
-            'filename': f,
-            'bounds': src.bounds,
-            'transform': src.transform,
-            'shape': src.shape
-        })
+        all_bounds[f] = src.bounds
 
-print("Checking 2-band files...")
-bounds_list_2bands = []
+# Step 2b: Compute median extent and filter outliers within tol
+min_xs = np.array([b.left   for b in all_bounds.values()])
+max_xs = np.array([b.right  for b in all_bounds.values()])
+min_ys = np.array([b.bottom for b in all_bounds.values()])
+max_ys = np.array([b.top    for b in all_bounds.values()])
 
-for f in sorted_files:
-    with rasterio.open(os.path.join(folder_path_2bands, f)) as src:
-        bounds_list_2bands.append({
-            'filename': f,
-            'bounds': src.bounds,
-            'transform': src.transform,
-            'shape': src.shape
-        })
+median_min_x = np.median(min_xs)
+median_max_x = np.median(max_xs)
+median_min_y = np.median(min_ys)
+median_max_y = np.median(max_ys)
 
-# Use the first file as reference for BOTH folders
-reference_4bands = bounds_list_4bands[0]
-reference_2bands = bounds_list_2bands[0]
-misaligned_files = []
+print(f"Median extent: X=[{median_min_x:.1f}, {median_max_x:.1f}]  Y=[{median_min_y:.1f}, {median_max_y:.1f}]")
+print(f"Filtering files whose extent deviates more than {tol} m from median...")
+
+outlier_files = []
 aligned_files = []
-
-for i, filename in enumerate(sorted_files):
-    item_4bands = bounds_list_4bands[i]
-    item_2bands = bounds_list_2bands[i]
-
-    # Check if either folder's file is misaligned OR if the two folders don't match each other
-    is_misaligned = False
-
-    # Check 4bands against its reference
-    if (item_4bands['bounds'] != reference_4bands['bounds'] or
-        item_4bands['transform'] != reference_4bands['transform'] or
-        item_4bands['shape'] != reference_4bands['shape']):
-        is_misaligned = True
-
-    # Check 2bands against its reference
-    if (item_2bands['bounds'] != reference_2bands['bounds'] or
-        item_2bands['transform'] != reference_2bands['transform'] or
-        item_2bands['shape'] != reference_2bands['shape']):
-        is_misaligned = True
-
-    # Check that 4bands and 2bands match each other
-    if (item_4bands['bounds'] != item_2bands['bounds'] or
-        item_4bands['transform'] != item_2bands['transform'] or
-        item_4bands['shape'] != item_2bands['shape']):
-        is_misaligned = True
-
-    if is_misaligned:
-        misaligned_files.append(filename)
+for f, b in all_bounds.items():
+    if (abs(b.left   - median_min_x) <= tol and
+        abs(b.right  - median_max_x) <= tol and
+        abs(b.bottom - median_min_y) <= tol and
+        abs(b.top    - median_max_y) <= tol):
+        aligned_files.append(f)
     else:
-        aligned_files.append(filename)
+        outlier_files.append(f)
 
-if misaligned_files:
-    print(f"WARNING: Found {len(misaligned_files)} files with different spatial extents!")
-    print(f"These files will be EXCLUDED from processing:")
-    for fname in misaligned_files[:5]:  # Show first 5
-        print(f"  - {fname}")
-    if len(misaligned_files) > 5:
-        print(f"  ... and {len(misaligned_files) - 5} more")
+if outlier_files:
+    print(f"WARNING: Discarding {len(outlier_files)} file(s) whose extent is outside tolerance:")
+    for fname in outlier_files[:5]:
+        b = all_bounds[fname]
+        print(f"  - {fname}  bounds=({b.left:.1f}, {b.bottom:.1f}, {b.right:.1f}, {b.top:.1f})")
+    if len(outlier_files) > 5:
+        print(f"  ... and {len(outlier_files) - 5} more")
 
-    # Update sorted_files and file_metadata to exclude misaligned files
-    sorted_files = aligned_files
-    file_metadata = [m for m in file_metadata if m['filename'] in aligned_files]
-    print(f"Continuing with {len(sorted_files)} aligned files")
+sorted_files = aligned_files
+file_metadata = [m for m in file_metadata if m['filename'] in set(aligned_files)]
+print(f"Continuing with {len(sorted_files)} files in set S")
 
-# Calculate intersection from aligned bounds only
-# Since all aligned files have identical bounds, just use the reference
-inter_left = reference_4bands['bounds'].left
-inter_bottom = reference_4bands['bounds'].bottom
-inter_right = reference_4bands['bounds'].right
-inter_top = reference_4bands['bounds'].top
+# Step 2c: Compute intersection I of all extents in S
+inter_left   = max(all_bounds[f].left   for f in sorted_files)
+inter_bottom = max(all_bounds[f].bottom for f in sorted_files)
+inter_right  = min(all_bounds[f].right  for f in sorted_files)
+inter_top    = min(all_bounds[f].top    for f in sorted_files)
+
+if inter_left >= inter_right or inter_bottom >= inter_top:
+    raise ValueError("Intersection of aligned extents is empty — check your input files or increase tol.")
+
+print(f"Intersection extent I: X=[{inter_left:.1f}, {inter_right:.1f}]  Y=[{inter_bottom:.1f}, {inter_top:.1f}]")
 
 # 3. Get Dimensions and Coordinates
 with rasterio.open(os.path.join(folder_path_4bands, sorted_files[0])) as src:
