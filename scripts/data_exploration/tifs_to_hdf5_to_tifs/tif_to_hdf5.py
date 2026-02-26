@@ -7,12 +7,18 @@ from rasterio.windows import from_bounds
 from datetime import datetime, timezone
 
 '''
-This script reads the HDF5 file created by the previous scripts, extracts the data, and reconstructs georeferenced GeoTIFF files for each timestamp. The output GeoTIFFs will be compressed using LZW and will include the original spatial metadata for accurate georeferencing.   
-Make sure to adjust the paths and configurations as needed before running the script.
-Key Steps:
-1. Load the HDF5 file and read the datasets (values, xs, ys, ts).
-2. Determine the spatial grid dimensions and calculate the affine transform.
-3. For each timestamp, create a GeoTIFF file with the corresponding bands, applying or not  LZW compression (reduces file size by 50%) and using the original spatial metadata for georeferencing.  
+This script reads pairs of 4-band and 2-band GeoTIFF files from specified folders, checks their spatial alignment, extracts the pixel values for a common intersection area, and writes the combined data into an HDF5 file. The script also filters out files whose spatial extents deviate significantly from the median extent across all timestamps to ensure consistency in the dataset.   
+The output HDF5 file contains a 3D dataset of pixel values with dimensions corresponding to (time, bands, pixels), as well as datasets for the x and y coordinates of each pixel, the ordinal dates, and the original timestamps in milliseconds. The band names are stored as attributes in the HDF5 file for reference.   
+Inputs: 
+- 'folder_path_4bands': Directory containing the 4-band GeoTIFF files (e.g., B3, B4, B8, B12).
+- 'folder_path_2bands': Directory containing the 2-band GeoTIFF files (e.g., B2, B11).
+- 'h5_filename': Path for the output HDF5 file to be created.
+Outputs:
+- An HDF5 file containing the combined pixel values, coordinates, and timestamps for the aligned GeoTIFF files.
+Requirements:
+- The GeoTIFF files in both folders must have matching filenames (except for the band differences) and should be spatially aligned.
+- The script uses a tolerance value to filter out files with spatial extents that deviate too much from the median extent, ensuring a consistent dataset for analysis.
+Note: Adjust the 'tol' variable as needed based on the expected spatial variability of the input files.
 '''
 
 folder_path = r'C:\Users\mlc\OneDrive - Universidade de Lisboa\Documents\temp\test_tif_to_hdf5'
@@ -176,5 +182,6 @@ with h5py.File(h5_filename, 'w') as h5f:
 
             # Fast concatenation
             dset_values[i, :, :] = np.concatenate([data4, data2], axis=0)
+
 
 print(f"Done! Created {h5_filename} with band metadata.")
