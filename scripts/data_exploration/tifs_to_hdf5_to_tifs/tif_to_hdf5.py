@@ -24,7 +24,7 @@ Note: Adjust the 'tol' variable as needed based on the expected spatial variabil
 folder_path = r'C:\Users\mlc\OneDrive - Universidade de Lisboa\Documents\temp\test_tif_to_hdf5'
 folder_path_4bands = r"D:\s2_images\T29TQG"
 folder_path_2bands = r"C:\Users\Public\Documents\s2_images_B2_B11\T29TQG"
-h5_filename = os.path.join(r"E:\T29TQG", 'T29TQG_6bands.h5')
+h5_filename = os.path.join(r"E:\T29TQG", 'T29TQG_6bands_updated_filter.h5')
 
 # Tolerance (in CRS units, i.e. metres) used to filter files whose spatial
 # extent deviates too far from the median extent across all timestamps.
@@ -156,7 +156,7 @@ print(f"Header check complete. {len(sorted_files)} file(s) ready for HDF5 write.
 # 5. Write to HDF5
 with h5py.File(h5_filename, 'w') as h5f:
     dset_values = h5f.create_dataset("values", (len(sorted_files), nbands, total_pixels),
-                                     dtype='uint16', chunks=(1, nbands, 1000000))
+                                     dtype='uint16', chunks=(1, nbands, 1000000), compression="lzf")
 
     # Store band names as a fixed-length string attribute
     h5f.attrs['band_names'] = [n.encode('ascii') for n in band_names]
