@@ -1,4 +1,6 @@
 """
+Aletred MC feb 2026: Revised version of ccd_to_raster.py to allow passing end and start band values to output 
+
 PURPOSE:
 This script processes parquet files containing change detection results from satellite imagery analysis.
 It filters and aggregates pixel-level change detection data, validates breaks using NDVI loss calculations,
@@ -26,6 +28,7 @@ INPUTS:
   * A separate raster is created for each date range
 - boundary_shapefile: Optional shapefile path for spatial filtering
   * Pixels outside boundary are marked as no-break (is_break=0) in the output raster
+- start_bands, end_bands: Lists of additional band names in the parquet files to include in the output raster (values at segment start and end)
 
 OUTPUTS:
 - Multi-band GeoTIFF raster file (.tif):
@@ -45,6 +48,8 @@ OUTPUTS:
   * Band 4: ndvi_last_segment (NDVI value of last segment, scaled by 10000)
     * Integer value for pixels with breaks (divide by 10000 to get original NDVI)
     * -9999 for pixels without breaks or NoData
+  * start_bands, end_bands : (MC; feb 2026) - additional bands (greenStart, greenEnd, ...) can be added if needed for further analysis/visualization
+    * Values for these bands are taken from the segment start and end values in the parquet files, and are set to NaN for pixels without breaks
   * Resolution: 10m x 10m pixels
   * Coordinate system: UTM (EPSG:32629) or optionally reprojected
 - QGIS style file (.qml): Color-coded visualization of Band 1 by year with gradient by day-of-year
@@ -52,6 +57,7 @@ OUTPUTS:
 """
 
 import pandas as pd
+import numpy as np
 import geopandas as gpd
 import os
 import glob
@@ -59,7 +65,6 @@ from pathlib import Path
 import rasterio
 from rasterio.transform import from_origin
 from rasterio.warp import calculate_default_transform, reproject, Resampling
-import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
 import colorsys
@@ -75,8 +80,12 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 ##################################
 
 # Set input directory and output files
-input_directory = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG" # UPDATE
-output_raster_file = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG\processed_outputs\rasters\output_raster_ccd.tif" # UPDATE
+#input_directory = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG" # UPDATE
+#output_raster_file = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG\processed_outputs\rasters\output_raster_ccd.tif" # UPDATE
+input_directory = r"H:\new_parquets_2017_2025\tabular\T29TQF" # small tile for tests
+input_directory = r"H:\new_parquets_2017_2025\tabular\T29TNE" # UPDATE
+output_raster_file = r"H:\new_parquets_2017_2025\tabular\T29TNE\processed_outputs\rasters\output_raster_ccd.tif" # dates will be inserted into the filename based on the date range
+output_raster_file=r"C:\Users\mlc\Downloads\TNE_raster_ccd_20_bands.tif"
 
 # Vector file is not set up
 output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
@@ -86,13 +95,22 @@ output_vector_file = None # Add path if vector file is wanted, to check which po
 # Raster will be created for each date range pair
 
 # Example 1 – use a fixed range (no splitting):
-# date_ranges = generate_date_ranges([("2018-01-01", "2021-12-31")],auto_intervals=False)
+date_ranges = generate_date_ranges([("2018-09-30", "2021-12-31")],auto_intervals=False)
+
+# bands names in parquets see https://github.com/S2change/vegetation_loss/tree/main/data_info
+# if empty, no additional bands will be added to the output raster (only the 4 main bands: last_tEnd, last_tBreak, is_break, ndvi_last_segment)
+start_bands= ["greenStart", "greenStart2", "redStart", "redStart2", "nirStart", "nirStart2" , "swir2Start", "swir2Start2"] # MC additional bands to add to the output raster (values at segment start)
+end_bands= ["greenEnd", "greenEnd2", "redEnd", "redEnd2", "nirEnd", "nirEnd2" , "swir2End", "swir2End2"] # MC additional bands to add to the output raster (values at segment end)
+nan_tuple = (np.nan,) * (len(end_bands) + len(start_bands)) # tuple of zeros for additional bands in no-break case (i.e. is_break not 1)
+
+SOURCE_CRS = "EPSG:32629" # CRS of input coordinates (UTM zone 29N)
+TARGET_CRS = "EPSG:32629" # CRS of input coordinates (UTM zone 29N)
 
 # Example 2 – automatically generate 2-month intervals:
-date_ranges = generate_date_ranges([("2023-01-01", "2024-12-31")], auto_intervals=True, months=2)
+#date_ranges = generate_date_ranges([("2023-01-01", "2024-12-31")], auto_intervals=True, months=2)
 
-# Number of parallel worker processes to use
-num_workers = 12
+# Number of parallel worker processes to use to be determined by number_of_workers() function depending on the system
+# num_workers = 22 # NEOUSYS: 12;  DELL: 22 ()
 
 # Boundary shapefile filtering (set to None to disable)
 boundary_shapefile = None  # Path to shapefile for spatial boundary filtering
@@ -101,6 +119,18 @@ qgis_style_file = True  # Set to True if a .qml style file should be created
 
 # Timer for testing
 set_timer = True
+
+# chunk_size for creating the output raster in chunks to avoid memory issues (number of rows to process at a time when creating the output raster)
+chunk_size = 500_000
+        
+################################ number of wortkers depending on the platform (MC feb 2026)
+
+def number_of_workers():
+    '''Determine the number of worker processes to use for parallel processing.'''
+    num_workers = os.cpu_count() or 1
+    return num_workers
+
+print(f"Number of worker processes to be used: {number_of_workers()}"  )
 
 ##################################
 
@@ -148,7 +178,7 @@ def date_conversion_ms(start_date, end_date):
 
     return start_date_ms, end_date_ms
 
-def load_boundary_shapefile(shapefile_path, source_crs="EPSG:32629"):
+def load_boundary_shapefile(shapefile_path, source_crs=SOURCE_CRS):
     """
     Load boundary shapefile and ensure it's in the same CRS as the data
     
@@ -184,7 +214,7 @@ def load_boundary_shapefile(shapefile_path, source_crs="EPSG:32629"):
     except Exception as e:
         raise Exception(f"Error loading boundary shapefile {shapefile_path}: {str(e)}")
     
-def filter_points_by_boundary(df, boundary_gdf, source_crs="EPSG:32629"):
+def filter_points_by_boundary(df, boundary_gdf, source_crs=SOURCE_CRS):
     """
     Separate points into those within and outside the boundary.
 
@@ -265,7 +295,7 @@ def date_filtering(date_value_ms, search_start_ms=None, search_end_ms=None):
 
     return True
     
-def process_parquet_file_optimized(file_path, date_ranges_ms_list, boundary_gdf=None, source_crs="EPSG:32629"):
+def process_parquet_file_optimized(file_path, date_ranges_ms_list, boundary_gdf=None, source_crs=SOURCE_CRS):
     """
     Process a single parquet file and return pixel results for MULTIPLE date ranges in a single pass.
     For each pixel and each date range, identifies the most recent break that passes date filtering and NDVI loss validation.
@@ -320,7 +350,7 @@ def process_parquet_file_optimized(file_path, date_ranges_ms_list, boundary_gdf=
             y_coord = pixel_row['y_coord']
             for _, _, date_range_idx in date_ranges_ms_list:
                 results_by_date_range[date_range_idx].append(
-                    (x_coord, y_coord, 0, None, None, np.nan)
+                    (x_coord, y_coord, 0, None, None, np.nan) + nan_tuple # (MC) add dummy values for the additional bands to be added to the output raster (currently set to 0, but can be replaced with actual values if needed
                 )
 
     # Store segments we're currently collecting for a pixel
@@ -343,7 +373,7 @@ def process_parquet_file_optimized(file_path, date_ranges_ms_list, boundary_gdf=
                 # Process segments for this date range
                 result = process_pixel_segments(current_segments, search_start_ms, search_end_ms)
                 results_by_date_range[date_range_idx].append(
-                    (current_pixel[0], current_pixel[1], result[0], result[1], result[2], result[3])
+                    (current_pixel[0], current_pixel[1]) + result # MC , result[0], result[1], result[2], result[3])
                 )
                 processed_pixels_by_range[date_range_idx].add(current_pixel)
 
@@ -358,19 +388,18 @@ def process_parquet_file_optimized(file_path, date_ranges_ms_list, boundary_gdf=
             # Same pixel, add segment
             current_segments.append(row)
 
-    # Process last pixel if it exists
+        # Process last pixel if it exists
     if current_pixel is not None:
         for search_start_ms, search_end_ms, date_range_idx in date_ranges_ms_list:
             if current_pixel not in processed_pixels_by_range[date_range_idx]:
                 result = process_pixel_segments(current_segments, search_start_ms, search_end_ms)
                 results_by_date_range[date_range_idx].append(
-                    (current_pixel[0], current_pixel[1], result[0], result[1], result[2], result[3])
+                    (current_pixel[0], current_pixel[1]) + result # MC , result[0], result[1], result[2], result[3])
                 )
 
     return results_by_date_range
 
-
-def process_pixel_segments(segments, search_start_ms, search_end_ms):
+def process_pixel_segments(segments, search_start_ms, search_end_ms): # MC where I can get more variables/bands from the segment to add to the output, if needed
     """
     Process a list of segments for a single pixel to determine break status.
     Segments should be in reverse chronological order (newest first).
@@ -394,9 +423,10 @@ def process_pixel_segments(segments, search_start_ms, search_end_ms):
         - tEnd_used: tEnd value for breaks (ms since Unix epoch), None for no breaks
         - tBreak_used: tBreak value for breaks (ms since Unix epoch), None for no breaks
         - ndvi_last_segment: NDVI value of the last segment (NaN for no breaks)
+        - additional bands: values for each band in end_bands and start_bands (0 if not available)
     """
     filtered_segments = []
-
+    
     for seg in segments:
 
         filtered_segments.append(seg)
@@ -413,7 +443,8 @@ def process_pixel_segments(segments, search_start_ms, search_end_ms):
 
             if pd.notna(last_tBreak) and last_tBreak != 0 and pd.notna(last_tEnd) and last_tEnd != 0 and last_tBreak != last_tEnd:
                 ndvi = calculate_ndvi(last_seg)
-                return (-1, last_tEnd, last_tBreak, ndvi)
+                # add to tuple dummy  values for the additional bands to be added to the output raster (currently set to 0, but can be replaced with actual values from the segment if needed)
+                return (-1, last_tEnd, last_tBreak, ndvi) + nan_tuple # uncertain break case: tBreak != tEnd but we have no previous segment to compare to, return is_break=-1 with tEnd and tBreak of the last segment, and ndvi of the last segment (the one that ends at the break date)
 
         # We need at least 2 segments to check NDVI change
         if len(filtered_segments) >= 2:
@@ -422,17 +453,20 @@ def process_pixel_segments(segments, search_start_ms, search_end_ms):
 
             if newer_segment["redStart"] == 0 and newer_segment["redStart2"] == 0 and newer_segment["nirStart"] == 0 and newer_segment["nirStart2"] == 0:
                 ndvi = calculate_ndvi(active_segment)
-                return (-1, active_segment["tEnd"], active_segment["tBreak"], ndvi)
+                return (-1, active_segment["tEnd"], active_segment["tBreak"], ndvi) + nan_tuple
 
             ndvi_check = ndvi_loss_calculation(active_segment, newer_segment)
             if ndvi_check == 1:
                 ndvi = calculate_ndvi(active_segment)
-                return (1, active_segment["tEnd"], active_segment["tBreak"], ndvi)
+                # add end values of active_segment and start value of newer_segment to the tuple to be added to the output raster (currently set to 0, but can be replaced with actual values from the segments if needed)
+                end_values = tuple([active_segment.get(band, 0) for band in end_bands]) # default value 0
+                start_values = tuple([newer_segment.get(band, 0) for band in start_bands])
+                return (1, active_segment["tEnd"], active_segment["tBreak"], ndvi) + end_values + start_values # MC only good case: true NDVI drop confirmed, return is_break=1 with tEnd and tBreak of the active segment (the one that ends at the break date)
 
     # If we've gone through all segments and found no break, return no break
-    return (0, None, None, np.nan)
+    return (0, None, None, np.nan) + nan_tuple # no break case: return is_break=0 with None for tEnd and tBreak, and NaN for NDVI, and dummy values for the additional bands to be added to the output raster (currently set to 0, but can be replaced with actual values if needed)
 
-def process_files_chunked(input_dir, date_ranges_list, boundary_shapefile=None, source_crs="EPSG:32629", max_workers=None):
+def process_files_chunked(input_dir, date_ranges_list, boundary_shapefile=None, source_crs=SOURCE_CRS, max_workers=number_of_workers):
     """
     Generator that yields processed data from parquet files one at a time to avoid memory issues.
     Processes multiple date ranges in a single pass through each file.
@@ -514,7 +548,7 @@ def process_files_chunked(input_dir, date_ranges_list, boundary_shapefile=None, 
     for result_dict in results_all:
         yield result_dict
 
-def collect_pixel_data_chunked(input_dir, date_ranges_list, boundary_shapefile=None, source_crs="EPSG:32629"):
+def collect_pixel_data_chunked(input_dir, date_ranges_list, boundary_shapefile=None, source_crs=SOURCE_CRS):
     """
     Collect and aggregate pixel data from all parquet files into DataFrames for each date range.
     Processes all date ranges in a single pass through each parquet file.
@@ -539,13 +573,14 @@ def collect_pixel_data_chunked(input_dir, date_ranges_list, boundary_shapefile=N
     all_results_by_range = {idx: [] for idx in range(len(date_ranges_list))}
 
     # Process all files and collect results for each date range
-    for results_dict in process_files_chunked(input_dir, date_ranges_list, boundary_shapefile, source_crs, max_workers=num_workers):
+    for results_dict in process_files_chunked(input_dir, date_ranges_list, boundary_shapefile, source_crs, max_workers=number_of_workers()):
         for date_range_idx, results_list in results_dict.items():
             all_results_by_range[date_range_idx].extend(results_list)
 
-    # Define column names
-    columns = ["x_coord", "y_coord", "is_break", "tEnd_used", "tBreak_used", "ndvi_last_segment"]
-
+    # Define column names 
+    columns = ["x_coord", "y_coord", "is_break", "tEnd_used", "tBreak_used", "ndvi_last_segment", "tEnd_used_yyyymmdd", "tBreak_used_yyyymmdd"]
+    # MC add additional band names to the columns list if they are specified in the start_bands and end_bands lists
+    columns = ["x_coord", "y_coord", "is_break", "tEnd_used", "tBreak_used", "ndvi_last_segment"] + end_bands + start_bands #+ ["tEnd_used_yyyymmdd", "tBreak_used_yyyymmdd"]
     # Create DataFrames for each date range
     dataframes_by_range = {}
 
@@ -556,7 +591,6 @@ def collect_pixel_data_chunked(input_dir, date_ranges_list, boundary_shapefile=N
         print(f"➤ Creating DataFrame for {date_ranges_list[date_range_idx]} with {total_rows:,} rows...")
 
         # Creation in chuncks
-        chunk_size = 500_000
         dfs = []
 
         for i in range(0, total_rows, chunk_size):
@@ -628,8 +662,18 @@ def calculate_raster_parameters_from_pixels(results_df):
         'bounds': (min_x_corner, min_y_corner, max_x_corner, max_y_corner)
     }
 
-def create_raster_array_from_pixels(results_df, raster_params):
+def create_raster_array_from_pixels(results_df, raster_params, start_bands, end_bands):
     """
+    Below is the docstring of the original version: without the dynamic handling of additional bands, and with the fixed 4-band output 
+    (last_tEnd, last_tBreak, is_break, ndvi_last_segment). 
+    The new version of the function will handle dynamically the additional bands specified in the start_bands and end_bands lists, 
+    and will add them to the output raster after the 4 main bands, in the order they are specified in the lists (first all end_bands, 
+    then all start_bands). Note that only ndvi_last_segment is currently calculated in the process_pixel_segments function, 
+    so if you want to add more bands to the output raster, you will need to modify the process_pixel_segments function to calculate the values 
+    for those bands and include them in the returned tuple, and also modify the collect_pixel_data_chunked function to include those values 
+    in the DataFrame that is passed to this function. ndvi_last_segment is rescaled below by 10000 to be stored as an integer in the raster, 
+    to preserve precision while keeping the output raster as integer type.
+    
     Create a 4-band raster array from results DataFrame with fixed 10m resolution in UTM.
     Assumes coordinates are pixel centers.
 
@@ -662,53 +706,76 @@ def create_raster_array_from_pixels(results_df, raster_params):
     min_x, min_y, max_x, max_y = raster_params['bounds']
     res_x, res_y = raster_params['resolution']
 
-    # Initialize 4 bands with NoData values
-    # Band 1: tEnd dates (int32)
-    tend_array = np.full((height, width), -9999, dtype=np.int32)
-    # Band 2: tBreak dates (int32)
-    tbreak_array = np.full((height, width), -9999, dtype=np.int32)
-    # Band 3: is_break status (int8 to save memory: 1, 0, -1, or -99 for NoData)
-    is_break_array = np.full((height, width), -99, dtype=np.int8)
-    # Band 4: NDVI values (int32, scaled by 10000, nodata=-9999)
-    ndvi_array = np.full((height, width), -9999, dtype=np.int32)
+    # 1. Define the dynamic list of extra bands
+    # Order: Fixed 4 + any extra start/end bands
+    extra_band_names = ["ndvi_last_segment"] + end_bands + start_bands
+    
+    # 2. Initialize a dictionary of arrays
+    # Fixed bands
+    bands_dict = {
+        'tEnd': np.full((height, width), -9999, dtype=np.int32),
+        'tBreak': np.full((height, width), -9999, dtype=np.int32),
+        'is_break': np.full((height, width), -99, dtype=np.int8),
+    }
+    
+    # Dynamic bands
+    for name in extra_band_names:
+        bands_dict[name] = np.full((height, width), -9999, dtype=np.int32)
 
-    # Process all pixels from the DataFrame
-    for _, row in results_df.iterrows():
-        x_coord = row['x_coord']
-        y_coord = row['y_coord']
-        is_break = row['is_break']
-        tEnd_yyyymmdd = row['tEnd_used_yyyymmdd']
-        tBreak_yyyymmdd = row['tBreak_used_yyyymmdd']
-        ndvi = row['ndvi_last_segment']
+    # 3. Vectorized Index Calculation (Pre-calculate for all rows at once)
+    x_coords = results_df['x_coord'].values
+    y_coords = results_df['y_coord'].values
+    
+    x_idxs = np.round((x_coords - min_x) / res_x - 0.5).astype(int)
+    y_idxs = np.round((max_y - y_coords) / res_y - 0.5).astype(int)
 
-        # Calculate pixel indices
-        x_idx = int(np.round((x_coord - min_x) / res_x - 0.5))
-        y_idx = int(np.round((max_y - y_coord) / res_y - 0.5))
+    # 4. Fill the arrays
+    # We use zip to iterate through the columns we need efficiently
+    # Collect all the columns we need to read from the DF
+    dynamic_data = {name: results_df[name].values for name in extra_band_names}
+    is_break_val = results_df['is_break'].values
+    tEnd_val = results_df['tEnd_used_yyyymmdd'].values
+    tBreak_val = results_df['tBreak_used_yyyymmdd'].values
 
-        if 0 <= x_idx < width and 0 <= y_idx < height:
-            # Band 1: tEnd date (0 for no_break, YYYYMMDD for valid/uncertain breaks)
-            if is_break == 0:
-                tend_array[y_idx, x_idx] = 0
-                tbreak_array[y_idx, x_idx] = 0
+    for i in range(len(results_df)):
+        xi, yi = x_idxs[i], y_idxs[i]
+        
+        # Check bounds
+        if 0 <= xi < width and 0 <= yi < height:
+            curr_break = is_break_val[i]
+            
+            # Fill Fixed Bands
+            bands_dict['is_break'][yi, xi] = curr_break
+            if curr_break == 0:
+                bands_dict['tEnd'][yi, xi] = 0
+                bands_dict['tBreak'][yi, xi] = 0
             else:
-                tend_array[y_idx, x_idx] = tEnd_yyyymmdd
-                tbreak_array[y_idx, x_idx] = tBreak_yyyymmdd
+                bands_dict['tEnd'][yi, xi] = tEnd_val[i]
+                bands_dict['tBreak'][yi, xi] = tBreak_val[i]
 
-            # Band 3: is_break status
-            is_break_array[y_idx, x_idx] = is_break
+            # Fill Dynamic Bands (scaling by 10000)
+            for name in extra_band_names:
+                val = dynamic_data[name][i]
+                if not pd.isna(val):
+                    if name == "ndvi_last_segment":
+                        bands_dict[name][yi, xi] = int(np.round(val * 10000))
+                    else:
+                        bands_dict[name][yi, xi] = int(np.round(val))
 
-            # Band 4: NDVI scaled by 10000 (keep as -9999 if not available)
-            if not pd.isna(ndvi):
-                ndvi_array[y_idx, x_idx] = int(np.round(ndvi * 10000))
+    # 5. Stack all arrays in order
+    # The order will be: tEnd, tBreak, is_break, ndvi_last_segment, then end_bands, then start_bands
+    ordered_keys = ['tEnd', 'tBreak', 'is_break'] + extra_band_names
+    final_stack = np.stack([bands_dict[key] for key in ordered_keys])
 
-    # Stack into 4-band array
-    raster_4band = np.stack([tend_array, tbreak_array, is_break_array, ndvi_array])
+    return final_stack
 
-    return raster_4band
-
-def save_geotiff(array, output_file, raster_params, source_crs='EPSG:32629', target_crs='EPSG:32629'):
+# (MC feb 2026) Add a function to save the raster array as a GeoTIFF, with proper metadata and reprojecti  on if needed, 
+# and with dynamic handling of the additional bands specified in the start_bands and end_bands lists
+def save_geotiff(array, output_file, raster_params, end_bands, start_bands, source_crs, target_crs):
     """
-    Save a 4-band numpy array as a GeoTIFF file, reprojecting to target CRS if needed.
+    Save a multi-band numpy array as a GeoTIFF, reprojecting if needed.
+
+    Below is the original docstring: Save a 4-band numpy array as a GeoTIFF file, reprojecting to target CRS if needed.
 
     Parameters:
     -----------
@@ -733,74 +800,72 @@ def save_geotiff(array, output_file, raster_params, source_crs='EPSG:32629', tar
     To get original NDVI values, divide by 10000 (e.g., 5432 -> 0.5432).
     """
 
-    band_nodata = [-9999, -9999, -99, -9999]
+    # 1. Dynamically determine band count and names
+    num_bands = array.shape[0]
+    fixed_names = ['last_tEnd', 'last_tBreak', 'is_break']
+    extra_names = ['ndvi_last_segment'] + end_bands + start_bands
+    band_names = fixed_names + extra_names
 
-    # If target CRS is different from source, reproject directly
+    # Ensure names match array depth (sanity check)
+    if len(band_names) != num_bands:
+        raise ValueError(f"Metadata names ({len(band_names)}) don't match array bands ({num_bands})")
+
+    # 2. Setup metadata
+    # Note: is_break is technically int8, but for simplicity in a multi-band 
+    # Tiff, we use int32 for all to maintain consistency with the dates and scaled NDVI.
+    kwargs = {
+        'driver': 'GTiff',
+        'height': raster_params['height'],
+        'width': raster_params['width'],
+        'count': num_bands,
+        'dtype': rasterio.int32,
+        'crs': source_crs,
+        'transform': raster_params['transform'],
+        'nodata': -9999,
+        'compress': 'lzw'  # Added compression because multi-band files get large!
+    }
+
     if source_crs != target_crs:
         from rasterio.io import MemoryFile
-
+        
         with MemoryFile() as memfile:
-            with memfile.open(
-                driver='GTiff',
-                height=raster_params['height'],
-                width=raster_params['width'],
-                count=4,
-                dtype=rasterio.int32,  # Use int32 for all bands (NDVI scaled by 10000)
-                crs=source_crs,
-                transform=raster_params['transform'],
-                nodata=-9999
-            ) as src:
-                for i in range(4):
-                    src.write(array[i], i + 1)
-                    src.set_band_description(i + 1, ['last_tEnd', 'last_tBreak', 'is_break', 'ndvi_last_segment'][i])
+            with memfile.open(**kwargs) as src:
+                # Write data and set names to the memory-buffered source
+                for i in range(num_bands):
+                    src.write(array[i].astype(np.int32), i + 1)
+                    src.set_band_description(i + 1, band_names[i])
 
-                # Calculate reprojection parameters
-                transform, width, height = calculate_default_transform(
+                # Calculate reprojection
+                dst_transform, dst_width, dst_height = calculate_default_transform(
                     src.crs, target_crs, src.width, src.height, *src.bounds)
-
-                kwargs = src.meta.copy()
-                kwargs.update({
+                
+                dst_kwargs = src.meta.copy()
+                dst_kwargs.update({
                     'crs': target_crs,
-                    'transform': transform,
-                    'width': width,
-                    'height': height
+                    'transform': dst_transform,
+                    'width': dst_width,
+                    'height': dst_height
                 })
 
-                # Write directly to output file with reprojection
-                with rasterio.open(output_file, 'w', **kwargs) as dst:
+                with rasterio.open(output_file, 'w', **dst_kwargs) as dst:
                     for i in range(1, src.count + 1):
-                        dst.set_band_description(i, src.descriptions[i-1])
                         reproject(
                             source=rasterio.band(src, i),
                             destination=rasterio.band(dst, i),
                             src_transform=src.transform,
                             src_crs=src.crs,
-                            dst_transform=transform,
+                            dst_transform=dst_transform,
                             dst_crs=target_crs,
                             resampling=Resampling.nearest)
-
+                        dst.set_band_description(i, src.descriptions[i-1])
     else:
-        # If no reprojection needed, save with int32 for all bands
-        with rasterio.open(
-            output_file,
-            'w',
-            driver='GTiff',
-            height=raster_params['height'],
-            width=raster_params['width'],
-            count=4,
-            dtype=rasterio.int32,  # Use int32 for all bands (NDVI scaled by 10000)
-            crs=source_crs,
-            transform=raster_params['transform'],
-            nodata=-9999
-        ) as dst:
-            # Write all 4 bands
-            for i in range(4):
+        # No reprojection needed
+        with rasterio.open(output_file, 'w', **kwargs) as dst:
+            for i in range(num_bands):
                 dst.write(array[i].astype(np.int32), i + 1)
-                dst.set_band_description(i + 1, ['last_tEnd', 'last_tBreak', 'is_break', 'ndvi_last_segment'][i])
-                # Set band-specific nodata values in tags
-                dst.update_tags(i + 1, nodata_value=str(band_nodata[i]))
+                dst.set_band_description(i + 1, band_names[i])
 
-def save_vector_points(results_df, output_file, target_crs="EPSG:32629", source_crs="EPSG:32629"):
+def save_vector_points(results_df, output_file, target_crs=TARGET_CRS, source_crs=SOURCE_CRS):
     """
     Save all points from the results DataFrame as a vector file.
 
@@ -840,7 +905,6 @@ def save_vector_points(results_df, output_file, target_crs="EPSG:32629", source_
     gdf.to_file(output_file, driver='GPKG')
 
     return len(gdf)
-
 
 def create_qgis_style_file_from_pixels(results_df, output_style_file):
     """
@@ -944,10 +1008,10 @@ def create_qgis_style_file_from_pixels(results_df, output_style_file):
     print(f"Years in data: {years}")
 
 def process_directory_to_geotiff(input_dir, output_raster_files, output_vector_files, date_ranges_list,
-                                target_crs="EPSG:32629", boundary_shapefile=None, qgis_style_file=False):
+                                source_crs=SOURCE_CRS, target_crs=TARGET_CRS, boundary_shapefile=None, qgis_style_file=False):
     """
-    Main function to process all parquet files in a directory and save multiple 4-band GeoTIFFs
-    (one for each date range) by reading each parquet file only ONCE.
+    Original docstring (with only 4 bands), now updated to reflect the dynamic handling of additional bands and the fact that we process all date ranges in a single pass through the parquet files:
+    Main function to process all parquet files in a directory and save multiple 4-band GeoTIFFs (one for each date range) by reading each parquet file only ONCE.
     Uses UTM coordinates throughout and only reprojects at the end if needed.
 
     The output GeoTIFF contains 4 bands:
@@ -955,6 +1019,7 @@ def process_directory_to_geotiff(input_dir, output_raster_files, output_vector_f
     - Band 2: last_tBreak (YYYYMMDD format, 0 for no break, -9999 for NoData)
     - Band 3: is_break (1=valid_break, 0=no_break, -1=uncertain_break, -99=NoData)
     - Band 4: ndvi_last_segment (int32 scaled by 10000, -9999 for NoData)
+    - Additional bands can be added dynamically based on the start_bands and end_bands lists, and will be included in the output raster after the 4 main bands.
 
     Parameters:
     -----------
@@ -1015,11 +1080,13 @@ def process_directory_to_geotiff(input_dir, output_raster_files, output_vector_f
         print(f"Creating raster with dimensions: {raster_params['width']} x {raster_params['height']}")
         print(f"Resolution: {raster_params['resolution'][0]} x {raster_params['resolution'][1]} meters")
 
-        # Create 4-band raster array
-        raster_array = create_raster_array_from_pixels(results_df, raster_params)
+        # MC: Create raster array from pixel data, including dynamic handling of additional bands
+        raster_array = create_raster_array_from_pixels(results_df, raster_params,start_bands, end_bands) # MC add start_bands and end_bands as parameters to create_raster_array_from_pixels to handle the dynamic additional bands in the output raster
+
+        print('raster array created with shape:', raster_array.shape)
 
         # Save to GeoTIFF (with optional reprojection)
-        save_geotiff(raster_array, output_raster_file, raster_params, source_crs='EPSG:32629', target_crs=target_crs)
+        save_geotiff(raster_array, output_raster_file, raster_params,  end_bands, start_bands, source_crs, target_crs)
 
         print(f"4-band GeoTIFF saved to: {output_raster_file}")
         print(f"  - Band 1: last_tEnd (YYYYMMDD format)")
@@ -1029,7 +1096,7 @@ def process_directory_to_geotiff(input_dir, output_raster_files, output_vector_f
 
         # Save vector points if requested
         if output_vector_file is not None:
-            num_points_saved = save_vector_points(results_df, output_vector_file, target_crs, source_crs='EPSG:32629')
+            num_points_saved = save_vector_points(results_df, output_vector_file, target_crs, source_crs)
             print(f"Vector points saved to: {output_vector_file}")
             print(f"Points saved to vector file: {num_points_saved}")
 
