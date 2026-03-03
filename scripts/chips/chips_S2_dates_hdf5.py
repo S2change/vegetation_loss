@@ -54,10 +54,10 @@ BREAK_DATE_BAND = 1
 IS_BREAK_BAND = 3
 
 # Output directory for chips
-OUTPUT_DIR = r"E:\T29TQG\hdf5_chips"
+OUTPUT_DIR = r"E:\T29TQG\03_hdf5_comparsion_test"
 
 # Output filename pattern
-OUTPUT_FILENAME = 'T29TQG_20180101_20211231_{}-{}.tif'
+OUTPUT_FILENAME = 'compression_reference_T29TQG_20180101_20211231_{}-{}.tif'
 
 # Chip dimensions in pixels
 CHIP_WIDTH = 256
@@ -637,7 +637,7 @@ if __name__ == "__main__":
             print(f"  Wrote chip: {out_filepath}")
             print(f"  Chip processing time: {chip_processing_time:.2f} minutes")
 
-            if chip_count >= 5:
+            if chip_count >= 20:
                 break
 
         end = time.time()

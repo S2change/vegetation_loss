@@ -9,7 +9,7 @@ if not files:
     print("No .tif files found in the directory.")
     exit()
 
-largest_file, largest_area = files[0], 0
+largest_file, largest_area, largest_bounds = files[0], 0, None
 for f in files:
     with rasterio.open(os.path.join(folder_path, f)) as src:
         b = src.bounds
@@ -17,5 +17,7 @@ for f in files:
     if area > largest_area:
         largest_area = area
         largest_file = f
+        largest_bounds = b
 
 print(os.path.join(folder_path, largest_file))
+print(f"  left={largest_bounds.left:.1f}  right={largest_bounds.right:.1f}  bottom={largest_bounds.bottom:.1f}  top={largest_bounds.top:.1f}")

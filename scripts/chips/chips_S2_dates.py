@@ -52,11 +52,11 @@ MIN_DATE = datetime(2017, 10, 1)
 MAX_DATE = datetime(2022, 3, 1)
 
 # Output directory for chips
-OUTPUT_DIR = r"E:\T29TQG\testing_single_band_validation"
+OUTPUT_DIR = r"E:\T29TQG\improved_tif_chips"
 
 # Output filename pattern, {} will be filled with the x, y coordinates of the first pixel in the chip
 # '(tile)_(break's start date)_(break's end date)_{}-{}.tif
-OUTPUT_FILENAME = 'fixed_ordering_T29TQG_20180101_20211231_{}-{}.tif'
+OUTPUT_FILENAME = 'T29TQG_20180101_20211231_{}-{}.tif'
 
 # Chip dimensions in pixels
 CHIP_WIDTH = 256
@@ -927,8 +927,8 @@ if __name__ == "__main__":
             chip_processing_time = (chip_end_time - chip_start_time) / 60
             print(f"  Wrote chip: {out_filepath}")
             print(f"  Processing time = {chip_processing_time:.2f} minutes")
-            if chip_count >= 5:
-                break
+            # if chip_count >= 5:
+            #     break
         
         end = time.time()
         total_time_minutes = (end - start) / 60
