@@ -165,7 +165,6 @@ def check_header_compatibility(folder_4b, folder_2b, filenames):
             if (src4.bounds != src2.bounds or
                     src4.transform != src2.transform or
                     src4.shape != src2.shape):
-                print(f"  WARNING: Header mismatch for {filename}")
                 header_failed.append(filename)
             else:
                 header_passed.append(filename)
