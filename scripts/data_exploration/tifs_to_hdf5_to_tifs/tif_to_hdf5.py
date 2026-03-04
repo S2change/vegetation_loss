@@ -198,13 +198,22 @@ with h5py.File(h5_filename, 'w') as h5f:
         path_2b = os.path.join(folder_path_2bands, filename)
 
         with rasterio.open(path_4b) as src4, rasterio.open(path_2b) as src2:
-            # Read full arrays — use mask_rows/mask_cols to select pixels
-            # band axis is 0, so read() returns (bands, height, width)
+            # Convert mask x/y coordinates to row/col indices for this TIF's grid
+            tif_rows, tif_cols = rasterio.transform.rowcol(src4.transform, xs_flat, ys_flat)
+            tif_rows = np.array(tif_rows)
+            tif_cols = np.array(tif_cols)
+
+            # Identify which mask pixels fall within this TIF's bounds
+            valid = ((tif_rows >= 0) & (tif_rows < src4.height) &
+                     (tif_cols >= 0) & (tif_cols < src4.width))
+
             data4 = src4.read()  # (4, H, W)
             data2 = src2.read()  # (2, H, W)
-
-            # Stack bands and select masked pixels
             data_all = np.concatenate([data4, data2], axis=0)  # (6, H, W)
-            dset_values[i, :, :] = data_all[:, mask_rows, mask_cols]
+
+            # Fill output with nodata, then populate valid pixels
+            out = np.full((nbands, total_masked_pixels), 65535, dtype=np.uint16)
+            out[:, valid] = data_all[:, tif_rows[valid], tif_cols[valid]]
+            dset_values[i, :, :] = out
 
 print(f"Done! Created {h5_filename} with {total_masked_pixels} masked pixels and {len(sorted_files)} timesteps.")
