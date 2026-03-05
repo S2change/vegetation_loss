@@ -3,98 +3,77 @@ import h5py
 import numpy as np
 import rasterio
 from rasterio.transform import from_origin
-from datetime import date
 
-'''
-This script reads the HDF5 file created by the previous scripts, extracts the data, and reconstructs georeferenced GeoTIFF files for each timestamp. The output GeoTIFFs will be compressed using LZW and will include the original spatial metadata for accurate georeferencing.
-
-Make sure to adjust the paths and configurations as needed before running the script.
-
-Key Steps:
-1. Load the HDF5 file and read the datasets (values, xs, ys, ts).
-2. Determine the spatial grid dimensions and calculate the affine transform.
-3. For each timestamp, create a GeoTIFF file with the corresponding bands, applying or not  LZW compression (reduces file size by 50%) and using the original spatial metadata for georeferencing.  
-'''
-
-# --- CONFIGURATION CONSTANTS ---
-h5_filename = r'C:\Users\mlc\OneDrive - Universidade de Lisboa\Documents\temp\test_tif_to_hdf5\satellite_data_6bands.h5'
+# --- CONFIGURATION ---
+hdf5_path = r'C:\Users\mlc\OneDrive - Universidade de Lisboa\Documents\temp\test_tif_to_hdf5\test_1667647823345_6bands.h5'
 output_dir = r'C:\Users\mlc\OneDrive - Universidade de Lisboa\Documents\temp\test_tif_to_hdf5\reconstructed_tifs'
-USE_COMPRESSION = False  # Set to False to disable LZW compression
-CONVERT_TO_YYYYMMDD=False  # Set to True to use human-readable dates in filenames, False to use raw timestamps UNIX milliseconds from 1979/1/1
-crs = "EPSG:32629"
-target_band_order = ["B2", "B3", "B4", "B8", "B11", "B12"] # hdf5 file contains bands labels, so we can use them to determine the order of bands in the output GeoTIFFs
-# -------------------------------
+CRS = "EPSG:32629"
+target_band_order = ["B2", "B3", "B4", "B8", "B11", "B12"]
+NODATA_VAL = 65535 
 
-if not os.path.exists(output_dir):
-    os.makedirs(output_dir)
+def export_multiband_hdf5(hdf5_path, output_dir, prefix, crs, target_band_order):
+    num_bands = len(target_band_order)
+    os.makedirs(output_dir, exist_ok=True)
 
-with h5py.File(h5_filename, 'r') as h5f:
-    # 1. Load coordinates and metadata
-    xs = h5f['xs'][:]
-    ys = h5f['ys'][:]
-    ts_ordinals = h5f['ts'][:]
-    ts_milliseconds = h5f['original_timestamps'][:] # The new dataset with raw timestamps
+    with h5py.File(hdf5_path, 'r') as f:
+        print("Loading coordinates...")
+        # Rounding to 1 decimal place to ensure grid alignment
+        xs = np.round(f['xs'][:], 1)
+        ys = np.round(f['ys'][:], 1)
+        ts_val = f['ts'][0]  # Get the single global timestamp
+        values_ds = f['values']
 
-    # Handle both byte-strings and regular strings
-    stored_bands = [b.decode('ascii') if isinstance(b, bytes) else b for b in h5f.attrs['band_names']]
-    print(f"Bands found in HDF5: {stored_bands}")
-    
-    band_indices = [stored_bands.index(b) for b in target_band_order]
-    
-    # 2. Determine grid dimensions
-    unique_xs = np.sort(np.unique(xs))
-    unique_ys = np.sort(np.unique(ys))[::-1] 
-    
-    width = len(unique_xs)
-    height = len(unique_ys)
-    res_x = unique_xs[1] - unique_xs[0]
-    res_y = unique_ys[0] - unique_ys[1] 
-    
-    transform = from_origin(unique_xs[0], unique_ys[0], res_x, res_y)
-    
-    # 3. Process each timestamp
-    for i in range(len(ts_ordinals)):
-        if CONVERT_TO_YYYYMMDD:
-            # Result: 2017-04-08.tif
-            date_str = date.fromordinal(ts_ordinals[i]).strftime('%Y-%m-%d')
-        else:
-            # Result: 1491651247967.tif
-            date_str = str(ts_milliseconds[i])
-        tif_name = f"sentinel2_6bands_{date_str}.tif"
-        output_path = os.path.join(output_dir, tif_name)
+        print("Calculating unique grid...")
+        unique_xs = np.unique(xs)
+        unique_ys = np.sort(np.unique(ys))[::-1]
         
-        if os.path.exists(output_path):
-            print(f"Skipping: {tif_name} (already exists)")
-            continue
+        cols, rows = len(unique_xs), len(unique_ys)
+        print(f"Grid Dimensions: {rows} rows x {cols} cols")
+        
+        res_x = unique_xs[1] - unique_xs[0]
+        res_y = unique_ys[0] - unique_ys[1]
+        transform = from_origin(unique_xs[0], unique_ys[0], res_x, res_y)
+        
+        # Initialize the 3D grid
+        grid = np.full((num_bands, rows, cols), NODATA_VAL, dtype=np.uint16)
+        
+        print("Mapping coordinates to pixels...")
+        col_indices = np.searchsorted(unique_xs, xs)
+        row_indices = np.searchsorted(-unique_ys, -ys)
+
+        for b_idx in range(num_bands):
+            print(f"Processing Band {target_band_order[b_idx]}...")
+            # values shape is (1, 6, 66911408)
+            # We take the 0th slice of the 1st dimension, and b_idx of the 2nd
+            band_data = values_ds[0, b_idx, :]
             
-        print(f"Exporting: {tif_name} (Compression: {USE_COMPRESSION})")
-        
-        # Base metadata
-        meta = {
-            'driver': 'GTiff',
-            'height': height,
-            'width': width,
-            'count': len(target_band_order),
-            'dtype': 'uint16',
-            'crs': crs,
-            'transform': transform,
-            'nodata': 65535,  # CHANGED: Set to 65535 to match your data range and avoid confusion with valid 0 values
-            'tiled': True,
-            'blockxsize': 256,
-            'blockysize': 256
-        }
-        
-        # Conditionally add compression parameters
-        if USE_COMPRESSION:
-            meta.update({
-                'compress': 'lzw',
-                'predictor': 2
-            })
-        
-        with rasterio.open(output_path, 'w', **meta) as dst:
-            for dst_idx, src_idx in enumerate(band_indices, start=1):
-                band_data_2d = h5f['values'][i, src_idx, :].reshape(height, width)
-                dst.write(band_data_2d.astype('uint16'), dst_idx)
-                dst.set_band_description(dst_idx, target_band_order[dst_idx-1])
+            # Map the 66 million points into the 2D grid
+            grid[b_idx, row_indices, col_indices] = band_data
+            
+            # Validation print
+            valid_pixels = np.count_nonzero(band_data != NODATA_VAL)
+            print(f"  - Band {b_idx} contains {valid_pixels:,} valid pixels.")
 
-print(f"\nDone! Files processed in {output_dir}")
+        # Cleanup timestamp for filename
+        ts_str = ts_val.decode() if isinstance(ts_val, bytes) else str(ts_val)
+        output_path = os.path.join(output_dir, f"{prefix}_{ts_str}.tif")
+        
+        print(f"Writing to GeoTIFF: {output_path}...")
+        with rasterio.open(
+            output_path, 'w',
+            driver='GTiff',
+            height=rows, width=cols,
+            count=num_bands,
+            dtype='uint16',
+            crs=crs,
+            transform=transform,
+            nodata=NODATA_VAL,
+            compress='lzw'
+        ) as dst:
+            dst.write(grid)
+            dst.descriptions = tuple(target_band_order)
+        
+        print("Export Complete.")
+
+# Run
+export_multiband_hdf5(hdf5_path, output_dir, 'test', CRS, target_band_order)
