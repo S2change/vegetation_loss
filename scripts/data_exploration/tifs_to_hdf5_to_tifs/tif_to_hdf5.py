@@ -36,12 +36,6 @@ folder_path_2bands = r"C:\Users\Public\Documents\s2_images_B2_B11\T29TQG"
 vector_mask_path   = r"C:\path\to\your\mask.shp"
 h5_filename        = os.path.join(r"E:\T29TQG", 'T29TQG_6bands_masked.h5')
 
-folder_path = r'C:\Users\mlc\OneDrive - Universidade de Lisboa\Documents\temp\test_tif_to_hdf5'
-folder_path_4bands = os.path.join(folder_path, '4bands')
-folder_path_2bands = os.path.join(folder_path, '2bands')
-vector_mask_path   = os.path.join(folder_path, 'portugal_continental_32629.gpkg')
-h5_filename = os.path.join(folder_path, 'test_1667647823345_6bands.h5')
-
 # Folder '4bands' (B3, B4, B8, B12) followed by Folder '2bands' (B2, B11)
 band_names = ["B3", "B4", "B8", "B12", "B2", "B11"]
 NODATA_VAL = 65535
@@ -259,3 +253,4 @@ if __name__ == "__main__":
             band_names, total_masked_pixels, xs_flat, ys_flat)
 
     print(f"Done! Created {h5_filename} with {total_masked_pixels} masked pixels and {len(sorted_files)} timesteps.")
+
