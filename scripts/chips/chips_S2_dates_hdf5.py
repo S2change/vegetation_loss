@@ -81,6 +81,15 @@ S2_NODATA = 65535
 # NODATA value for output raster
 OUTPUT_NODATA = 0
 
+# Optional date range filter. Set to None to use all available timesteps.
+# Use format: datetime(2024, 12, 31)
+MIN_DATE = None
+MAX_DATE = None
+
+# Optional spatial bounding box filter. Set to None to use full INPUT_TIF extent.
+# Use format: (left, right, bottom, top) in the same CRS as INPUT_TIF.
+SPATIAL_BOUNDS: tuple | None = None
+
 # Band index to use for initial cascading selection (0-indexed)
 # After reordering to [B2, B11, B3, B4, B8, B12], index 0 is B2
 SELECTION_BAND_INDEX = 0
@@ -128,7 +137,7 @@ class HDF5DataLoader:
     Pre-computes spatial mappings to avoid repeated coordinate lookups.
     """
 
-    def __init__(self, hdf5_path, input_tif_bounds):
+    def __init__(self, hdf5_path, input_tif_bounds, min_date=None, max_date=None):
         """
         Initialize HDF5 loader with spatial filtering.
 
@@ -138,6 +147,10 @@ class HDF5DataLoader:
             Path to HDF5 file
         input_tif_bounds : tuple
             Bounds (left, right, bottom, top) to filter spatially
+        min_date : datetime, optional
+            Only use timesteps on or after this date
+        max_date : datetime, optional
+            Only use timesteps on or before this date
         """
         print(f"\nInitializing HDF5 data loader: {hdf5_path}")
         self.hdf5_path = hdf5_path
@@ -146,8 +159,8 @@ class HDF5DataLoader:
             # Load coordinate arrays
             xs = h5f['xs'][:]
             ys = h5f['ys'][:]
-            self.ts = h5f['ts'][:]
-            self.original_timestamps = h5f['original_timestamps'][:]
+            ts_all = h5f['ts'][:]
+            original_timestamps_all = h5f['original_timestamps'][:]
 
             # Get band names and count
             if 'band_names' in h5f.attrs:
@@ -160,6 +173,20 @@ class HDF5DataLoader:
 
             print(f"  Total timesteps: {self.n_timesteps}")
             print(f"  Total pixels: {len(xs)}")
+
+        # Filter timesteps by date range
+        time_mask = np.ones(len(ts_all), dtype=bool)
+        if min_date is not None:
+            time_mask &= ts_all >= min_date.toordinal()
+        if max_date is not None:
+            time_mask &= ts_all <= max_date.toordinal()
+
+        self.time_indices = np.where(time_mask)[0]  # global HDF5 indices for filtered timesteps
+        self.ts = ts_all[time_mask]
+        self.original_timestamps = original_timestamps_all[time_mask]
+
+        if min_date is not None or max_date is not None:
+            print(f"  Date filter: {min_date} to {max_date} → {len(self.ts)} of {len(ts_all)} timesteps kept")
 
         # Apply spatial filtering
         minx, maxx, miny, maxy = input_tif_bounds
@@ -282,9 +309,9 @@ class HDF5DataLoader:
 
         with h5py.File(self.hdf5_path, 'r') as h5f:
             for i, time_idx in enumerate(time_indices):
-                # Read data for this timestep and these pixels only
-                # Shape: (bands, n_pixels)
-                timestep_data = h5f['values'][time_idx, :, global_pixel_indices]
+                # Map filtered time index to global HDF5 index
+                global_time_idx = int(self.time_indices[time_idx])
+                timestep_data = h5f['values'][global_time_idx, :, global_pixel_indices]
 
                 # Fill into grid using vectorized indexing
                 # Need to loop over bands or use proper broadcasting
@@ -485,8 +512,18 @@ if __name__ == "__main__":
         filter_bounds = (input_bounds.left, input_bounds.right, input_bounds.bottom, input_bounds.top)
         print(f"INPUT_TIF bounds: x=[{filter_bounds[0]}, {filter_bounds[1]}], y=[{filter_bounds[2]}, {filter_bounds[3]}]")
 
+        if SPATIAL_BOUNDS is not None:
+            sb_left, sb_right, sb_bottom, sb_top = SPATIAL_BOUNDS
+            filter_bounds = (
+                max(filter_bounds[0], sb_left),
+                min(filter_bounds[1], sb_right),
+                max(filter_bounds[2], sb_bottom),
+                min(filter_bounds[3], sb_top),
+            )
+            print(f"Spatial filter applied. Intersected bounds: x=[{filter_bounds[0]}, {filter_bounds[1]}], y=[{filter_bounds[2]}, {filter_bounds[3]}]")
+
         # Initialize HDF5 data loader
-        hdf5_loader = HDF5DataLoader(S2_HDF5_FILE, filter_bounds)
+        hdf5_loader = HDF5DataLoader(S2_HDF5_FILE, filter_bounds, min_date=MIN_DATE, max_date=MAX_DATE)
 
         metadata = src.meta.copy()
         band_names = src.descriptions
