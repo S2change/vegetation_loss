@@ -36,9 +36,22 @@ folder_path_2bands = r"C:\Users\Public\Documents\s2_images_B2_B11\T29TQG"
 vector_mask_path   = r"C:\path\to\your\mask.shp"
 h5_filename        = os.path.join(r"E:\T29TQG", 'T29TQG_6bands_masked.h5')
 
+##########
+folder_path = r'C:\Users\mlc\OneDrive - Universidade de Lisboa\Documents\temp\test_tif_to_hdf5'
+folder_path_4bands = os.path.join(folder_path, '4bands')
+folder_path_2bands = os.path.join(folder_path, '2bands')
+vector_mask_path   = os.path.join(folder_path, 'portugal_continental_32629.gpkg')
+h5_filename = os.path.join(folder_path, 'test_1667647823345_6bands.h5')
+
+folder_path_4bands = r"H:\s2_images\T29TQG"
+folder_path_2bands = r"D:\s2_images_B2_B11\T29TQG"
+h5_filename = os.path.join(folder_path, 'T29TQG_6bands.h5') # output in folder_path (to be changed)
+#########
+
 # Folder '4bands' (B3, B4, B8, B12) followed by Folder '2bands' (B2, B11)
 band_names = ["B3", "B4", "B8", "B12", "B2", "B11"]
 NODATA_VAL = 65535
+APPLY_MASK_FILTER = False # Set to True to exclude files with mismatched headers (potentially due to mask filtering)
 
 def parse_and_sort_files(folder):
     """Parse timestamps from filenames and return metadata sorted by date."""
@@ -154,20 +167,24 @@ def rasterize_mask(clipped_mask, ref_meta, ref_transform):
     return total_masked_pixels, xs_flat, ys_flat
 
 
-def check_header_compatibility(folder_4b, folder_2b, filenames):
+def check_header_compatibility(folder_4b, folder_2b, filenames,apply_mask_filter=True):
     """Verify that 4-band and 2-band files have matching spatial headers."""
-    print("Checking 4-band/2-band header compatibility...")
+    if apply_mask_filter:
+        print("Checking 4-band/2-band header compatibility...")
     header_failed = []
     header_passed = []
     for filename in filenames:
-        with rasterio.open(os.path.join(folder_4b, filename)) as src4, \
-             rasterio.open(os.path.join(folder_2b, filename)) as src2:
-            if (src4.bounds != src2.bounds or
-                    src4.transform != src2.transform or
-                    src4.shape != src2.shape):
-                header_failed.append(filename)
-            else:
-                header_passed.append(filename)
+        if apply_mask_filter:
+            with rasterio.open(os.path.join(folder_4b, filename)) as src4, \
+                rasterio.open(os.path.join(folder_2b, filename)) as src2:
+                if (src4.bounds != src2.bounds or
+                        src4.transform != src2.transform or
+                        src4.shape != src2.shape):
+                    header_failed.append(filename)
+                else:
+                    header_passed.append(filename)
+        else:
+            header_passed.append(filename)
 
     if header_failed:
         print(f"Excluding {len(header_failed)} file(s) with mismatched headers:")
@@ -246,11 +263,10 @@ if __name__ == "__main__":
     ref_meta.update({"count": 1})
     total_masked_pixels, xs_flat, ys_flat = rasterize_mask(clipped_mask, ref_meta, ref_transform)
 
-    sorted_files = check_header_compatibility(folder_path_4bands, folder_path_2bands, aligned_files)
+    sorted_files = check_header_compatibility(folder_path_4bands, folder_path_2bands, aligned_files, apply_mask_filter=APPLY_MASK_FILTER)
     file_metadata = [m for m in file_metadata if m['filename'] in set(sorted_files)]
 
     write_hdf5(h5_filename, sorted_files, file_metadata, folder_path_4bands, folder_path_2bands,
             band_names, total_masked_pixels, xs_flat, ys_flat)
 
     print(f"Done! Created {h5_filename} with {total_masked_pixels} masked pixels and {len(sorted_files)} timesteps.")
-
