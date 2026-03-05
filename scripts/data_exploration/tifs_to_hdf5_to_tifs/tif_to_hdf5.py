@@ -36,9 +36,15 @@ folder_path_2bands = r"C:\Users\Public\Documents\s2_images_B2_B11\T29TQG"
 vector_mask_path   = r"C:\path\to\your\mask.shp"
 h5_filename        = os.path.join(r"E:\T29TQG", 'T29TQG_6bands_masked.h5')
 
+folder_path = r'C:\Users\mlc\OneDrive - Universidade de Lisboa\Documents\temp\test_tif_to_hdf5'
+folder_path_4bands = os.path.join(folder_path, '4bands')
+folder_path_2bands = os.path.join(folder_path, '2bands')
+vector_mask_path   = os.path.join(folder_path, 'portugal_continental_32629.gpkg')
+h5_filename = os.path.join(folder_path, 'test_1667647823345_6bands.h5')
+
 # Folder '4bands' (B3, B4, B8, B12) followed by Folder '2bands' (B2, B11)
 band_names = ["B3", "B4", "B8", "B12", "B2", "B11"]
-
+NODATA_VAL = 65535
 
 def parse_and_sort_files(folder):
     """Parse timestamps from filenames and return metadata sorted by date."""
@@ -215,7 +221,15 @@ def write_hdf5(h5_filename, sorted_files, file_metadata, folder_4b, folder_2b,
                 data2 = src2.read()  # (2, H, W)
                 data_all = np.concatenate([data4, data2], axis=0)  # (6, H, W)
 
-                out = np.full((nbands, total_masked_pixels), 65535, dtype=np.uint16)
+                # --- NEW: EFFICIENT MASKING LOGIC ---
+                # Create a 2D mask (H, W) where True means at least one band is NoData
+                # axis=0 refers to the bands dimension
+                nodata_mask = np.any(data_all == NODATA_VAL, axis=0)
+                
+                # Apply mask to all 6 bands at once: if one is 65535, all become 65535
+                data_all[:, nodata_mask] = NODATA_VAL
+
+                out = np.full((nbands, total_masked_pixels), NODATA_VAL, dtype=np.uint16)
                 out[:, valid] = data_all[:, tif_rows[valid], tif_cols[valid]]
                 dset_values[i, :, :] = out
 
