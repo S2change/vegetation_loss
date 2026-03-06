@@ -46,7 +46,7 @@ from ccd_results_utils.segment_identification import yyyymmdd_to_ordinal
 # ============================================================================
 
 # HDF5 file path
-S2_HDF5_FILE = r"E:\T29TQG\T29TQG_6bands.h5"
+S2_HDF5_FILE = r"E:\T29TQG\T29TQG_6bands_lzf_compression.h5"
 
 # Input TIF file path and relevant bands
 INPUT_TIF = r"C:\Users\Public\Documents\new_parquets_2017_2025\tabular\T29TQG\processed_outputs\rasters\output_raster_ccd_20180101_to_20211231.tif"
@@ -54,10 +54,10 @@ BREAK_DATE_BAND = 1
 IS_BREAK_BAND = 3
 
 # Output directory for chips
-OUTPUT_DIR = r"E:\T29TQG\03_hdf5_comparsion_test"
+OUTPUT_DIR = r"E:\T29TQG\05_hdf5_filters_test"
 
 # Output filename pattern
-OUTPUT_FILENAME = 'compression_reference_T29TQG_20180101_20211231_{}-{}.tif'
+OUTPUT_FILENAME = 'spatial_filter_test_1_T29TQG_20180101_20211231_{}-{}.tif'
 
 # Chip dimensions in pixels
 CHIP_WIDTH = 256
@@ -88,7 +88,7 @@ MAX_DATE = None
 
 # Optional spatial bounding box filter. Set to None to use full INPUT_TIF extent.
 # Use format: (left, right, bottom, top) in the same CRS as INPUT_TIF.
-SPATIAL_BOUNDS: tuple | None = None
+SPATIAL_BOUNDS = (699960, 702520, 4646360, 4648920)
 
 # Band index to use for initial cascading selection (0-indexed)
 # After reordering to [B2, B11, B3, B4, B8, B12], index 0 is B2
@@ -674,7 +674,7 @@ if __name__ == "__main__":
             print(f"  Wrote chip: {out_filepath}")
             print(f"  Chip processing time: {chip_processing_time:.2f} minutes")
 
-            if chip_count >= 20:
+            if chip_count >= 5:
                 break
 
         end = time.time()
