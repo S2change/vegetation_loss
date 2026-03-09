@@ -5,11 +5,15 @@ import rasterio
 from rasterio.transform import from_origin
 
 # --- CONFIGURATION ---
-hdf5_path = r'C:\Users\mlc\OneDrive - Universidade de Lisboa\Documents\temp\test_tif_to_hdf5\test_1667647823345_6bands.h5'
+hdf5_path = r'C:\Users\mlc\OneDrive - Universidade de Lisboa\Documents\temp\test_tif_to_hdf5\T29TNE_6bands_20210101_20210630.h5'
+# where tifs will be saved
 output_dir = r'C:\Users\mlc\OneDrive - Universidade de Lisboa\Documents\temp\test_tif_to_hdf5\reconstructed_tifs'
 CRS = "EPSG:32629"
-target_band_order = ["B2", "B3", "B4", "B8", "B11", "B12"]
+# Order of bands in hdf5
+target_band_order = ["B3", "B4", "B8", "B12", "B2", "B11"]
 NODATA_VAL = 65535 
+IDX=-3
+# index of the timestamp to process
 
 def export_multiband_hdf5(hdf5_path, output_dir, prefix, crs, target_band_order):
     num_bands = len(target_band_order)
@@ -20,7 +24,7 @@ def export_multiband_hdf5(hdf5_path, output_dir, prefix, crs, target_band_order)
         # Rounding to 1 decimal place to ensure grid alignment
         xs = np.round(f['xs'][:], 1)
         ys = np.round(f['ys'][:], 1)
-        ts_val = f['ts'][0]  # Get the single global timestamp
+        ts_val = f['ts'][IDX]  # Get the single global timestamp
         values_ds = f['values']
 
         print("Calculating unique grid...")
@@ -45,7 +49,7 @@ def export_multiband_hdf5(hdf5_path, output_dir, prefix, crs, target_band_order)
             print(f"Processing Band {target_band_order[b_idx]}...")
             # values shape is (1, 6, 66911408)
             # We take the 0th slice of the 1st dimension, and b_idx of the 2nd
-            band_data = values_ds[0, b_idx, :]
+            band_data = values_ds[IDX, b_idx, :]
             
             # Map the 66 million points into the 2D grid
             grid[b_idx, row_indices, col_indices] = band_data
@@ -76,4 +80,4 @@ def export_multiband_hdf5(hdf5_path, output_dir, prefix, crs, target_band_order)
         print("Export Complete.")
 
 # Run
-export_multiband_hdf5(hdf5_path, output_dir, 'test', CRS, target_band_order)
+export_multiband_hdf5(hdf5_path, output_dir, 'TNE_hdf5', CRS, target_band_order)
