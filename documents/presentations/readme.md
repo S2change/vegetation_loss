@@ -8,7 +8,7 @@
 
 - 11 de março de 2026 (reunião DGT/ISA/LIP/CNCA) on-line
 
-  [Apresentação (Power Point)](https://ulisboa-my.sharepoint.com/:p:/g/personal/mlc_office365_ulisboa_pt/IQDURNhbmW2SQrFi8nPL0tsBAfloWxbFupcqW0wXhLyQJPk?e=cvkeCb)
+  [Apresentação (Power Point)](https://ulisboa-my.sharepoint.com/:p:/g/personal/mlc_office365_ulisboa_pt/IQA5M3rzjtdETb9qQKzFzQOqAcT7_hqvMQwoyf91kM8beLM?e=i59Wiq)
 
 ## 2025
 
