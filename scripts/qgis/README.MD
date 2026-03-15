@@ -27,10 +27,7 @@ temp_raster_reference= os.path.join(working_dir, "harmonized_to_tifs") # tempora
 
 
 
-# other possibilities
-
-   
-# B. Access chips and apply DL model
+# Other available scripts
 
 2. (optional if A) Execute in QGIS `qgis_read_reference_data_set_and_CCD_vector.py`. Set `CLEAR=True` to clear the current QGIS project. The legend for the burned area indicates the month and the labels indicate the day. If available, add to the map the vectorized CCD raw results results for the same ROI and time period of the reference data. Use same legend for both reference and vectorized CCD datasets (but `width` is different to distinguish both data sets).
 3. In QGIS, execute `qgis_add_chips_boundaries_to_project.py` to create a layer that shows the locations of the available chips available in `chip_source_folder`; 
