@@ -8,7 +8,6 @@ import rasterio.transform
 from datetime import datetime, timezone
 from shapely.geometry import box
 import geopandas as gpd
-import sys
 
 '''
 This script reads 10-band GeoTIFF files from a specified folder, filters out files with no overlap
