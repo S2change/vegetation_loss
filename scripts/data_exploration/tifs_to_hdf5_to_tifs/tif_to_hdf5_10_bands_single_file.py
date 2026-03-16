@@ -226,16 +226,16 @@ def append_hdf5(h5_filename, new_files, new_metadata, folder_tifs, xs_flat, ys_f
         if skipped:
             print(f"Skipping {skipped} file(s) already present in HDF5.")
 
-        nbands             = h5f["values"].shape[1]
+        nbands = h5f["values"].shape[1]
         total_masked_pixels = h5f["values"].shape[2]
-        current_t          = h5f["values"].shape[0]
-        new_t              = current_t + len(new_files)
+        current_t = h5f["values"].shape[0]
+        new_t = current_t + len(new_files)
 
         h5f["values"].resize(new_t, axis=0)
         h5f["ts"].resize((new_t,))
         h5f["original_timestamps"].resize((new_t,))
 
-        h5f["ts"][current_t:]                 = [m['ordinal']      for m in new_metadata]
+        h5f["ts"][current_t:] = [m['ordinal'] for m in new_metadata]
         h5f["original_timestamps"][current_t:] = [m['timestamp_ms'] for m in new_metadata]
 
         for i, filename in enumerate(new_files):

@@ -211,6 +211,7 @@ def write_hdf5(h5_filename, sorted_files, file_metadata, folder_4b, folder_2b,
             "values",
             shape=(len(sorted_files), nbands, total_masked_pixels),
             dtype='uint16',
+            maxshape=(None, nbands, total_masked_pixels), # None = Additional time steps can be appended in future
             chunks=(1, nbands, min(1000000, total_masked_pixels)),
             compression="lzf"
         )
@@ -218,10 +219,11 @@ def write_hdf5(h5_filename, sorted_files, file_metadata, folder_4b, folder_2b,
         h5f.attrs['band_names'] = [n.encode('ascii') for n in band_names]
         h5f.create_dataset("xs", data=xs_flat, dtype='int32')
         h5f.create_dataset("ys", data=ys_flat, dtype='int32')
-        h5f.create_dataset("ts", data=[m['ordinal'] for m in file_metadata], dtype='int32')
+        h5f.create_dataset("ts", data=[m['ordinal'] for m in file_metadata], dtype='int32', maxshape=(None,))
         h5f.create_dataset("original_timestamps",
                            data=[m['timestamp_ms'] for m in file_metadata],
-                           dtype='int64')
+                           dtype='int64',
+                           maxshape=(None,))
 
         for i, filename in enumerate(sorted_files):
             print(f"Processing {i+1}/{len(sorted_files)}: {filename}")
