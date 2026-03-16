@@ -1,21 +1,37 @@
+import datetime
 import os
+import sys
 import h5py
 import numpy as np
 import rasterio
 from rasterio.transform import from_origin
 
+'''
+This script reconstructs georeferenced TIFF files from a multiband HDF5 file containing satellite data.
+The HDF5 file is expected to have the following structure:
+- 'xs': 1D array of x coordinates (longitude)
+- 'ys': 1D array of y coordinates (latitude)
+- 'ts': 1D array of timestamps; ts_values are ordinal dates (Proleptic Gregorian Ordinal: Day 1: 0001-01-01), like 737849 for 2021-02-28
+- 'values': 3D array of satellite values
+The script processes the HDF5 data to create a 3D grid (bands x rows x cols) and writes it to a GeoTIFF file with appropriate georeferencing and metadata.
+'''
+
 # --- CONFIGURATION ---
-hdf5_path = r'C:\Users\mlc\OneDrive - Universidade de Lisboa\Documents\temp\test_tif_to_hdf5\T29TNE_6bands_20210101_20210630.h5'
+hdf5_path = r'C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\T29TNE_6bands_20210101_20210630.h5'
 # where tifs will be saved
-output_dir = r'C:\Users\mlc\OneDrive - Universidade de Lisboa\Documents\temp\test_tif_to_hdf5\reconstructed_tifs'
+output_dir = r'C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\reconstructed_tifs'
 CRS = "EPSG:32629"
 # Order of bands in hdf5
 target_band_order = ["B3", "B4", "B8", "B12", "B2", "B11"]
 NODATA_VAL = 65535 
-IDX=-3
-# index of the timestamp to process
+# select timestamp to determine which timestamp is going to be processed; if None, will process the first timestamp in the hdf5 file
+DATE_OUTPUT='2021-03-25'
 
-def export_multiband_hdf5(hdf5_path, output_dir, prefix, crs, target_band_order):
+
+def main():
+    export_multiband_hdf5(hdf5_path, output_dir, "T29TNE_6bands", CRS, target_band_order,DATE_OUTPUT)
+
+def export_multiband_hdf5(hdf5_path, output_dir, prefix, crs, target_band_order, DATE_OUTPUT):
     num_bands = len(target_band_order)
     os.makedirs(output_dir, exist_ok=True)
 
@@ -24,6 +40,23 @@ def export_multiband_hdf5(hdf5_path, output_dir, prefix, crs, target_band_order)
         # Rounding to 1 decimal place to ensure grid alignment
         xs = np.round(f['xs'][:], 1)
         ys = np.round(f['ys'][:], 1)
+        # compute IDX based on DATE_OUTPUT
+        ts_values = f['ts'][:]  # ts_values are ordinal dates, like 737849
+        ts_str_values = [datetime.datetime.fromordinal(o).strftime('%Y-%m-%d') for o in ts_values]  # Convert to YYYY-MM-DD format strings
+        print(f"Timestamps in HDF5 (YYYY-MM-DD): {ts_str_values}")
+        
+        if DATE_OUTPUT is not None:
+            # choose the date closest to the specified DATE_OUTPUT
+            date_output_dt = datetime.datetime.strptime(DATE_OUTPUT, '%Y-%m-%d')
+            date_diffs = [abs((datetime.datetime.fromordinal(o) - date_output_dt).days) for o in ts_values]
+            IDX = date_diffs.index(min(date_diffs))
+            DATE_OUTPUT = ts_str_values[IDX]  # Update DATE_OUTPUT to the actual closest date found in the HDF5
+            print(f"Selected timestamp '{DATE_OUTPUT}' found at index {IDX}.")  
+        else:
+            IDX = 0
+            DATE_OUTPUT = ts_str_values[0]
+            print(f"No DATE_OUTPUT specified. Defaulting to first timestamp at date {DATE_OUTPUT}.")
+
         ts_val = f['ts'][IDX]  # Get the single global timestamp
         values_ds = f['values']
 
@@ -59,8 +92,7 @@ def export_multiband_hdf5(hdf5_path, output_dir, prefix, crs, target_band_order)
             print(f"  - Band {b_idx} contains {valid_pixels:,} valid pixels.")
 
         # Cleanup timestamp for filename
-        ts_str = ts_val.decode() if isinstance(ts_val, bytes) else str(ts_val)
-        output_path = os.path.join(output_dir, f"{prefix}_{ts_str}.tif")
+        output_path = os.path.join(output_dir, f"{prefix}_{DATE_OUTPUT}.tif")
         
         print(f"Writing to GeoTIFF: {output_path}...")
         with rasterio.open(
@@ -79,5 +111,4 @@ def export_multiband_hdf5(hdf5_path, output_dir, prefix, crs, target_band_order)
         
         print("Export Complete.")
 
-# Run
-export_multiband_hdf5(hdf5_path, output_dir, 'TNE_hdf5', CRS, target_band_order)
+main()
