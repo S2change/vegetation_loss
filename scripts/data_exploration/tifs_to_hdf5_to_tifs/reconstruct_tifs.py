@@ -17,19 +17,19 @@ The script processes the HDF5 data to create a 3D grid (bands x rows x cols) and
 '''
 
 # --- CONFIGURATION ---
-hdf5_path = r'C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\T29TNE_6bands_20210101_20210630.h5'
+hdf5_path = r"E:\T29TQG\CNCA_tifs_to_hdf5_tests\T29TQG_CNCA_test.h5"
 # where tifs will be saved
-output_dir = r'C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\reconstructed_tifs'
+output_dir = r"E:\T29TQG\CNCA_tifs_to_hdf5_tests\T29TQG_reconstructed_tifs\new_hdf5"
 CRS = "EPSG:32629"
 # Order of bands in hdf5
-target_band_order = ["B3", "B4", "B8", "B12", "B2", "B11"]
+target_band_order = ["B3", "B4", "B8", "B12"]
 NODATA_VAL = 65535 
 # select timestamp to determine which timestamp is going to be processed; if None, will process the first timestamp in the hdf5 file
-DATE_OUTPUT='2021-03-25'
+DATE_OUTPUT=None
 
 
 def main():
-    export_multiband_hdf5(hdf5_path, output_dir, "T29TNE_6bands", CRS, target_band_order,DATE_OUTPUT)
+    export_multiband_hdf5(hdf5_path, output_dir, "T29TQG_CNCA_test_third_file", CRS, target_band_order,DATE_OUTPUT)
 
 def export_multiband_hdf5(hdf5_path, output_dir, prefix, crs, target_band_order, DATE_OUTPUT):
     num_bands = len(target_band_order)
@@ -53,7 +53,7 @@ def export_multiband_hdf5(hdf5_path, output_dir, prefix, crs, target_band_order,
             DATE_OUTPUT = ts_str_values[IDX]  # Update DATE_OUTPUT to the actual closest date found in the HDF5
             print(f"Selected timestamp '{DATE_OUTPUT}' found at index {IDX}.")  
         else:
-            IDX = 0
+            IDX = 2
             DATE_OUTPUT = ts_str_values[0]
             print(f"No DATE_OUTPUT specified. Defaulting to first timestamp at date {DATE_OUTPUT}.")
 

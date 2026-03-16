@@ -33,15 +33,15 @@ Note: TIFs with no overlap with the mask bounding box are discarded. TIFs that p
 overlap are kept — the boolean pixel mask determines which pixels are written to the HDF5.
 '''
 
-folder_path_tifs = r"D:\s2_images\T29TQG"
-vector_mask_path = r"C:\path\to\your\mask.shp"
-h5_filename      = os.path.join(r"E:\T29TQG", 'T29TQG_10bands_masked.h5')
+folder_path_tifs = r"E:\T29TQG\CNCA_tifs_to_hdf5_tests\T29TQG_tifs_for_testing\create_new_hdf5"
+vector_mask_path = r"C:\Users\isa127909\Downloads\mask_continental_portugal_3763.gpkg"
+h5_filename      = os.path.join(r"E:\T29TQG\CNCA_tifs_to_hdf5_tests", 'T29TQG_CNCA_test.h5')
 
-# B2, B3, B4, B5, B6, B7, B8, B8a, B11, B12
-band_names = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8a", "B11", "B12"]
+# B2, B3, B4, B5, B6, B7, B8, B8a, B11, B12 for 10 bands
+band_names = ["B3", "B4", "B8", "B12"]
 
-MIN_DATE = datetime(2021, 1, 1).date()
-MAX_DATE = datetime(2021, 6, 30).date()
+MIN_DATE = None # datetime(2017, 1, 1) # set a minimum date to filter out files with earlier timestamps
+MAX_DATE = None # datetime(2030, 1, 1) # set a maximum date to filter out files with later timestamps
 
 
 def get_reference_tif(folder, filenames, all_bounds):
