@@ -1,4 +1,5 @@
 # Assumptions
+
 1. GeoTIFF files are stored all in the same folder
 2. The GeoTIFF file name includes the timestamp (e.g. a sequence of 13 digits as in `S2SR_image_1667647823345.tif`)
 3. CRS: Ideally GeoTIFF files should use CRS EPSG:32629 (UTM 29N). The CRS of the output hdf5 file is identical to the CRS of the input GeoTIFF files.
