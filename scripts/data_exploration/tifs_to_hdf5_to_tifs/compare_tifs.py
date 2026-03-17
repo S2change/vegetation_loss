@@ -3,8 +3,8 @@ import rasterio
 import rasterio.transform
 from rasterio.windows import from_bounds
 
-tif_a = r"E:\T29TQG\CNCA_tifs_to_hdf5_tests\T29TQG_tifs_for_testing\create_new_hdf5\S2SR_image_1497179412353.tif"
-tif_b = r"E:\T29TQG\CNCA_tifs_to_hdf5_tests\T29TQG_reconstructed_tifs\new_hdf5\T29TQG_CNCA_test_second_file_2017-04-15.tif"
+tif_a = r"E:\T29TQG\CNCA_tifs_to_hdf5_tests\T29TQG_tifs_for_testing\append_to_hdf5\S2SR_image_1522063466000.tif"
+tif_b = r"E:\T29TQG\CNCA_tifs_to_hdf5_tests\T29TQG_reconstructed_tifs\appended_hdf5\T29TQG_CNCA_appended_2_2017-04-15.tif"
 
 with rasterio.open(tif_a) as a, rasterio.open(tif_b) as b:
     # Check CRS and resolution are compatible

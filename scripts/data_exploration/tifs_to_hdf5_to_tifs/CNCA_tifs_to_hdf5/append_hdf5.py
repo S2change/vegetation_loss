@@ -19,11 +19,11 @@ Inputs:
 - 'h5_filename': Path to the existing HDF5 file to append to.
 '''
 
-folder_path_tifs = r"D:\s2_images\T29TQG"
-h5_filename      = os.path.join(r"E:\T29TQG", 'T29TQG_10bands_masked.h5')
+folder_path_tifs = r"E:\T29TQG\CNCA_tifs_to_hdf5_tests\T29TQG_tifs_for_testing\append_to_hdf5"
+h5_filename      = os.path.join(r"E:\T29TQG\CNCA_tifs_to_hdf5_tests", 'T29TQG_CNCA_test_appended.h5')
 
-MIN_DATE = datetime(2021, 1, 1).date()
-MAX_DATE = datetime(2021, 6, 30).date()
+MIN_DATE = None
+MAX_DATE = None
 
 
 def append_hdf5(h5_filename, new_files, new_metadata, folder_tifs, xs_flat, ys_flat):
