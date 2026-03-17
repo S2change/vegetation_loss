@@ -5,7 +5,7 @@ import rasterio
 import rasterio.transform
 from datetime import datetime
 
-from hdf5_utils import parse_and_sort_files, NODATA_VAL
+from hdf5_utils import parse_and_sort_files, INPUT_NODATA_VAL, OUTPUT_NODATA_VAL
 
 '''
 Appends new timesteps to an existing HDF5 file created by create_hdf5.py.
@@ -86,10 +86,10 @@ def append_hdf5(h5_filename, new_files, new_metadata, folder_tifs, xs_flat, ys_f
 
                 data_all = src.read()  # (10, H, W)
 
-                nodata_mask = np.any(data_all == NODATA_VAL, axis=0)
-                data_all[:, nodata_mask] = NODATA_VAL
+                nodata_mask = np.any(data_all == INPUT_NODATA_VAL, axis=0)
+                data_all[:, nodata_mask] = OUTPUT_NODATA_VAL
 
-                out = np.full((nbands, total_masked_pixels), NODATA_VAL, dtype=np.uint16)
+                out = np.full((nbands, total_masked_pixels), OUTPUT_NODATA_VAL, dtype=np.uint16)
                 out[:, valid] = data_all[:, tif_rows[valid], tif_cols[valid]]
                 h5f["values"][current_t + i, :, :] = out
 

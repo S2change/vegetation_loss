@@ -8,7 +8,7 @@ from datetime import datetime
 from shapely.geometry import box
 import geopandas as gpd
 
-from hdf5_utils import parse_and_sort_files, read_all_bounds, NODATA_VAL
+from hdf5_utils import parse_and_sort_files, read_all_bounds, INPUT_NODATA_VAL, OUTPUT_NODATA_VAL
 
 '''
 Creates a new HDF5 file from 10-band GeoTIFF files in a specified folder.
@@ -201,12 +201,12 @@ def write_hdf5(h5_filename, sorted_files, file_metadata, folder_tifs,
                 data_all = src.read()  # (10, H, W)
 
                 # Create a 2D mask (H, W) where True means at least one band is NoData
-                nodata_mask = np.any(data_all == NODATA_VAL, axis=0)
+                nodata_mask = np.any(data_all == INPUT_NODATA_VAL, axis=0)
 
-                # Apply mask to all 10 bands at once: if one is 65535, all become 65535
-                data_all[:, nodata_mask] = NODATA_VAL
+                # Apply mask to all 10 bands at once: if one is NoData, all become NoData
+                data_all[:, nodata_mask] = OUTPUT_NODATA_VAL
 
-                out = np.full((nbands, total_masked_pixels), NODATA_VAL, dtype=np.uint16)
+                out = np.full((nbands, total_masked_pixels), OUTPUT_NODATA_VAL, dtype=np.uint16)
                 out[:, valid] = data_all[:, tif_rows[valid], tif_cols[valid]]
                 dset_values[i, :, :] = out
 

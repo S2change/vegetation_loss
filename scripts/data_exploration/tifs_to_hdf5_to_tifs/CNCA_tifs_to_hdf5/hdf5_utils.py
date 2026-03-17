@@ -3,7 +3,8 @@ import re
 import rasterio
 from datetime import datetime, timezone
 
-NODATA_VAL = 65535
+INPUT_NODATA_VAL = 65535
+OUTPUT_NODATA_VAL = 65535
 
 
 def parse_and_sort_files(folder, min_date, max_date):
