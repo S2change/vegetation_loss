@@ -2,7 +2,7 @@
 
 1. GeoTIFF files are stored all in the same folder
 2. The GeoTIFF file name includes the timestamp (e.g. a sequence of 13 digits as in `S2SR_image_1667647823345.tif`). Parsing is done by `hdf5_utils.parse_and_sort_files` and should be adapted to CNCA file names.
-3. CRS: Ideally GeoTIFF files should use CRS EPSG:32629 (WGS 84 / UTM zone 29N). The CRS of the output hdf5 file is identical to the CRS of the input GeoTIFF files.
+3. CRS: Ideally the output HDF5 file should store coordinates in CRS EPSG:32629 (WGS 84 / UTM zone 29N). In the current code, the CRS of the output hdf5 file is identical to the CRS of the input GeoTIFF files, but this can be changed in case the CRS of the GeoTIFF files is not EPSG:32629.
 4. Vector mask: an input vector mask (any CRS) is used to filters out TIFs with no overlap with a vector mask, rasterizes the mask to identify valid pixels, and writes the sparse pixel time series to an HDF5 file. Only pixels inside the vector mask are stored in the HDF5 file.
 5. Output *nodata* value (either missing data in GeoTIFF files or pixels outside the vector mask but within the output spatial grid) is defined in `hdf5_utils.NODATA_VAL`
 
