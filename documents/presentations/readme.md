@@ -10,6 +10,38 @@
 
   [Apresentação (Power Point)](https://ulisboa-my.sharepoint.com/:p:/g/personal/mlc_office365_ulisboa_pt/IQA5M3rzjtdETb9qQKzFzQOqAcT7_hqvMQwoyf91kM8beLM?e=i59Wiq)
 
+  <details>
+    
+    <summary>Agenda and actions</summary>
+
+    ## Agendas Discussed
+    
+    - **INCD → CNCA transition**: INCD legally renamed to CNCA; HPC platform Cirrus unchanged; LIP continues HPC support
+    - **CCD algorithm (Approach A) review**: Low false detection but high omission; unsuitable as primary detection method; useful for building reference dataset
+    - **Deep Learning model (Approach B)**: Pre-trained foundation model with fine-tuning; preliminary results show cleaner change patches than CCD; training on Deucalion cluster (Calient)
+    - **DL processing pipeline**: Sentinel-2 images → spatial chips (overlapping before/after pairs) → model outputs change probability → spatial & temporal aggregation → final binary map
+    - **HDF5 role**: Retained as key intermediate format for fast chip generation; persistent HDF5 per tile (Option B) preferred over on-the-fly creation
+    - **Sentinel-2 data pipeline (LIP/CNCA)**: Full 2015–2025 time series processed; 10 bands; cloud masking via Omnicloud; data served via STAC Catalog on S3
+    - **Tile overlap handling**: Clipping tile boundaries agreed for current phase; focus on largest tile TNE first
+    - **DGT mask strategy**: Prefer applying masks at processing stage rather than embedding in shared HDF5
+    - **GPU on Cirrus**: DL inference needs GPUs but modest memory; strategy is to parallelise many chips
+    - **GDAL vs xarray+HDF5**: Current xarray+HDF5 stack kept; no time to revisit
+    - Both ISA and LIP contracts end ~June 2026
+    
+    ---
+    
+    ## Action Items
+    
+    - [ ]  **ISA** — Share HDF5 creation code (GitHub repo) with Jorge, CC: Pedro, Ricardo, Gonçalo
+    - [ ]  **LIP** — Review HDF5 code; assess feasibility of persistent update/append functionality
+    - [ ]  **LIP**— Confirm final HDF5 strategy (persistent vs on-the-fly) and communicate to ISA → *ASAP*
+    - [ ]  **LIP** — Make Sentinel-2 time series (2015–2025, 10 bands) available via STAC Catalog with cloud metadata
+    - [ ]  **ISA** — Continue fine-tuning DL model; target model ready → *End April 2026*
+    - [ ]  **ISA + LIP** — Work in parallel on chip generation pipeline on Cirrus; discuss storage for temp chip files
+    - [ ]  **ISA + LIP** — Produce joint written roadmap of remaining tasks, owners, and schedule → *25 March 2026*
+
+    </details>
+
 ## 2025
 
 - (18 de junho de 2025) Reunião com DGT/CNCA: [Presentation (pdf)](Reuniao_DGT_CNCA_ISA_18_junho_2025.pdf)
