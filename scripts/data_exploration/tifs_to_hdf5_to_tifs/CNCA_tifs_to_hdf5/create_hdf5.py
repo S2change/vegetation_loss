@@ -37,45 +37,11 @@ folder_path_tifs = r"E:\T29TQG\CNCA_tifs_to_hdf5_tests\T29TQG_tifs_for_testing\c
 vector_mask_path = r"C:\Users\isa127909\Downloads\mask_continental_portugal_3763.gpkg"
 h5_filename      = os.path.join(r"E:\T29TQG\CNCA_tifs_to_hdf5_tests", 'T29TQG_CNCA_test.h5')
 
+# B2, B3, B4, B5, B6, B7, B8, B8a, B11, B12 for 10 bands
+band_names = ["B3", "B4", "B8", "B12"]
+
 MIN_DATE = None # datetime(2017, 1, 1) # set a minimum date to filter out files with earlier timestamps
 MAX_DATE = None # datetime(2030, 1, 1) # set a maximum date to filter out files with later timestamps
-
-def main():
-    band_names = get_band_names_from_tifs(folder_path_tifs)
-
-    file_metadata = parse_and_sort_files(folder_path_tifs, MIN_DATE, MAX_DATE)
-    sorted_files = [m['filename'] for m in file_metadata]
-
-    all_bounds = read_all_bounds(folder_path_tifs, sorted_files)
-
-    largest_file, ref_crs, ref_transform, ref_meta = get_reference_tif(
-        folder_path_tifs, sorted_files, all_bounds
-    )
-
-    clipped_mask = clip_vector_mask(vector_mask_path, all_bounds[largest_file], ref_crs)
-
-    aligned_files = filter_by_mask_overlap(all_bounds, clipped_mask)
-    file_metadata = [m for m in file_metadata if m['filename'] in set(aligned_files)]
-
-    ref_meta.update({"count": 1})
-    total_masked_pixels, xs_flat, ys_flat = rasterize_mask(clipped_mask, ref_meta, ref_transform)
-
-    write_hdf5(h5_filename, aligned_files, file_metadata, folder_path_tifs,
-               band_names, total_masked_pixels, xs_flat, ys_flat)
-
-    print(f"Done! Created {h5_filename} with {total_masked_pixels} masked pixels and {len(aligned_files)} timesteps.")
-
-
-def get_band_names_from_tifs(folder):
-    """Read band names from the descriptions of the first TIF found in the folder."""
-    tif_files = [f for f in os.listdir(folder) if f.lower().endswith('.tif') or f.lower().endswith('.tiff')]
-    if not tif_files:
-        raise FileNotFoundError(f"No TIF files found in {folder}")
-    with rasterio.open(os.path.join(folder, tif_files[0])) as src:
-        descriptions = src.descriptions
-    band_names = [d if d else f"Band_{i+1}" for i, d in enumerate(descriptions)]
-    print(f"  Band names from TIF: {band_names}")
-    return band_names
 
 
 def get_reference_tif(folder, filenames, all_bounds):
@@ -212,5 +178,24 @@ def write_hdf5(h5_filename, sorted_files, file_metadata, folder_tifs,
 
 
 if __name__ == "__main__":
-    main()
+    file_metadata = parse_and_sort_files(folder_path_tifs, MIN_DATE, MAX_DATE)
+    sorted_files = [m['filename'] for m in file_metadata]
 
+    all_bounds = read_all_bounds(folder_path_tifs, sorted_files)
+
+    largest_file, ref_crs, ref_transform, ref_meta = get_reference_tif(
+        folder_path_tifs, sorted_files, all_bounds
+    )
+
+    clipped_mask = clip_vector_mask(vector_mask_path, all_bounds[largest_file], ref_crs)
+
+    aligned_files = filter_by_mask_overlap(all_bounds, clipped_mask)
+    file_metadata = [m for m in file_metadata if m['filename'] in set(aligned_files)]
+
+    ref_meta.update({"count": 1})
+    total_masked_pixels, xs_flat, ys_flat = rasterize_mask(clipped_mask, ref_meta, ref_transform)
+
+    write_hdf5(h5_filename, aligned_files, file_metadata, folder_path_tifs,
+               band_names, total_masked_pixels, xs_flat, ys_flat)
+
+    print(f"Done! Created {h5_filename} with {total_masked_pixels} masked pixels and {len(aligned_files)} timesteps.")

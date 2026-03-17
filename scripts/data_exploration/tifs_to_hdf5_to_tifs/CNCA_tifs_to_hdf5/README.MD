@@ -14,6 +14,7 @@
     - `folder_path_tifs`: Directory containing the 10-band GeoTIFF files.
     - `vector_mask_path`: Path to vector file (shapefile, GeoJSON, etc, any CRS) defining the region of interest.
     - `h5_filename`: Path for the output HDF5 file to be created.
+    - `band_names`: List of Sentinel-2 band names that will used as column names in the outputted HDF5. Order should be the same order that the bands appear in the GeoTIFF files.
     - `MIN_DATE`, `MAX_DATE`: `None` or `datetime(y, m, d)`, defining the period of interest (if None, all GeoTIFF file are processed)
 
 2. `append_hdf5.py`: Appends new timesteps to an existing HDF5 file created by `create_hdf5.py`. Timestamps already present in the HDF5 are skipped automatically. The spatial
