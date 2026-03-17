@@ -11,8 +11,14 @@
 
     Inputs:
     - `folder_path_tifs`: Directory containing the 10-band GeoTIFF files.
-    - 'vector_mask_path': Path to vector file (shapefile, GeoJSON, etc, any CRS) defining the region of interest.
-    - 'h5_filename': Path for the output HDF5 file to be created.
-    - `MIN_DATE`, `MAX_DATE`: None or datetime(y, m, d), defining the period of interest (if None, all GeoTIFF file are processed)
+    - `vector_mask_path`: Path to vector file (shapefile, GeoJSON, etc, any CRS) defining the region of interest.
+    - `h5_filename`: Path for the output HDF5 file to be created.
+    - `MIN_DATE`, `MAX_DATE`: `None` or `datetime(y, m, d)`, defining the period of interest (if None, all GeoTIFF file are processed)
 
-2. `append_hdf5.py`: Appends new timesteps to an existing HDF5 file created by `create_hdf5.py`
+2. `append_hdf5.py`: Appends new timesteps to an existing HDF5 file created by `create_hdf5.py`. Timestamps already present in the HDF5 are skipped automatically. The spatial
+grid (xs, ys) is read from the existing HDF5 file and new TIFs must cover the same pixel footprint.
+
+    Inputs:
+    - `folder_path_tifs`: Directory containing the 10-band GeoTIFF files.
+    - `h5_filename`: Path to the existing HDF5 file to append to.
+    - `MIN_DATE`, `MAX_DATE`: `None` or `datetime(y, m, d)`, defining the period of interest (if None, all GeoTIFF file are processed) 
