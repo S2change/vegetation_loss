@@ -44,6 +44,40 @@ MIN_DATE = None # datetime(2017, 1, 1) # set a minimum date to filter out files 
 MAX_DATE = None # datetime(2030, 1, 1) # set a maximum date to filter out files with later timestamps
 
 
+def main():
+    """
+    Main Steps:
+    - Parses and sorts input directory of GeoTIFFs
+    - Identifies largest tif, uses that as a reference tif
+    - Clip input vector_mask_path by reference tif
+    - Filters out tifs that have no overlap with reference tif
+    - Rasterize mask to get bool pixels and total pixel count
+    - Iterate through input GeoTIFFs, saving pixels that overlap rasterized mask to the HDF5
+        - If any of the bands for a pixel have NODATA, then all bands are set to NODATA
+    """
+    file_metadata = parse_and_sort_files(folder_path_tifs, MIN_DATE, MAX_DATE)
+    sorted_files = [m['filename'] for m in file_metadata]
+
+    all_bounds = read_all_bounds(folder_path_tifs, sorted_files)
+
+    largest_file, ref_crs, ref_transform, ref_meta = get_reference_tif(
+        folder_path_tifs, sorted_files, all_bounds
+    )
+
+    clipped_mask = clip_vector_mask(vector_mask_path, all_bounds[largest_file], ref_crs)
+
+    aligned_files = filter_by_mask_overlap(all_bounds, clipped_mask)
+    file_metadata = [m for m in file_metadata if m['filename'] in set(aligned_files)]
+
+    ref_meta.update({"count": 1})
+    total_masked_pixels, xs_flat, ys_flat = rasterize_mask(clipped_mask, ref_meta, ref_transform)
+
+    write_hdf5(h5_filename, aligned_files, file_metadata, folder_path_tifs,
+               band_names, total_masked_pixels, xs_flat, ys_flat)
+
+    print(f"Done! Created {h5_filename} with {total_masked_pixels} masked pixels and {len(aligned_files)} timesteps.")
+    
+
 def get_reference_tif(folder, filenames, all_bounds):
     """Find the largest TIF by bounding box area and return its metadata."""
     print("Finding largest TIF as spatial reference...")
@@ -178,24 +212,4 @@ def write_hdf5(h5_filename, sorted_files, file_metadata, folder_tifs,
 
 
 if __name__ == "__main__":
-    file_metadata = parse_and_sort_files(folder_path_tifs, MIN_DATE, MAX_DATE)
-    sorted_files = [m['filename'] for m in file_metadata]
-
-    all_bounds = read_all_bounds(folder_path_tifs, sorted_files)
-
-    largest_file, ref_crs, ref_transform, ref_meta = get_reference_tif(
-        folder_path_tifs, sorted_files, all_bounds
-    )
-
-    clipped_mask = clip_vector_mask(vector_mask_path, all_bounds[largest_file], ref_crs)
-
-    aligned_files = filter_by_mask_overlap(all_bounds, clipped_mask)
-    file_metadata = [m for m in file_metadata if m['filename'] in set(aligned_files)]
-
-    ref_meta.update({"count": 1})
-    total_masked_pixels, xs_flat, ys_flat = rasterize_mask(clipped_mask, ref_meta, ref_transform)
-
-    write_hdf5(h5_filename, aligned_files, file_metadata, folder_path_tifs,
-               band_names, total_masked_pixels, xs_flat, ys_flat)
-
-    print(f"Done! Created {h5_filename} with {total_masked_pixels} masked pixels and {len(aligned_files)} timesteps.")
+    main()

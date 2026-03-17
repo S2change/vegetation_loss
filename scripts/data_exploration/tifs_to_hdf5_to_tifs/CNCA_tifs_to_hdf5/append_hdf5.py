@@ -26,6 +26,26 @@ MIN_DATE = None
 MAX_DATE = None
 
 
+def main():
+    """
+    Main Steps:
+    - Parse and sorts input directory of GeoTIFFs
+    - Checks existing timestamps in HDF5 file, filters any matches input directory
+    - Appends additional data to the HDF5 file
+    """
+    if not os.path.exists(h5_filename):
+        raise FileNotFoundError(f"Cannot append — HDF5 file not found: {h5_filename}")
+
+    file_metadata = parse_and_sort_files(folder_path_tifs, MIN_DATE, MAX_DATE)
+    sorted_files = [m['filename'] for m in file_metadata]
+
+    with h5py.File(h5_filename, 'r') as h5f:
+        xs_flat = h5f["xs"][:]
+        ys_flat = h5f["ys"][:]
+
+    append_hdf5(h5_filename, sorted_files, file_metadata, folder_path_tifs, xs_flat, ys_flat)
+
+
 def append_hdf5(h5_filename, new_files, new_metadata, folder_tifs, xs_flat, ys_flat):
     """Append new timesteps to an existing HDF5 file, skipping duplicates."""
     with h5py.File(h5_filename, 'a') as h5f:
@@ -77,14 +97,4 @@ def append_hdf5(h5_filename, new_files, new_metadata, folder_tifs, xs_flat, ys_f
 
 
 if __name__ == "__main__":
-    if not os.path.exists(h5_filename):
-        raise FileNotFoundError(f"Cannot append — HDF5 file not found: {h5_filename}")
-
-    file_metadata = parse_and_sort_files(folder_path_tifs, MIN_DATE, MAX_DATE)
-    sorted_files = [m['filename'] for m in file_metadata]
-
-    with h5py.File(h5_filename, 'r') as h5f:
-        xs_flat = h5f["xs"][:]
-        ys_flat = h5f["ys"][:]
-
-    append_hdf5(h5_filename, sorted_files, file_metadata, folder_path_tifs, xs_flat, ys_flat)
+    main()
