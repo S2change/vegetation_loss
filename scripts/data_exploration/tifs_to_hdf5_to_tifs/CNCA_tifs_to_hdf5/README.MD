@@ -24,3 +24,22 @@ grid (xs, ys) is read from the existing HDF5 file and new TIFs must cover the sa
     - `folder_path_tifs`: Directory containing the 10-band GeoTIFF files.
     - `h5_filename`: Path to the existing HDF5 file to append to.
     - `MIN_DATE`, `MAX_DATE`: `None` or `datetime(y, m, d)`, defining the period of interest (if None, all GeoTIFF file are processed) 
+
+# Example File Structure
+```
+portugal_S2_data
+    |-- hdf5
+        |-- T29SPB.h5
+        |-- T29TQG.h5
+        |-- ...
+    |-- input_tifs
+        |-- T29TQG
+            |-- S2SR_image_1497179412353.tif
+            |-- S2SR_image_1520335361869.tif
+            |-- ...
+        |-- T29TNE
+            |-- ...
+        |-- ...
+    |-- vector_mask
+        |-- mask_continental_portugal_3763.gpkg
+```
