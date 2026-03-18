@@ -34,6 +34,7 @@ from functools import wraps
 import h5py
 from affine import Affine
 from rasterio.windows import bounds as window_bounds
+from rasterio.crs import CRS
 
 # Add parent directory to path to import pyccd modules
 module_path = os.path.abspath(os.path.join('..'))
@@ -505,36 +506,43 @@ def ordinal_to_unix_timestamp(ordinal_array, ordinal_to_unix_map, output_nodata=
 if __name__ == "__main__":
     start = time.time()
 
-    # Open INPUT_TIF to get bounds and for chip generation
-    print("\nReading INPUT_TIF bounds...")
-    with rio.open(INPUT_TIF) as src:
-        input_bounds = src.bounds
-        filter_bounds = (input_bounds.left, input_bounds.right, input_bounds.bottom, input_bounds.top)
-        print(f"INPUT_TIF bounds: x=[{filter_bounds[0]}, {filter_bounds[1]}], y=[{filter_bounds[2]}, {filter_bounds[3]}]")
+    # Read spatial bounds and CRS from HDF5 attributes
+    print("\nReading bounds from HDF5 attributes...")
+    with h5py.File(S2_HDF5_FILE, 'r') as h5f:
+        hdf5_bounds = (
+            float(np.asarray(h5f.attrs['bounds_left'])),
+            float(np.asarray(h5f.attrs['bounds_right'])),
+            float(np.asarray(h5f.attrs['bounds_bottom'])),
+            float(np.asarray(h5f.attrs['bounds_top'])),
+        )
+        hdf5_crs = CRS.from_wkt(str(h5f.attrs['crs']))
+    filter_bounds = hdf5_bounds
+    print(f"HDF5 bounds: x=[{filter_bounds[0]}, {filter_bounds[1]}], y=[{filter_bounds[2]}, {filter_bounds[3]}]")
 
-        if SPATIAL_BOUNDS is not None:
-            sb_left, sb_right, sb_bottom, sb_top = SPATIAL_BOUNDS
-            filter_bounds = (
-                max(filter_bounds[0], sb_left),
-                min(filter_bounds[1], sb_right),
-                max(filter_bounds[2], sb_bottom),
-                min(filter_bounds[3], sb_top),
-            )
-            print(f"Spatial filter applied. Intersected bounds: x=[{filter_bounds[0]}, {filter_bounds[1]}], y=[{filter_bounds[2]}, {filter_bounds[3]}]")
+    if SPATIAL_BOUNDS is not None:
+        sb_left, sb_right, sb_bottom, sb_top = SPATIAL_BOUNDS
+        filter_bounds = (
+            max(filter_bounds[0], sb_left),
+            min(filter_bounds[1], sb_right),
+            max(filter_bounds[2], sb_bottom),
+            min(filter_bounds[3], sb_top),
+        )
+        print(f"Spatial filter applied. Intersected bounds: x=[{filter_bounds[0]}, {filter_bounds[1]}], y=[{filter_bounds[2]}, {filter_bounds[3]}]")
+
+    # Open INPUT_TIF for chip generation
+    print("\nOpening INPUT_TIF for chip generation...")
+    with rio.open(INPUT_TIF) as src:
 
         # Initialize HDF5 data loader
         hdf5_loader = HDF5DataLoader(S2_HDF5_FILE, filter_bounds, min_date=MIN_DATE, max_date=MAX_DATE)
 
-        metadata = src.meta.copy()
-        band_names = src.descriptions
+        metadata = {'driver': 'GTiff', 'crs': hdf5_crs}
 
         print(f"\nInput image size: {src.meta['width']} x {src.meta['height']}")
-        print(f"Number of bands: {src.count}")
-        print(f"Band names: {band_names}")
+        print(f"Input number of bands: {src.count}")
         print(f"Chip size: {CHIP_WIDTH} x {CHIP_HEIGHT}")
         print(f"Overlap: {OVERLAP} pixels")
         print(f"Output directory: {OUTPUT_DIR}")
-        print(f"Processing mode: HDF5 OPTIMIZED\n")
 
         # Create output directory if it doesn't exist
         os.makedirs(OUTPUT_DIR, exist_ok=True)
