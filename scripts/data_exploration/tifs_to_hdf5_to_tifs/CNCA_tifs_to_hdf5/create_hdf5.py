@@ -73,7 +73,7 @@ def main():
     total_masked_pixels, xs_flat, ys_flat = rasterize_mask(clipped_mask, ref_meta, ref_transform)
 
     write_hdf5(h5_filename, aligned_files, file_metadata, folder_path_tifs,
-               band_names, total_masked_pixels, xs_flat, ys_flat)
+               band_names, total_masked_pixels, xs_flat, ys_flat, ref_transform, ref_crs)
 
     print(f"Done! Created {h5_filename} with {total_masked_pixels} masked pixels and {len(aligned_files)} timesteps.")
     
@@ -165,7 +165,7 @@ def rasterize_mask(clipped_mask, ref_meta, ref_transform):
 
 
 def write_hdf5(h5_filename, sorted_files, file_metadata, folder_tifs,
-               band_names, total_masked_pixels, xs_flat, ys_flat):
+               band_names, total_masked_pixels, xs_flat, ys_flat, ref_transform, ref_crs):
     """Write sparse pixel time series to HDF5."""
     nbands = len(band_names)
     with h5py.File(h5_filename, 'w') as h5f:
@@ -179,6 +179,11 @@ def write_hdf5(h5_filename, sorted_files, file_metadata, folder_tifs,
         )
 
         h5f.attrs['band_names'] = [n.encode('ascii') for n in band_names]
+        h5f.attrs['crs'] = ref_crs.to_wkt()
+        h5f.attrs['bounds_left']   = float(xs_flat.min())
+        h5f.attrs['bounds_right']  = float(xs_flat.max()) + ref_transform.a
+        h5f.attrs['bounds_bottom'] = float(ys_flat.min()) + ref_transform.e  # e is negative
+        h5f.attrs['bounds_top']    = float(ys_flat.max())
         h5f.create_dataset("xs", data=xs_flat, dtype='int32')
         h5f.create_dataset("ys", data=ys_flat, dtype='int32')
         h5f.create_dataset("ts", data=[m['ordinal'] for m in file_metadata], dtype='int32', maxshape=(None,))
