@@ -1,3 +1,4 @@
+import random
 import sys
 import h5py
 import numpy as np
@@ -6,6 +7,7 @@ import rasterio
 from scipy.spatial import KDTree
 from datetime import date,datetime, timedelta
 import os
+import glob
 import geopandas as gpd
 from rasterio.transform import from_origin
 from rasterio.features import rasterize
@@ -22,14 +24,17 @@ Query:
 (3rd input) Delta=number of days, say Delta=45
 For all pixels where band3=1, I want to extract the sprectral values for the 6bands from the hdf5 file for all dates in the dhdf5 file from  'before'-Delta until  'after'+Delta
 (output) The output can be a dataframe with the pixel coordinates (xs,ys) , the ordinal dates (ts), and the spectral values for all 6 bands (from 'values')
+
+instructions to create ouput visual chips
+Now, I have my dataframe df with colums xs         ys      ts  mask_b3  band_1  band_2  band_3  band_4  band_5  band_6. I also have estimated the signal drop most significant date break_date_yyyyddmm. I want to create a function that uses df and break_date_yyyyddmm , and a path to store output files output_dir.
+The function should create 2 geotiff files both with TARGET_CRS (the same CRS used by  xs and ys in df). Each geotiff has 6 bands and should contain all pixels in df. The first geotiff 'before' is the time composite of spectral values up to and including break_date_yyyyddmm. The second is the time composite for dates after break_date_yyyyddmm. The time composite works is backwards for 'before' and forward for 'after'. It will use the first date where the pixel is not NODATA_VAL. If the pixel is NODATA_VAL then it looks for the following date (backwards for 'before' and forward for 'after'). If there are no NODATA value the pixel value in the composite should be PAD_VALUE.
+
 '''
 
 # --- CONFIGURATION ---
 GPKG_PATH = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\harmonized\BDR_expanded_v0.gpkg"
-H5_PATH = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\T29TNE_6bands_20180630_20211231.h5"
-RASTER_FOLDER = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\harmonized_to_tifs"
-RASTER_FOLDER_BEST_DATE=r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\tifs_at_best_break_date"
-VISUAL_CHIPS_FOLDER=r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\visual"
+LABEL_REF_DATASET="BDRexp_v0"
+
 DELTA = 45 # Days to expand date range on either side of the break date (can be adjusted as needed)
 TARGET_CRS = "EPSG:32629"
 NUMBER_BANDS_HDF5=6
@@ -37,49 +42,102 @@ NIR='band_3' # NIR is band 3 in the HDF5 file
 RED='band_2' # RED is band 2 in the HDF5 file
 #FID_TO_PROCESS = 309 #87 #309 # Id of the feature to process (adjust as needed)
 small_D = 100  # Extent size in meters (100m x 100m) - adjust as needed
-big_D=3000 # Extent to create raster and extract spectral data from hdf5 (to ultimately create visual chip)
+big_D=4000 # Extent to create raster and extract spectral data from hdf5 (to ultimately create visual chip)
 #prefix = f"BDRexp_{FID_TO_PROCESS}"
 RES=10 # Raster resolution in meters (adjust as needed)
 WINDOW_SIZE = 16 # Number of dates in the sliding window for break detection (adjust as needed)
 NODATA_VAL = 65535 # The value used in the hdf5 file to indicate NoData (adjust if different)
 PAD_VALUE=0 # output visual chip band value
-T_TEST_THRESHOLD=0.05
+T_TEST_THRESHOLD,T_TEST_LABEL=0.025,'025'
+MIN_REF_FEAT_AREA=4000 # 3ha
 #----------------------
 
-''' instructions to create ouput visual chips
-Now, I have my dataframe df with colums xs         ys      ts  mask_b3  band_1  band_2  band_3  band_4  band_5  band_6. I also have estimated the signal drop most significant date break_date_yyyyddmm. I want to create a function that uses df and break_date_yyyyddmm , and a path to store output files output_dir.
-The function should create 2 geotiff files both with TARGET_CRS (the same CRS used by  xs and ys in df). Each geotiff has 6 bands and should contain all pixels in df. The first geotiff 'before' is the time composite of spectral values up to and including break_date_yyyyddmm. The second is the time composite for dates after break_date_yyyyddmm. The time composite works is backwards for 'before' and forward for 'after'. It will use the first date where the pixel is not NODATA_VAL. If the pixel is NODATA_VAL then it looks for the following date (backwards for 'before' and forward for 'after'). If there are no NODATA value the pixel value in the composite should be PAD_VALUE.
+''' 
+changes from v0:
+- only process features included in tile
+- organize output per tile: OK
+- fixed vchip extension: 4 km: OK
+- vchip not centered in reference feature
+- only reference features with more than 3 ha: OK
 '''
 
+tile="T29TNE"
+H5_FOLDER = os.path.join(r"H:\outputs_ROI\hdf5",tile)
+VISUAL_CHIPS_FOLDER=os.path.join(r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\visual", tile)
+RASTER_FOLDER = os.path.join(r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\harmonized_to_tifs", tile)
+S2TILES_PATH = os.path.join(r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5", "sentinel2_tiles_PT_32629.gpkg")
+
+# 1st clear RASTER_FOLDER
+os.makedirs(RASTER_FOLDER, exist_ok=True)
+for f in os.listdir(RASTER_FOLDER):
+    os.remove(os.path.join(RASTER_FOLDER, f))
+os.makedirs(VISUAL_CHIPS_FOLDER, exist_ok=True)
+
 def main():
-    
+    '''
+    Main function to process the GeoPackage, extract spectral data from HDF5, detect breaks, and create visual chips.
+    The main loop visits all features in the GeoPackage, checks for valid dates, creates rasters for valid features, 
+    and then extracts spectral data from the HDF5 file for those rasters. It then calculates NDVI time series, detects breaks using Welch's t-test, 
+    and creates visual chips with consistent symbology based on the detected break date.
+    '''
+    H5_PATH = get_most_recent_h5(H5_FOLDER,extension="*.h5")
     for var in [GPKG_PATH, H5_PATH]:
         if not os.path.exists(var):
             print(f"Error: File {var} does not exist. Please check the path and try again.")
             return  
-        
-    for folder in [RASTER_FOLDER, RASTER_FOLDER_BEST_DATE]:
-        if not os.path.exists(folder):
-            os.makedirs(folder)
     
     # 1. Load the GeoPackage
     gdf = gpd.read_file(GPKG_PATH)
     raster_list = []
     fids_processed = []
+    companion_gdfs = []
     
     print(f"Total features in GPKG: {len(gdf)}")
+
+    # load tile geometry from S2TILES_PATH, filter by tile code in attribute 'name' and get geometry of the tile, to later check if features are within the tile and only process those that are within the tile
+    tile_gdf = gpd.read_file(S2TILES_PATH)
+    # check if tile_gdf geometry is the same as target CRS, if not reproject it to target CRS
+    if tile_gdf.crs != TARGET_CRS:
+        tile_gdf = tile_gdf.to_crs(TARGET_CRS)
+
+    # determine just the feature for 'tile' 
+    tile_gdf = tile_gdf[tile_gdf['Name'] == tile]
+    if not tile_gdf.empty:
+        tile_geom = tile_gdf.iloc[0].geometry
+    else:        
+        print(f"Error: Tile {tile} not found in {S2TILES_PATH}. Please check the tile code and try again.")
+        return
+
     # 2. Loop through features and filter out NULL dates
     for index, feat in gdf.iterrows():
+        # 1st convert feature geometry to target CRS if needed; we need to do this before the tile geometry check to ensure both geometries are in the same CRS for accurate spatial operations. If the feature geometry is not in the target CRS, we reproject it.
+        if gdf.crs != TARGET_CRS:
+            # reproject feat to target CRS; the result should still be of the same type as feat, not just a geometry. I want to preserve teh attributes
+            try:
+                geom_series = gpd.GeoSeries([feat.geometry], crs=gdf.crs)
+                geom_reprojected = geom_series.to_crs(TARGET_CRS).iloc[0]
+                feat.geometry = geom_reprojected
+            except Exception as e:
+                print(f"Error reprojecting feature ID {feat['Id']}: {e}. Skipping this feature.")
+                continue
+
+        # to be faster, I just want to check that the bounding box of the feature is within the tile geometry, to avoid doing a more time consuming check of the whole feature geometry. If the bounding box of the feature is not within the tile geometry, we skip processing this feature.
+        if not tile_geom.contains(feat.geometry):
+            print(f"Skipping FID {feat['Id']}: Bounding box not within tile {tile}.")
+            continue    
+
         # Check if Date0 and Date1 are both present
-        if pd.notnull(feat['Data0']) and pd.notnull(feat['Data1']): # and (feat['Id']>297) and (feat['Id']<312):
+        if pd.notnull(feat['Data0']) and pd.notnull(feat['Data1']) and (feat['Id']>297) and (feat['Id']<312):
             fid = feat['Id']
-            prefix = f"BDRexp_{fid}"
+            prefix = f"{LABEL_REF_DATASET}_{fid}_{T_TEST_LABEL}"
             # Generate the 3 band raster raster for this valid feature and save tifs in RASTER_FOLDER with b1=date0 and b2=date1, b3=1 within feature
-            path = process_feature_to_raster(gpkg_path=GPKG_PATH, target_fid=fid, output_dir=RASTER_FOLDER, prefix=prefix, 
-                                            extent_size=big_D,res=RES, target_crs=TARGET_CRS, break_date_yyyyddmm=None)
+            path, companion_gdf = process_feature_to_raster(feat, fid, output_dir=RASTER_FOLDER, prefix=prefix, 
+                                            extent_size=big_D,res=RES, target_crs=TARGET_CRS, break_date_yyyyddmm=None,
+                                            min_ref_feat_area=MIN_REF_FEAT_AREA,visual_chips_dir=VISUAL_CHIPS_FOLDER)
             if path:
                 raster_list.append(path)
                 fids_processed.append(fid)
+                companion_gdfs.append(companion_gdf)
         else:
             # Optional: Log which FIDs were skipped
             print(f"Skipping FID {feat['Id']}: One or both dates are NULL.")
@@ -94,9 +152,9 @@ def main():
     # 1. Extract spectral data
     # start/end dates are in band 1 and 2 of the rasters
     # Delta is the interval of days before and after dates
-    data_stream = extract_spectral_data_generator(H5_PATH, raster_paths=raster_list, delta=DELTA) # with yield: memory efficient
+    data_stream = extract_spectral_data_generator(H5_PATH, raster_paths=raster_list, delta=DELTA,companion_gdfs=companion_gdfs) # with yield: memory efficient
     
-    for i, (df, date_before_str,date_after_str) in enumerate(data_stream):
+    for i, (df, date_before_str,date_after_str,companion_gdf) in enumerate(data_stream):
         if df is not None:
             current_fid = fids_processed[i]
         
@@ -114,21 +172,33 @@ def main():
 
                 # format break_date, like '2020-07-13',  as YYYYMMDD
                 break_date_yyyyddmm = int(break_date.strftime('%Y%m%d'))
-                prefix = f"BDRexp_{current_fid}"
-                # Create 3-band raster with date break (optional)
-                if False:
-                    raster_path = process_feature_to_raster(gpkg_path=GPKG_PATH, target_fid=current_fid, output_dir=RASTER_FOLDER_BEST_DATE, prefix=prefix, 
-                                                            extent_size=big_D,res=RES, target_crs=TARGET_CRS,break_date_yyyyddmm=break_date_yyyyddmm)
-                # Create visual chips with spectral band data from df
-                create_time_composites_vectorized(df, break_date_int=break_date_yyyyddmm, output_dir=VISUAL_CHIPS_FOLDER, target_crs=TARGET_CRS, res=RES, nodata_val=NODATA_VAL, pad_value=PAD_VALUE,prefix=prefix)
+                prefix = f"{LABEL_REF_DATASET}_{current_fid}_{T_TEST_LABEL}"  
+                 # Create visual chips with spectral band data from df (for one single fid)
+                create_time_composites_vectorized(df, companion_gdf, break_date_int=break_date_yyyyddmm, output_dir=VISUAL_CHIPS_FOLDER, target_crs=TARGET_CRS, res=RES, 
+                                                  nodata_val=NODATA_VAL, pad_value=PAD_VALUE,prefix=prefix)
             else:
-                print(f"No significant drop detected (all p-values > 0.05 or insufficient data).")
+                print(f"No significant drop detected (all p-values > {T_TEST_THRESHOLD} or insufficient data).")
         
         # --- MANUALLY FREE MEMORY ---
             del df 
             gc.collect() 
         else:
             print(f"Skipping feature {i} due to lack of data.")
+
+def get_most_recent_h5(folder_path,extension):
+    ''' determine most recent file in folder with some extension'''
+    # 1. Create a list of all .h5 files in the directory
+    search_pattern = os.path.join(folder_path, extension)
+    files = glob.glob(search_pattern)
+
+    if not files:
+        print(f"No {extension} files found in the directory.")
+        return None
+
+    # 2. Find the file with the maximum modification time
+    most_recent_file = max(files, key=os.path.getmtime)
+    
+    return most_recent_file
 
 def plot_ndvi_time_series(ordinal_dates, ndvi_values, break_date, window_size, prefix):
     """
@@ -190,7 +260,7 @@ def calculate_ndvi_and_changes(df, red_band, nir_band, nodata_val):
     print(f"Calculating NDVI and aggregating time series (skipping NODATA: {nodata_val})...")
 
     # 1. Create a mask of valid pixels (where neither band is the NoData value)
-    # This prevents 65535 from being treated as a real spectral value
+    # This prevents NODATA_VAL from being treated as a real spectral value
     valid_mask = (df[red_band] != nodata_val) & (df[nir_band] != nodata_val)
     
     # Create a copy of the valid data to avoid SettingWithCopyWarnings
@@ -264,66 +334,64 @@ def detect_breaks_welch(ordinal_dates, y, date_before_str, date_after_str, windo
     
     return None
 
-def process_feature_to_raster(gpkg_path, target_fid, output_dir, prefix, extent_size, res,target_crs,break_date_yyyyddmm):
+def process_feature_to_raster(feat, target_fid, output_dir, prefix, 
+                             extent_size, res, target_crs, break_date_yyyyddmm, min_ref_feat_area, visual_chips_dir):
     """
-    Reads a specific feature, reprojects to EPSG:32629, and generates a raster selecting ONLY pixels totally contained within the feature.
-
-    - break_date_yyyyddmm is the estimated date at the end of 'before' for the most significant drop of mean NDVI
-    - if break_date_yyyyddmm is not None, it is the date to be used for band 1 and band 2
-
-    the raster is centered in the feature; extent_size is small_d, big_D
+    Generates a randomly-shifted raster chip and a companion GeoPackage.
+    Ensures the feature is fully contained within the chip extent.
     """
 
-    # 1. Load Data
-    gdf = gpd.read_file(gpkg_path)
-    
-    # Select feature by Id
-    selected_feat = gdf[gdf['Id'] == target_fid]
-    if selected_feat.empty:
-        print(f"Error: Id {target_fid} not found.")
-        return None
+    # --- AREA THRESHOLD CHECK ---
+    geom=feat.geometry
+    feat_area = geom.area
+    if feat_area < min_ref_feat_area:
+        print(f"Skipping FID {target_fid}: Area ({feat_area:.1f} m²) < {min_ref_feat_area} m².")
+        return None,None
 
-    # --- REPROJECTION ---
-    selected_feat = selected_feat.to_crs(target_crs)
-    feature = selected_feat.iloc[0]
-    geom = feature.geometry
-
-    # --- INTERIOR PIXEL LOGIC ---
-    # We apply a negative buffer (res/2) to ensure the 
-    # geometry is strictly 'inside' and set all_touched=False.
-    clean_geom = geom.buffer(-res/2) # Buffer by half the resolution to ensure we only get pixels fully inside
-    if clean_geom.is_empty:
-        # Fallback if the feature is smaller than a pixel
-        clean_geom = geom
-
-    # 2. Date Formatting
+    # --- DATE FORMATTING ---
     if break_date_yyyyddmm:
         d0_int = int(break_date_yyyyddmm)
-        d1_int = int(break_date_yyyyddmm)
     else:
-        d0 = pd.to_datetime(feature['Data0'])
-        d1 = pd.to_datetime(feature['Data1'])
+        d0 = pd.to_datetime(feat['Data0'])
         d0_int = int(d0.strftime('%Y%m%d'))
-        d1_int = int(d1.strftime('%Y%m%d'))
 
-    # 3. Calculate Spatial Extent
-    centroid = geom.centroid
-    left = int(centroid.x - (extent_size / 2))
-    right = int(centroid.x + (extent_size / 2))
-    bottom = int(centroid.y - (extent_size / 2))
-    top = int(centroid.y + (extent_size / 2))
+    # 2. RANDOM SPATIAL EXTENT LOGIC
+    minx, miny, maxx, maxy = geom.bounds
+    feat_w = maxx - minx
+    feat_h = maxy - miny
 
-    # 4. Raster Setup
-    width = int((right - left) / res)
-    height = int((top - bottom) / res)
+    if feat_w > extent_size or feat_h > extent_size:
+        # Fallback to centering if feature is larger than the chip
+        left = geom.centroid.x - (extent_size / 2)
+        bottom = geom.centroid.y - (extent_size / 2)
+    else:
+        # Calculate wiggle room (slack)
+        slack_x = extent_size - feat_w
+        slack_y = extent_size - feat_h
+        
+        # Random offset ensures (minx - offset) is the chip start
+        left = minx - random.uniform(0, slack_x)
+        bottom = miny - random.uniform(0, slack_y)
+
+    # Snap to resolution grid
+    left = int(np.floor(left / res) * res)
+    bottom = int(np.floor(bottom / res) * res)
+    right = left + extent_size
+    top = bottom + extent_size
+
+    # 3. RASTER SETUP
+    width = int(extent_size / res)
+    height = int(extent_size / res)
     transform = from_origin(left, top, res, res)
     
-    out_name = f"{prefix}_{d0_int}_{left}_{right}_{bottom}_{top}.tif"
-    out_path = os.path.join(output_dir, out_name)
+    # Filename stem
+    stem_name = f"{prefix}_{target_fid}_{d0_int}_{left}_{bottom}"
+    out_path = os.path.join(output_dir, f"{stem_name}.tif")
 
-    # 5. Generate Band Arrays
-    # IMPORTANT: all_touched=False ensures only pixels with centers 
-    # inside the polygon are selected.(already guaranteed by res/2 above)
+    # 4. GENERATE MASK & BANDS
+    clean_geom = geom.buffer(-res/2)
+    if clean_geom.is_empty: clean_geom = geom
+
     mask = rasterize(
         [(clean_geom, 1)],
         out_shape=(height, width),
@@ -333,31 +401,31 @@ def process_feature_to_raster(gpkg_path, target_fid, output_dir, prefix, extent_
         dtype='uint32'
     )
 
-    band1 = np.where(mask == 1, d0_int, 65535).astype('uint32')
-    band2 = np.where(mask == 1, d1_int, 65535).astype('uint32')
-
-    # 6. Write GeoTIFF
+    # 5. WRITE GEOTIFF
     profile = {
-        'driver': 'GTiff',
-        'height': height,
-        'width': width,
-        'count': 3,
-        'dtype': 'uint32',
-        'crs': TARGET_CRS,
-        'transform': transform,
-        'nodata': 65535,
-        'compress': 'lzw'
+        'driver': 'GTiff', 'height': height, 'width': width, 'count': 3,
+        'dtype': 'uint32', 'crs': target_crs, 'transform': transform,
+        'nodata': 65535, 'compress': 'lzw'
     }
 
-    # burn raster
     with rasterio.open(out_path, 'w', **profile) as dst:
-        dst.write(band1, 1) 
-        dst.write(band2, 2) 
-        dst.write(mask, 3)   
+        dst.write(np.where(mask == 1, d0_int, 65535).astype('uint32'), 1) 
+        dst.write(np.where(mask == 1, d0_int, 65535).astype('uint32'), 2) # Using d0 for both as per logic
+        dst.write(mask, 3)
+    
+    # We keep 'Id' and 'Chg_type'. 
+    cols_to_keep = ['geometry', 'Id']
+    # 'Chg_type' is one of the attributes in the input GPKG, but it may not be present in all versions of the GPKG. We check if it exists before trying to include it in the output GPKG.
+    if 'Chg_type' in feat.index and pd.notna(feat['Chg_type']):
+        cols_to_keep.append('Chg_type')
+        
+    # 2. Convert the Series to a GeoDataFrame
+    # We wrap [feat[cols_to_keep]] in a list to make it a single-row table
+    companion_gdf = gpd.GeoDataFrame([feat[cols_to_keep]], crs=target_crs)
 
-    return out_path
+    return out_path, companion_gdf
 
-def extract_spectral_data_generator(h5_path, raster_paths, delta, mem_threshold_pct=90):
+def extract_spectral_data_generator(h5_path, raster_paths, delta, companion_gdfs, mem_threshold_pct=90):
     '''
     A generator that yields one DataFrame at a time to save memory.
     Stops if system memory usage exceeds mem_threshold_pct.
@@ -373,7 +441,10 @@ def extract_spectral_data_generator(h5_path, raster_paths, delta, mem_threshold_
         h5_coords = np.column_stack((h5_xs, h5_ys))
         tree = KDTree(h5_coords)
 
-        for raster_path in raster_paths:
+        #for raster_path in raster_paths:
+        for i, raster_path in enumerate(raster_paths):
+            # pass companion_gdf for the current raster, if it exists; otherwise pass None
+            companion_gdf = companion_gdfs[i] if i < len(companion_gdfs) else None
             # --- MEMORY GUARD ---
             mem_usage = psutil.virtual_memory().percent
             if mem_usage > mem_threshold_pct:
@@ -389,7 +460,7 @@ def extract_spectral_data_generator(h5_path, raster_paths, delta, mem_threshold_
             # Use the robust Date Range Logic from earlier
             interior_indices = np.where(b3 == 1) # correspond to input feature
             if len(interior_indices[0]) == 0:
-                yield None
+                yield None, None, None,None
                 continue
             
             # Interior pixels (interior to the feature, i.e. b3==1)
@@ -429,19 +500,21 @@ def extract_spectral_data_generator(h5_path, raster_paths, delta, mem_threshold_
 
             if raster_dfs:
                 final_feature_df = pd.concat(raster_dfs, ignore_index=True)
-                yield final_feature_df,date_before_str,date_after_str # SEND DATA BACK TO MAIN IMMEDIATELY
+                yield final_feature_df,date_before_str,date_after_str,companion_gdf # SEND DATA BACK TO MAIN IMMEDIATELY
             else:
-                yield None, None, None
+                yield None, None, None, None
 
             # Clean up local references for this specific loop iteration
             del raster_dfs
             gc.collect()
 
-def create_time_composites_vectorized(df, break_date_int, output_dir, target_crs, res=10, nodata_val=65535, pad_value=0, prefix='', std_dev_factor=3):
+def create_time_composites_vectorized(df, companion_gdf, break_date_int, output_dir, target_crs, res=10, nodata_val=NODATA_VAL, pad_value=0, prefix='', 
+                                      std_dev_factor=3):
     """
     Creates 'before' and 'after' GeoTIFFs with consistent 3-stdDev symbology
     calculated from the combined time series.
     """
+
     # 1. Date Conversion (YYYYMMDD -> Ordinal)
     date_str = str(break_date_int)
     break_ordinal = datetime.strptime(date_str, '%Y%m%d').toordinal()
@@ -460,7 +533,7 @@ def create_time_composites_vectorized(df, break_date_int, output_dir, target_crs
             mean_val = valid_data.mean()
             std_val = valid_data.std()
             stats_config[f'min{color}'] = max(0, mean_val - (std_dev_factor * std_val))
-            stats_config[f'max{color}'] = min(65535, mean_val + (std_dev_factor * std_val))
+            stats_config[f'max{color}'] = min(NODATA_VAL, mean_val + (std_dev_factor * std_val))
         else:
             stats_config[f'min{color}'], stats_config[f'max{color}'] = 0, 4000 # Fallback
 
@@ -503,7 +576,14 @@ def create_time_composites_vectorized(df, break_date_int, output_dir, target_crs
 
     path_before = build_stack(df_b, "before")
     path_after = build_stack(df_a, "after")
-    
+
+    # Write companion GeoPackage with the same prefix  
+    # determine stem_name from out_path, like 'BDRexp_309_025_before_20200713.tif' -> 'BDRexp_309_025_before_20200713'
+    # BUT REMOVE THE '_before' OR '_after' SUFFIX TO GET A COMMON STEM NAME FOR BOTH BEFORE AND AFTER GPKG
+    stem_name = os.path.basename(path_before).replace('.tif', '').replace('_before', '').replace('_after', '') if path_before else os.path.basename(path_after).replace('.tif', '').replace('_before', '').replace('_after', '')
+    gpkg_out_path = os.path.join(VISUAL_CHIPS_FOLDER, f"{stem_name}.gpkg")
+    companion_gdf.to_file(gpkg_out_path, driver="GPKG")
+
     return path_before, path_after
 
 def save_qgis_style_custom(tif_path, stats):
