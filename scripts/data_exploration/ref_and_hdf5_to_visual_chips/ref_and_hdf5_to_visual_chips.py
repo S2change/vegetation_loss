@@ -1,3 +1,4 @@
+import logging
 import random
 import sys
 import h5py
@@ -17,20 +18,6 @@ import matplotlib.dates as mdates
 import psutil  # You may need to: pip install psutil
 import gc
 
-'''
-Query:
-(1st input) I have a hdf5 filefor the same area of interest with the structure below where xs and ys are coordinates in CRS EPSG:32629, and 'ts' are ordinal dates.
-(2nd input) I have a raster with 3 bands: band1 is date 'before' in format yyymmdd; band2 is date 'after' in the same format, and band3 is either1 or 0.
-(3rd input) Delta=number of days, say Delta=45
-For all pixels where band3=1, I want to extract the sprectral values for the 6bands from the hdf5 file for all dates in the dhdf5 file from  'before'-Delta until  'after'+Delta
-(output) The output can be a dataframe with the pixel coordinates (xs,ys) , the ordinal dates (ts), and the spectral values for all 6 bands (from 'values')
-
-instructions to create ouput visual chips
-Now, I have my dataframe df with colums xs         ys      ts  mask_b3  band_1  band_2  band_3  band_4  band_5  band_6. I also have estimated the signal drop most significant date break_date_yyyyddmm. I want to create a function that uses df and break_date_yyyyddmm , and a path to store output files output_dir.
-The function should create 2 geotiff files both with TARGET_CRS (the same CRS used by  xs and ys in df). Each geotiff has 6 bands and should contain all pixels in df. The first geotiff 'before' is the time composite of spectral values up to and including break_date_yyyyddmm. The second is the time composite for dates after break_date_yyyyddmm. The time composite works is backwards for 'before' and forward for 'after'. It will use the first date where the pixel is not NODATA_VAL. If the pixel is NODATA_VAL then it looks for the following date (backwards for 'before' and forward for 'after'). If there are no NODATA value the pixel value in the composite should be PAD_VALUE.
-
-'''
-
 # --- CONFIGURATION ---
 GPKG_PATH = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\harmonized\BDR_expanded_v0.gpkg"
 LABEL_REF_DATASET="BDRexp_v0"
@@ -45,40 +32,52 @@ small_D = 100  # Extent size in meters (100m x 100m) - adjust as needed
 big_D=4000 # Extent to create raster and extract spectral data from hdf5 (to ultimately create visual chip)
 #prefix = f"BDRexp_{FID_TO_PROCESS}"
 RES=10 # Raster resolution in meters (adjust as needed)
-WINDOW_SIZE = 16 # Number of dates in the sliding window for break detection (adjust as needed)
 NODATA_VAL = 65535 # The value used in the hdf5 file to indicate NoData (adjust if different)
 PAD_VALUE=0 # output visual chip band value
-T_TEST_THRESHOLD,T_TEST_LABEL=0.025,'025'
-MIN_REF_FEAT_AREA=4000 # 3ha
+T_TEST_THRESHOLD,T_TEST_LABEL=0.05,'05'
+MIN_REF_FEAT_AREA=20000 # 3ha
+MIN_NDVI_DROP, LABEL_MIN_NDVI_DROP=0.05,'05'
+WINDOW_MAX_HALF_RANGE, LABEL_WINDOW_MAX_HALF_RANGE=30,'30' # maximum number of days before and after the center date to consider in the t-test (to avoid comparing very distant dates that may not be relevant for the break detection)
+
 #----------------------
 
 ''' 
 changes from v0:
-- only process features included in tile
+- only process features included in tile: OK
 - organize output per tile: OK
 - fixed vchip extension: 4 km: OK
-- vchip not centered in reference feature
+- vchip not centered in reference feature: OK
 - only reference features with more than 3 ha: OK
+- create companion gdf with same prefix as vchip, with geometry of the reference feature and attributes 'Id' and 'Chg_type' (if exists in input GPKG): OK
+- half-windo to apply t-test of 30 days; does not depend on a fixed number of observations before and after, but on a fixed temporal window: OK
+- new logic to determine break date: we move a candidate break date from present to past, and for each candidate break date we apply the t-test to the observations that are within a temporal window of +/- 30 days around the candidate break date. The first candidate break date that has a significant t-test result (p-value < 0.05) and a mean NDVI drop of at least 0.05 is selected as the break date. This way we ensure that the detected break date is not too far from the reference dates, and we also ensure that there are enough observations on either side of the break date to perform a valid t-test.
+- added a minimum drop of average ndvi to declare a drop date as a break, to avoid detecting breaks that are statistically significant but not relevant in practice because the drop is very small (e.g., less than 0.05 in average NDVI)
 '''
 
 tile="T29TNE"
 H5_FOLDER = os.path.join(r"H:\outputs_ROI\hdf5",tile)
 VISUAL_CHIPS_FOLDER=os.path.join(r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\visual", tile)
+PLOTS_FOLDER=os.path.join(r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\plots", tile)
 RASTER_FOLDER = os.path.join(r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\harmonized_to_tifs", tile)
 S2TILES_PATH = os.path.join(r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5", "sentinel2_tiles_PT_32629.gpkg")
 
 # 1st clear RASTER_FOLDER
 os.makedirs(RASTER_FOLDER, exist_ok=True)
-for f in os.listdir(RASTER_FOLDER):
-    os.remove(os.path.join(RASTER_FOLDER, f))
 os.makedirs(VISUAL_CHIPS_FOLDER, exist_ok=True)
+os.makedirs(PLOTS_FOLDER, exist_ok=True)
+# clear temporary folders
+for folder in [RASTER_FOLDER, PLOTS_FOLDER]:
+    for f in os.listdir(folder):
+        os.remove(os.path.join(folder, f))
+
 
 def main():
     '''
     Main function to process the GeoPackage, extract spectral data from HDF5, detect breaks, and create visual chips.
-    The main loop visits all features in the GeoPackage, checks for valid dates, creates rasters for valid features, 
-    and then extracts spectral data from the HDF5 file for those rasters. It then calculates NDVI time series, detects breaks using Welch's t-test, 
-    and creates visual chips with consistent symbology based on the detected break date.
+    (1) The main loop visits all features in the GeoPackage, checks for valid dates, creates rasters for valid features, 
+    and then extracts spectral data from the HDF5 file for those rasters. 
+    (2) Then, the input are the raster files that were created in the previous step, and the extracted spectral data from the HDF5 file for those rasters.
+    It then calculates NDVI time series, detects breaks, if any, using Welch's t-test, and creates visual chips with consistent symbology based on the detected break date.
     '''
     H5_PATH = get_most_recent_h5(H5_FOLDER,extension="*.h5")
     for var in [GPKG_PATH, H5_PATH]:
@@ -121,18 +120,18 @@ def main():
                 print(f"Error reprojecting feature ID {feat['Id']}: {e}. Skipping this feature.")
                 continue
 
-        # to be faster, I just want to check that the bounding box of the feature is within the tile geometry, to avoid doing a more time consuming check of the whole feature geometry. If the bounding box of the feature is not within the tile geometry, we skip processing this feature.
+        # to be faster, one could check that the bounding box of the feature is within the tile geometry, to avoid doing a more time consuming check of the whole feature geometry. If the bounding box of the feature is not within the tile geometry, we skip processing this feature.
         if not tile_geom.contains(feat.geometry):
             print(f"Skipping FID {feat['Id']}: Bounding box not within tile {tile}.")
             continue    
 
         # Check if Date0 and Date1 are both present
-        if pd.notnull(feat['Data0']) and pd.notnull(feat['Data1']) and (feat['Id']>297) and (feat['Id']<312):
+        if pd.notnull(feat['Data0']) and pd.notnull(feat['Data1']): # and (feat['Id']>297) and (feat['Id']<312):
             fid = feat['Id']
-            prefix = f"{LABEL_REF_DATASET}_{fid}_{T_TEST_LABEL}"
+            prefix = f"{LABEL_REF_DATASET}_{fid}"
             # Generate the 3 band raster raster for this valid feature and save tifs in RASTER_FOLDER with b1=date0 and b2=date1, b3=1 within feature
             path, companion_gdf = process_feature_to_raster(feat, fid, output_dir=RASTER_FOLDER, prefix=prefix, 
-                                            extent_size=big_D,res=RES, target_crs=TARGET_CRS, break_date_yyyyddmm=None,
+                                            extent_size=big_D,res=RES, target_crs=TARGET_CRS,
                                             min_ref_feat_area=MIN_REF_FEAT_AREA,visual_chips_dir=VISUAL_CHIPS_FOLDER)
             if path:
                 raster_list.append(path)
@@ -163,21 +162,23 @@ def main():
             
             # 3. Detect the break using the new logic
             # Returns a datetime.date object or None
-            break_date = detect_breaks_welch(ordinal_dates, ndvi_values, date_before_str,date_after_str, window_size=WINDOW_SIZE, p_threshold=T_TEST_THRESHOLD)
-            # --- NEW: Call the plotting function ---
-            # plot_ndvi_time_series(ordinal_dates, ndvi_values, break_date, WINDOW_SIZE, prefix)
-
+            break_date = detect_breaks_welch_midpoint(ordinal_dates, ndvi_values, date_before_str, date_after_str,  
+                                                    window_max_half_range=WINDOW_MAX_HALF_RANGE,p_threshold=T_TEST_THRESHOLD, min_drop=MIN_NDVI_DROP)
+            
             if break_date:
+                print(30*"-")
                 print(f"!!! Break Detected: Most significant drop around {break_date} !!!")
 
                 # format break_date, like '2020-07-13',  as YYYYMMDD
                 break_date_yyyyddmm = int(break_date.strftime('%Y%m%d'))
-                prefix = f"{LABEL_REF_DATASET}_{current_fid}_{T_TEST_LABEL}"  
+                prefix = f"{LABEL_REF_DATASET}_{current_fid}_{T_TEST_LABEL}_{LABEL_MIN_NDVI_DROP}_{LABEL_WINDOW_MAX_HALF_RANGE}"  
+                # plot 
+                plot_ndvi_time_series(ordinal_dates, ndvi_values, break_date, WINDOW_MAX_HALF_RANGE, date_before_str, date_after_str, prefix)
                  # Create visual chips with spectral band data from df (for one single fid)
                 create_time_composites_vectorized(df, companion_gdf, break_date_int=break_date_yyyyddmm, output_dir=VISUAL_CHIPS_FOLDER, target_crs=TARGET_CRS, res=RES, 
                                                   nodata_val=NODATA_VAL, pad_value=PAD_VALUE,prefix=prefix)
             else:
-                print(f"No significant drop detected (all p-values > {T_TEST_THRESHOLD} or insufficient data).")
+                print(f"No significant drop detected (all p-values > {T_TEST_THRESHOLD} or drop less than {MIN_NDVI_DROP}).")
         
         # --- MANUALLY FREE MEMORY ---
             del df 
@@ -200,57 +201,66 @@ def get_most_recent_h5(folder_path,extension):
     
     return most_recent_file
 
-def plot_ndvi_time_series(ordinal_dates, ndvi_values, break_date, window_size, prefix):
+def plot_ndvi_time_series(ordinal_dates, ndvi_values, break_date, window_max_half_range, 
+                          date_before_str, date_after_str, prefix):
     """
-    Plots the NDVI time series and highlights the detected break.
+    Plots the NDVI time series, highlighting the temporal window (in days) 
+    used for the Welch's t-test detection.
     """
-    # 1. Convert ordinals to datetime objects for plotting
+    # 1. Convert ordinals to datetime objects
     dates = [datetime.fromordinal(int(d)) for d in ordinal_dates]
     
+    # Parse string bounds
+    dt_ref_before = datetime.strptime(date_before_str, '%Y%m%d')
+    dt_ref_after = datetime.strptime(date_after_str, '%Y%m%d')
+
     plt.figure(figsize=(12, 6))
-    plt.plot(dates, ndvi_values, marker='o', linestyle='-', color='#2ecc71', label='Mean NDVI', markersize=4)
+    plt.plot(dates, ndvi_values, marker='o', linestyle='-', color='#2ecc71', 
+             label='Mean NDVI', markersize=4, alpha=0.8)
+
+    # 2. Reference Vertical Lines
+    plt.axvline(x=dt_ref_before, color='#3498db', linestyle=':', linewidth=1.2, label='Target Start')
+    plt.axvline(x=dt_ref_after, color='#f39c12', linestyle=':', linewidth=1.2, label='Target End')
 
     if break_date:
-        # Convert break_date (date object) to datetime for the vlines function
+        # Convert date object to datetime
         break_dt = datetime.combine(break_date, datetime.min.time())
         
-        # 2. Highlight the detected break
-        plt.axvline(x=break_dt, color='#e74c3c', linestyle='--', linewidth=2, label=f'Break Detected ({break_date})')
+        # 3. Highlight the detected break
+        plt.axvline(x=break_dt, color='#e74c3c', linestyle='--', linewidth=2, 
+                    label=f'Break Detected ({break_date})')
         
-        # 3. Optional: Highlight the window around the break
-        # Find the index of the break date to show the window used
-        try:
-            break_ordinal = break_date.toordinal()
-            idx = ordinal_dates.index(break_ordinal)
-            half = window_size // 2
-            
-            # Start and end dates of the specific window that triggered the break
-            win_start = dates[max(0, idx - half + 1)]
-            win_end = dates[min(len(dates)-1, idx + half)]
-            
-            plt.axvspan(win_start, win_end, color='gray', alpha=0.2, label='Detection Window')
-        except (ValueError, IndexError):
-            pass
+        # 4. Highlight the TEMPORAL window used (e.g., +/- 30 days)
+        # win_start = break_date - 30 days; win_end = break_date + 30 days
+        win_start = break_dt - timedelta(days=window_max_half_range)
+        win_end = break_dt + timedelta(days=window_max_half_range)
+        
+        plt.axvspan(win_start, win_end, color='gray', alpha=0.15, label=f'Temporal Window ({window_max_half_range}d)')
 
     # Formatting
-    plt.title(f"NDVI Time Series Analysis - Feature {prefix}", fontsize=14)
-    plt.xlabel("Date", fontsize=12)
-    plt.ylabel("Mean NDVI", fontsize=12)
-    plt.grid(True, which='both', linestyle='--', alpha=0.5)
-    plt.legend()
+    plt.title(f"NDVI Time Series - Feature {prefix}", fontsize=13, fontweight='bold')
+    plt.xlabel("Date", fontsize=11)
+    plt.ylabel("Mean NDVI", fontsize=11)
+    plt.grid(True, which='both', linestyle='--', alpha=0.3)
     
-    # Date formatting on X-axis
+    # Legend outside to avoid overlapping data
+    plt.legend(loc='upper left', bbox_to_anchor=(1, 1), frameon=False)
+    
+    # Date formatting
     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
     plt.gca().xaxis.set_major_locator(mdates.AutoDateLocator())
-    plt.gcf().autofmt_xdate() # Rotate dates
+    plt.gcf().autofmt_xdate() 
     
     plt.tight_layout()
     
     # Save the plot
-    plot_path = os.path.join(RASTER_FOLDER, f"{prefix}_ndvi_plot.png")
-    plt.savefig(plot_path)
-    print(f"Plot saved to: {plot_path}")
-    plt.show()
+    plot_path = os.path.join(PLOTS_FOLDER, f"{prefix}_ndvi_plot.png")
+    plt.savefig(plot_path, dpi=150)
+    
+    # Clean up memory
+    plt.close() 
+
+    return plot_path
 
 def calculate_ndvi_and_changes(df, red_band, nir_band, nodata_val):
     """
@@ -287,55 +297,62 @@ def calculate_ndvi_and_changes(df, red_band, nir_band, nodata_val):
 
     return ordinal_dates, ndvi_values
 
-def detect_breaks_welch(ordinal_dates, y, date_before_str, date_after_str, window_size, p_threshold=0.05):
+def detect_breaks_welch_midpoint(ordinal_dates, y, date_before_str, date_after_str, 
+                                 window_max_half_range=30, p_threshold=0.05, 
+                                 min_drop=0.15, min_obs=2):
     """
-    Applies a sliding window Welch's t-test and returns the date of the 
-    most significant drop ONLY if it falls between date_before and date_after.
-    
-    Args:
-        date_before_str (str): "YYYYMMDD"
-        date_after_str (str): "YYYYMMDD"
+    Welch's t-test with a dynamic window moving Present -> Past.
+    Returns the MIDPOINT date between the last 'before' and first 'after' observation.
     """
     y = np.array(y)
-    half = window_size // 2
-    results = [] 
-
-    # 1. Convert string bounds to ordinal integers for comparison
+    ordinal_dates = np.array(ordinal_dates)
+    
     limit_start = datetime.strptime(str(date_before_str), '%Y%m%d').toordinal()
     limit_end = datetime.strptime(str(date_after_str), '%Y%m%d').toordinal()
 
-    if len(y) < window_size:
-        return None
+    # Iterate backwards through the indices
+    # We start from 1 because we need at least one 'before' point at index i-1
+    for i in range(len(y) - 1, 0, -1):
+        # The 'split' occurs between index i-1 and index i
+        # Candidate date for the break is the first 'after' point
+        after_start_date = ordinal_dates[i]
+        before_end_date = ordinal_dates[i-1]
+        
+        # Calculate the midpoint between these two observations
+        midpoint_ordinal = (before_end_date + after_start_date) // 2
+        
+        # Check if the midpoint falls within our user-defined target interval
+        if not (limit_start <= midpoint_ordinal <= limit_end):
+            continue
 
-    for i in range(window_size, len(y) + 1):
-        window = y[i - window_size : i]
-        before = window[:half]
-        after = window[half:]
+        # --- WINDOW DEFINITION ---
+        # Before: observations in [midpoint - range, midpoint)
+        # After:  observations in [midpoint, midpoint + range]
+        before_mask = (ordinal_dates < midpoint_ordinal) & (ordinal_dates >= midpoint_ordinal - window_max_half_range)
+        after_mask = (ordinal_dates >= midpoint_ordinal) & (ordinal_dates <= midpoint_ordinal + window_max_half_range)
         
-        # Welch's t-test: H1: mean(before) > mean(after)
-        t_stat, p_val = stats.ttest_ind(before, after, equal_var=False, alternative='greater')
-        
-        # The center of the window is the likely "break point"
-        center_date = ordinal_dates[i - half - 1] 
-        
-        # 2. Only store results that fall within the specified period
-        if limit_start <= center_date <= limit_end:
-            results.append((p_val, center_date))
-        
-    if not results:
-        print(f" No break points found within the range {date_before_str} to {date_after_str}")
-        return None
+        before_y = y[before_mask]
+        after_y = y[after_mask]
 
-    # 3. Find the result with the SMALLEST p-value within the filtered results
-    best_p, best_ordinal = min(results, key=lambda x: x[0])
+        # Ensure statistical validity
+        if len(before_y) < min_obs or len(after_y) < min_obs:
+            continue
 
-    if best_p <= p_threshold:
-        return date.fromordinal(int(best_ordinal))
-    
+        # --- TEST ---
+        mean_before = np.mean(before_y)
+        mean_after = np.mean(after_y)
+        drop_magnitude = mean_before - mean_after
+        
+        t_stat, p_val = stats.ttest_ind(before_y, after_y, equal_var=False, alternative='greater')
+        
+        if p_val <= p_threshold and drop_magnitude >= min_drop:
+            # Success: Return the midpoint of the transition
+            return date.fromordinal(int(midpoint_ordinal))
+        
     return None
 
 def process_feature_to_raster(feat, target_fid, output_dir, prefix, 
-                             extent_size, res, target_crs, break_date_yyyyddmm, min_ref_feat_area, visual_chips_dir):
+                             extent_size, res, target_crs, min_ref_feat_area, visual_chips_dir):
     """
     Generates a randomly-shifted raster chip and a companion GeoPackage.
     Ensures the feature is fully contained within the chip extent.
@@ -345,15 +362,12 @@ def process_feature_to_raster(feat, target_fid, output_dir, prefix,
     geom=feat.geometry
     feat_area = geom.area
     if feat_area < min_ref_feat_area:
-        print(f"Skipping FID {target_fid}: Area ({feat_area:.1f} m²) < {min_ref_feat_area} m².")
+        logging.info(f"Skipping FID {target_fid}: Area ({feat_area:.1f} m²) < {min_ref_feat_area} m².")
         return None,None
 
     # --- DATE FORMATTING ---
-    if break_date_yyyyddmm:
-        d0_int = int(break_date_yyyyddmm)
-    else:
-        d0 = pd.to_datetime(feat['Data0'])
-        d0_int = int(d0.strftime('%Y%m%d'))
+    d0,d1 = pd.to_datetime(feat['Data0']), pd.to_datetime(feat['Data1'])
+    d0_int,d1_int = int(d0.strftime('%Y%m%d')), int(d1.strftime('%Y%m%d'))
 
     # 2. RANDOM SPATIAL EXTENT LOGIC
     minx, miny, maxx, maxy = geom.bounds
@@ -385,7 +399,7 @@ def process_feature_to_raster(feat, target_fid, output_dir, prefix,
     transform = from_origin(left, top, res, res)
     
     # Filename stem
-    stem_name = f"{prefix}_{target_fid}_{d0_int}_{left}_{bottom}"
+    stem_name = f"{prefix}_{d0_int}_{left}_{bottom}"
     out_path = os.path.join(output_dir, f"{stem_name}.tif")
 
     # 4. GENERATE MASK & BANDS
@@ -410,11 +424,11 @@ def process_feature_to_raster(feat, target_fid, output_dir, prefix,
 
     with rasterio.open(out_path, 'w', **profile) as dst:
         dst.write(np.where(mask == 1, d0_int, 65535).astype('uint32'), 1) 
-        dst.write(np.where(mask == 1, d0_int, 65535).astype('uint32'), 2) # Using d0 for both as per logic
+        dst.write(np.where(mask == 1, d1_int, 65535).astype('uint32'), 2) # Using d0 for both as per logic
         dst.write(mask, 3)
     
     # We keep 'Id' and 'Chg_type'. 
-    cols_to_keep = ['geometry', 'Id']
+    cols_to_keep = ['geometry', 'Data0', 'Data1']
     # 'Chg_type' is one of the attributes in the input GPKG, but it may not be present in all versions of the GPKG. We check if it exists before trying to include it in the output GPKG.
     if 'Chg_type' in feat.index and pd.notna(feat['Chg_type']):
         cols_to_keep.append('Chg_type')
@@ -546,8 +560,8 @@ def create_time_composites_vectorized(df, companion_gdf, break_date_int, output_
     transform = from_origin(unique_xs[0], unique_ys[0], res, res)
 
     # 4. Split and Sort: check inequalities
-    df_b = df[df['ts_ordinal'] < break_ordinal].sort_values('ts_ordinal', ascending=False)
-    df_a = df[df['ts_ordinal'] >= break_ordinal].sort_values('ts_ordinal', ascending=True)
+    df_b = df[df['ts_ordinal'] < break_ordinal].sort_values('ts_ordinal', ascending=False) #before
+    df_a = df[df['ts_ordinal'] >= break_ordinal].sort_values('ts_ordinal', ascending=True) #after, includes EQUAL to break date
 
     def build_stack(sub_df, suffix):
         stack = np.full((NUMBER_BANDS_HDF5, height, width), pad_value, dtype='uint16')
@@ -583,8 +597,249 @@ def create_time_composites_vectorized(df, companion_gdf, break_date_int, output_
     stem_name = os.path.basename(path_before).replace('.tif', '').replace('_before', '').replace('_after', '') if path_before else os.path.basename(path_after).replace('.tif', '').replace('_before', '').replace('_after', '')
     gpkg_out_path = os.path.join(VISUAL_CHIPS_FOLDER, f"{stem_name}.gpkg")
     companion_gdf.to_file(gpkg_out_path, driver="GPKG")
+    save_vector_qml(gpkg_out_path)
 
     return path_before, path_after
+
+def save_vector_qml(gpkg_path):
+    """
+    Creates a QML style for a vector layer: 
+    Transparent fill, Black outline, Width 20.
+    """
+    qml_path = gpkg_path.replace(".gpkg", ".qml")
+    
+    # Note the double-braces {{ }} for the QGIS IDs to avoid f-string errors
+    qml_content = f"""<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>
+    <qgis styleCategories="Symbology|Labeling" version="3.44.7-Solothurn" labelsEnabled="1">
+    <renderer-v2 referencescale="-1" enableorderby="0" symbollevels="0" forceraster="0" type="singleSymbol">
+    <symbols>
+        <symbol alpha="1" frame_rate="10" name="0" is_animated="0" clip_to_extent="1" type="fill" force_rhr="0">
+        <data_defined_properties>
+            <Option type="Map">
+            <Option name="name" value="" type="QString"/>
+            <Option name="properties"/>
+            <Option name="type" value="collection" type="QString"/>
+            </Option>
+        </data_defined_properties>
+        <layer enabled="1" locked="0" pass="0" id="{{507ea401-5fe0-44db-acf5-e8bc97ac0fc9}}" class="SimpleLine">
+            <Option type="Map">
+            <Option name="align_dash_pattern" value="0" type="QString"/>
+            <Option name="capstyle" value="square" type="QString"/>
+            <Option name="customdash" value="5;2" type="QString"/>
+            <Option name="customdash_map_unit_scale" value="3x:0,0,0,0,0,0" type="QString"/>
+            <Option name="customdash_unit" value="MM" type="QString"/>
+            <Option name="dash_pattern_offset" value="0" type="QString"/>
+            <Option name="dash_pattern_offset_map_unit_scale" value="3x:0,0,0,0,0,0" type="QString"/>
+            <Option name="dash_pattern_offset_unit" value="MM" type="QString"/>
+            <Option name="draw_inside_polygon" value="0" type="QString"/>
+            <Option name="joinstyle" value="bevel" type="QString"/>
+            <Option name="line_color" value="0,0,0,255,rgb:0,0,0,1" type="QString"/>
+            <Option name="line_style" value="solid" type="QString"/>
+            <Option name="line_width" value="0.96" type="QString"/>
+            <Option name="line_width_unit" value="MM" type="QString"/>
+            <Option name="offset" value="0" type="QString"/>
+            <Option name="offset_map_unit_scale" value="3x:0,0,0,0,0,0" type="QString"/>
+            <Option name="offset_unit" value="MM" type="QString"/>
+            <Option name="ring_filter" value="0" type="QString"/>
+            <Option name="trim_distance_end" value="0" type="QString"/>
+            <Option name="trim_distance_end_map_unit_scale" value="3x:0,0,0,0,0,0" type="QString"/>
+            <Option name="trim_distance_end_unit" value="MM" type="QString"/>
+            <Option name="trim_distance_start" value="0" type="QString"/>
+            <Option name="trim_distance_start_map_unit_scale" value="3x:0,0,0,0,0,0" type="QString"/>
+            <Option name="trim_distance_start_unit" value="MM" type="QString"/>
+            <Option name="tweak_dash_pattern_on_corners" value="0" type="QString"/>
+            <Option name="use_custom_dash" value="0" type="QString"/>
+            <Option name="width_map_unit_scale" value="3x:0,0,0,0,0,0" type="QString"/>
+            </Option>
+            <data_defined_properties>
+            <Option type="Map">
+                <Option name="name" value="" type="QString"/>
+                <Option name="properties"/>
+                <Option name="type" value="collection" type="QString"/>
+            </Option>
+            </data_defined_properties>
+        </layer>
+        </symbol>
+    </symbols>
+    <rotation/>
+    <sizescale/>
+    <data-defined-properties>
+        <Option type="Map">
+        <Option name="name" value="" type="QString"/>
+        <Option name="properties"/>
+        <Option name="type" value="collection" type="QString"/>
+        </Option>
+    </data-defined-properties>
+    </renderer-v2>
+    <selection mode="Default">
+    <selectionColor invalid="1"/>
+    <selectionSymbol>
+        <symbol alpha="1" frame_rate="10" name="" is_animated="0" clip_to_extent="1" type="fill" force_rhr="0">
+        <data_defined_properties>
+            <Option type="Map">
+            <Option name="name" value="" type="QString"/>
+            <Option name="properties"/>
+            <Option name="type" value="collection" type="QString"/>
+            </Option>
+        </data_defined_properties>
+        <layer enabled="1" locked="0" pass="0" id="{{6955d215-37e9-4154-9a4d-a0ba5131644d}}" class="SimpleFill">
+            <Option type="Map">
+            <Option name="border_width_map_unit_scale" value="3x:0,0,0,0,0,0" type="QString"/>
+            <Option name="color" value="0,0,255,255,rgb:0,0,1,1" type="QString"/>
+            <Option name="joinstyle" value="bevel" type="QString"/>
+            <Option name="offset" value="0,0" type="QString"/>
+            <Option name="offset_map_unit_scale" value="3x:0,0,0,0,0,0" type="QString"/>
+            <Option name="offset_unit" value="MM" type="QString"/>
+            <Option name="outline_color" value="35,35,35,255,rgb:0.1372549,0.1372549,0.1372549,1" type="QString"/>
+            <Option name="outline_style" value="solid" type="QString"/>
+            <Option name="outline_width" value="0.26" type="QString"/>
+            <Option name="outline_width_unit" value="MM" type="QString"/>
+            <Option name="style" value="solid" type="QString"/>
+            </Option>
+            <data_defined_properties>
+            <Option type="Map">
+                <Option name="name" value="" type="QString"/>
+                <Option name="properties"/>
+                <Option name="type" value="collection" type="QString"/>
+            </Option>
+            </data_defined_properties>
+        </layer>
+        </symbol>
+    </selectionSymbol>
+    </selection>
+    <labeling type="simple">
+    <settings calloutType="simple">
+        <text-style fontItalic="0" fontLetterSpacing="0" fontUnderline="0" fieldName="concat( &quot;Data0&quot; ,'_', &quot;Data1&quot; )" fontWordSpacing="0" fontSizeUnit="Point" multilineHeightUnit="Percentage" tabStopDistanceMapUnitScale="3x:0,0,0,0,0,0" namedStyle="Regular" forcedItalic="0" stretchFactor="100" legendString="Aa" multilineHeight="1" forcedBold="0" textColor="250,250,250,255,hsv:0,0,0.9789425497825589,1" fontSize="10" fontWeight="50" fontKerning="1" fontStrikeout="0" tabStopDistance="80" capitalization="0" isExpression="1" fontSizeMapUnitScale="3x:0,0,0,0,0,0" textOpacity="1" previewBkgrdColor="255,255,255,255,rgb:1,1,1,1" tabStopDistanceUnit="Point" fontFamily="Open Sans" allowHtml="0" textOrientation="horizontal" blendMode="0" useSubstitutions="0">
+        <families/>
+        <text-buffer bufferJoinStyle="128" bufferNoFill="1" bufferSizeUnits="MM" bufferSizeMapUnitScale="3x:0,0,0,0,0,0" bufferOpacity="1" bufferSize="1" bufferBlendMode="0" bufferDraw="0" bufferColor="250,250,250,255,rgb:0.9803922,0.9803922,0.9803922,1"/>
+        <text-mask maskJoinStyle="128" maskSizeUnits="MM" maskSizeMapUnitScale="3x:0,0,0,0,0,0" maskedSymbolLayers="" maskOpacity="1" maskSize="1.5" maskSize2="1.5" maskEnabled="0" maskType="0"/>
+        <background shapeRotationType="0" shapeJoinStyle="64" shapeOffsetX="0" shapeRadiiUnit="Point" shapeOpacity="1" shapeSizeType="0" shapeOffsetMapUnitScale="3x:0,0,0,0,0,0" shapeBorderWidthUnit="Point" shapeDraw="0" shapeRadiiX="0" shapeSizeUnit="Point" shapeRadiiMapUnitScale="3x:0,0,0,0,0,0" shapeSVGFile="" shapeOffsetY="0" shapeRadiiY="0" shapeRotation="0" shapeBorderWidth="0" shapeSizeX="0" shapeSizeMapUnitScale="3x:0,0,0,0,0,0" shapeBlendMode="0" shapeBorderWidthMapUnitScale="3x:0,0,0,0,0,0" shapeFillColor="255,255,255,255,rgb:1,1,1,1" shapeSizeY="0" shapeBorderColor="128,128,128,255,rgb:0.5019608,0.5019608,0.5019608,1" shapeType="0" shapeOffsetUnit="Point">
+            <symbol alpha="1" frame_rate="10" name="markerSymbol" is_animated="0" clip_to_extent="1" type="marker" force_rhr="0">
+            <data_defined_properties>
+                <Option type="Map">
+                <Option name="name" value="" type="QString"/>
+                <Option name="properties"/>
+                <Option name="type" value="collection" type="QString"/>
+                </Option>
+            </data_defined_properties>
+            <layer enabled="1" locked="0" pass="0" id="" class="SimpleMarker">
+                <Option type="Map">
+                <Option name="angle" value="0" type="QString"/>
+                <Option name="cap_style" value="square" type="QString"/>
+                <Option name="color" value="190,178,151,255,rgb:0.745098,0.6980392,0.5921569,1" type="QString"/>
+                <Option name="horizontal_anchor_point" value="1" type="QString"/>
+                <Option name="joinstyle" value="bevel" type="QString"/>
+                <Option name="name" value="circle" type="QString"/>
+                <Option name="offset" value="0,0" type="QString"/>
+                <Option name="offset_map_unit_scale" value="3x:0,0,0,0,0,0" type="QString"/>
+                <Option name="offset_unit" value="MM" type="QString"/>
+                <Option name="outline_color" value="35,35,35,255,rgb:0.1372549,0.1372549,0.1372549,1" type="QString"/>
+                <Option name="outline_style" value="solid" type="QString"/>
+                <Option name="outline_width" value="0" type="QString"/>
+                <Option name="outline_width_map_unit_scale" value="3x:0,0,0,0,0,0" type="QString"/>
+                <Option name="outline_width_unit" value="MM" type="QString"/>
+                <Option name="scale_method" value="diameter" type="QString"/>
+                <Option name="size" value="2" type="QString"/>
+                <Option name="size_map_unit_scale" value="3x:0,0,0,0,0,0" type="QString"/>
+                <Option name="size_unit" value="MM" type="QString"/>
+                <Option name="vertical_anchor_point" value="1" type="QString"/>
+                </Option>
+                <data_defined_properties>
+                <Option type="Map">
+                    <Option name="name" value="" type="QString"/>
+                    <Option name="properties"/>
+                    <Option name="type" value="collection" type="QString"/>
+                </Option>
+                </data_defined_properties>
+            </layer>
+            </symbol>
+            <symbol alpha="1" frame_rate="10" name="fillSymbol" is_animated="0" clip_to_extent="1" type="fill" force_rhr="0">
+            <data_defined_properties>
+                <Option type="Map">
+                <Option name="name" value="" type="QString"/>
+                <Option name="properties"/>
+                <Option name="type" value="collection" type="QString"/>
+                </Option>
+            </data_defined_properties>
+            <layer enabled="1" locked="0" pass="0" id="" class="SimpleFill">
+                <Option type="Map">
+                <Option name="border_width_map_unit_scale" value="3x:0,0,0,0,0,0" type="QString"/>
+                <Option name="color" value="255,255,255,255,rgb:1,1,1,1" type="QString"/>
+                <Option name="joinstyle" value="bevel" type="QString"/>
+                <Option name="offset" value="0,0" type="QString"/>
+                <Option name="offset_map_unit_scale" value="3x:0,0,0,0,0,0" type="QString"/>
+                <Option name="offset_unit" value="MM" type="QString"/>
+                <Option name="outline_color" value="128,128,128,255,rgb:0.5019608,0.5019608,0.5019608,1" type="QString"/>
+                <Option name="outline_style" value="no" type="QString"/>
+                <Option name="outline_width" value="0" type="QString"/>
+                <Option name="outline_width_unit" value="Point" type="QString"/>
+                <Option name="style" value="solid" type="QString"/>
+                </Option>
+                <data_defined_properties>
+                <Option type="Map">
+                    <Option name="name" value="" type="QString"/>
+                    <Option name="properties"/>
+                    <Option name="type" value="collection" type="QString"/>
+                </Option>
+                </data_defined_properties>
+            </layer>
+            </symbol>
+        </background>
+        <shadow shadowRadiusMapUnitScale="3x:0,0,0,0,0,0" shadowScale="100" shadowUnder="0" shadowOffsetMapUnitScale="3x:0,0,0,0,0,0" shadowRadiusAlphaOnly="0" shadowRadiusUnit="MM" shadowOpacity="0.69999999999999996" shadowDraw="0" shadowColor="0,0,0,255,rgb:0,0,0,1" shadowOffsetDist="1" shadowBlendMode="6" shadowRadius="1.5" shadowOffsetGlobal="1" shadowOffsetAngle="135" shadowOffsetUnit="MM"/>
+        <dd_properties>
+            <Option type="Map">
+            <Option name="name" value="" type="QString"/>
+            <Option name="properties"/>
+            <Option name="type" value="collection" type="QString"/>
+            </Option>
+        </dd_properties>
+        <substitutions/>
+        </text-style>
+        <text-format autoWrapLength="0" multilineAlign="3" decimals="3" addDirectionSymbol="0" placeDirectionSymbol="0" formatNumbers="0" wrapChar="" rightDirectionSymbol=">" leftDirectionSymbol="&lt;" plussign="0" useMaxLineLengthForAutoWrap="1" reverseDirectionSymbol="0"/>
+        <placement repeatDistanceUnits="MM" xOffset="0" overrunDistanceMapUnitScale="3x:0,0,0,0,0,0" polygonPlacementFlags="2" maximumDistance="0" maximumDistanceUnit="MM" geometryGenerator="" fitInPolygonOnly="0" overrunDistance="0" centroidWhole="0" overlapHandling="PreventOverlap" predefinedPositionOrder="TR,TL,BR,BL,R,L,TSR,BSR" rotationAngle="0" geometryGeneratorEnabled="0" quadOffset="4" allowDegraded="0" overrunDistanceUnit="MM" prioritization="PreferCloser" preserveRotation="1" offsetUnits="MM" distUnits="MM" maxCurvedCharAngleOut="-25" dist="0" repeatDistance="0" placement="0" yOffset="0" maxCurvedCharAngleIn="25" layerType="PolygonGeometry" priority="5" placementFlags="10" maximumDistanceMapUnitScale="3x:0,0,0,0,0,0" offsetType="0" lineAnchorType="0" rotationUnit="AngleDegrees" lineAnchorPercent="0.5" lineAnchorTextPoint="FollowPlacement" labelOffsetMapUnitScale="3x:0,0,0,0,0,0" geometryGeneratorType="PointGeometry" lineAnchorClipping="0" centroidInside="0" distMapUnitScale="3x:0,0,0,0,0,0" repeatDistanceMapUnitScale="3x:0,0,0,0,0,0"/>
+        <rendering upsidedownLabels="0" fontMinPixelSize="3" obstacle="1" scaleVisibility="0" scaleMax="0" obstacleType="1" maxNumLabels="2000" minFeatureSize="0" fontLimitPixelSize="0" unplacedVisibility="0" fontMaxPixelSize="10000" scaleMin="0" obstacleFactor="1" limitNumLabels="0" labelPerPart="0" drawLabels="1" mergeLines="0" zIndex="0"/>
+        <dd_properties>
+        <Option type="Map">
+            <Option name="name" value="" type="QString"/>
+            <Option name="properties"/>
+            <Option name="type" value="collection" type="QString"/>
+        </Option>
+        </dd_properties>
+        <callout type="simple">
+        <Option type="Map">
+            <Option name="anchorPoint" value="pole_of_inaccessibility" type="QString"/>
+            <Option name="blendMode" value="0" type="int"/>
+            <Option name="ddProperties" type="Map">
+            <Option name="name" value="" type="QString"/>
+            <Option name="properties"/>
+            <Option name="type" value="collection" type="QString"/>
+            </Option>
+            <Option name="drawToAllParts" value="false" type="bool"/>
+            <Option name="enabled" value="0" type="QString"/>
+            <Option name="labelAnchorPoint" value="point_on_exterior" type="QString"/>
+            <Option name="lineSymbol" value="&lt;symbol alpha=&quot;1&quot; frame_rate=&quot;10&quot; name=&quot;symbol&quot; is_animated=&quot;0&quot; clip_to_extent=&quot;1&quot; type=&quot;line&quot; force_rhr=&quot;0&quot;>&lt;data_defined_properties>&lt;Option type=&quot;Map&quot;>&lt;Option name=&quot;name&quot; value=&quot;&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;properties&quot;/>&lt;Option name=&quot;type&quot; value=&quot;collection&quot; type=&quot;QString&quot;/>&lt;/Option>&lt;/data_defined_properties>&lt;layer enabled=&quot;1&quot; locked=&quot;0&quot; pass=&quot;0&quot; id=&quot;{{6ae6cc91-5624-40e2-bc48-691f5e9fc922}}&quot; class=&quot;SimpleLine&quot;>&lt;Option type=&quot;Map&quot;>&lt;Option name=&quot;align_dash_pattern&quot; value=&quot;0&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;capstyle&quot; value=&quot;square&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;customdash&quot; value=&quot;5;2&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;customdash_map_unit_scale&quot; value=&quot;3x:0,0,0,0,0,0&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;customdash_unit&quot; value=&quot;MM&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;dash_pattern_offset&quot; value=&quot;0&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;dash_pattern_offset_map_unit_scale&quot; value=&quot;3x:0,0,0,0,0,0&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;dash_pattern_offset_unit&quot; value=&quot;MM&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;draw_inside_polygon&quot; value=&quot;0&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;joinstyle&quot; value=&quot;bevel&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;line_color&quot; value=&quot;60,60,60,255,rgb:0.2352941,0.2352941,0.2352941,1&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;line_style&quot; value=&quot;solid&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;line_width&quot; value=&quot;0.3&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;line_width_unit&quot; value=&quot;MM&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;offset&quot; value=&quot;0&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;offset_map_unit_scale&quot; value=&quot;3x:0,0,0,0,0,0&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;offset_unit&quot; value=&quot;MM&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;ring_filter&quot; value=&quot;0&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;trim_distance_end&quot; value=&quot;0&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;trim_distance_end_map_unit_scale&quot; value=&quot;3x:0,0,0,0,0,0&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;trim_distance_end_unit&quot; value=&quot;MM&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;trim_distance_start&quot; value=&quot;0&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;trim_distance_start_map_unit_scale&quot; value=&quot;3x:0,0,0,0,0,0&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;trim_distance_start_unit&quot; value=&quot;MM&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;tweak_dash_pattern_on_corners&quot; value=&quot;0&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;use_custom_dash&quot; value=&quot;0&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;width_map_unit_scale&quot; value=&quot;3x:0,0,0,0,0,0&quot; type=&quot;QString&quot;/>&lt;/Option>&lt;data_defined_properties>&lt;Option type=&quot;Map&quot;>&lt;Option name=&quot;name&quot; value=&quot;&quot; type=&quot;QString&quot;/>&lt;Option name=&quot;properties&quot;/>&lt;Option name=&quot;type&quot; value=&quot;collection&quot; type=&quot;QString&quot;/>&lt;/Option>&lt;/data_defined_properties>&lt;/layer>&lt;/symbol>" type="QString"/>
+            <Option name="minLength" value="0" type="double"/>
+            <Option name="minLengthMapUnitScale" value="3x:0,0,0,0,0,0" type="QString"/>
+            <Option name="minLengthUnit" value="MM" type="QString"/>
+            <Option name="offsetFromAnchor" value="0" type="double"/>
+            <Option name="offsetFromAnchorMapUnitScale" value="3x:0,0,0,0,0,0" type="QString"/>
+            <Option name="offsetFromAnchorUnit" value="MM" type="QString"/>
+            <Option name="offsetFromLabel" value="0" type="double"/>
+            <Option name="offsetFromLabelMapUnitScale" value="3x:0,0,0,0,0,0" type="QString"/>
+            <Option name="offsetFromLabelUnit" value="MM" type="QString"/>
+        </Option>
+        </callout>
+    </settings>
+    </labeling>
+    <blendMode>0</blendMode>
+    <featureBlendMode>0</featureBlendMode>
+    <layerGeometryType>2</layerGeometryType>
+    </qgis>
+
+
+    """
+    with open(qml_path, "w") as f:
+        f.write(qml_content)
 
 def save_qgis_style_custom(tif_path, stats):
     """
