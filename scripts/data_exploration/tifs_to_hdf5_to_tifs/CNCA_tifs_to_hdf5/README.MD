@@ -1,14 +1,37 @@
+# File Structure
+
+```
+portugal_S2_data
+    |-- hdf5
+        |-- T29SPB.h5
+        |-- T29TQG.h5
+        |-- ...
+    |-- input_tifs
+        |-- 2025
+            |-- S2C_MSIL2A_20251007-110951_N0511_R137_T29TPE_20251007T145121
+                |-- S2C_MSIL2A_20251007-110951_N0511_R137_T29TPE_20251007T145121.tif
+                |-- S2C_MSIL1C_20251007-110951_N0511_R137_T29TPE_mask_omni.tif
+            |-- ...
+        |-- 2024
+            |-- S2C_MSIL2A_2024...
+                |-- S2C_MSIL2A_2024...tif
+                |-- S2C_MSIL2A_2024..._mask_omni.tif
+            |-- ...
+        |-- ...
+    |-- vector_mask
+        |-- mask_continental_portugal_CNCA.gpkg
+```
+
 # Assumptions
 
-1. GeoTIFF files are stored all in the same folder
-2. The GeoTIFF file name includes the timestamp (e.g. a sequence of 13 digits as in `S2SR_image_1667647823345.tif`). Parsing is done by `hdf5_utils.parse_and_sort_files` and should be adapted to CNCA file names.
-3. CRS: Ideally the output HDF5 file should store coordinates in CRS EPSG:32629 (WGS 84 / UTM zone 29N). In the current code, the CRS of the output hdf5 file is identical to the CRS of the input GeoTIFF files, but this can be changed in case the CRS of the GeoTIFF files is not EPSG:32629.
+1. There will be a single output `hdf5` file per Sentinel-2 tile that contains all years, i.e. there will be 17 `hdf5` files for the whole Continental Portugal and Sentinel-2 time span 
+2. Ideally the output HDF5 file should store coordinates in CRS EPSG:32629 (WGS 84 / UTM zone 29N). In the current code, the CRS of the output hdf5 file is identical to the CRS of the input GeoTIFF files, but this can be changed in case the CRS of the GeoTIFF files is not EPSG:32629.
 4. Vector mask: an input vector mask (any CRS) is used to filters out TIFs with no overlap with a vector mask, rasterizes the mask to identify valid pixels, and writes the sparse pixel time series to an HDF5 file. Only pixels inside the vector mask are stored in the HDF5 file.
 5. Input and output *nodata* values (either missing data in GeoTIFF files or pixels outside the vector mask but within the output spatial grid) are defined in `hdf5_utils.INPUT_NODATA_VAL` and `hdf5_utils.OUTPUT_NODATA_VAL`.
 
 # Options
 
-1. `create_hdf5.py`: Creates a new HDF5 file from 10-band GeoTIFF files in a specified folder. 
+1. `create_hdf5.py`: Creates a new HDF5 file from 10-band GeoTIFF files 
 
     Inputs:
     - `folder_path_tifs`: Directory containing the 10-band GeoTIFF files.
