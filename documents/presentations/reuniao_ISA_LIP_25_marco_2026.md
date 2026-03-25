@@ -16,6 +16,20 @@ A previsão é que este processo esteja concluido até 1/4/2026.
 
 Este email serve de relatório de atividades que a DGT pediu até 25/3/2026
 
+## Estrutura de ficheiros
+
+Estrutura CACN (exemplo para um par geotiff+mask do ano 2025):
+
+```
+|-- 2025
+
+     |-- S2C_MSIL2A_20251007-110951_N0511_R137_T29TPE_20251007T145121
+
+         |-- S2C_MSIL2A_20251007-110951_N0511_R137_T29TPE_20251007T145121.tif  
+
+         |-- S2C_MSIL1C_20251007-110951_N0511_R137_T29TPE_mask_omni.tif
+```
+
 ## Metados Sentinel-2 (parte)
 
   ```
