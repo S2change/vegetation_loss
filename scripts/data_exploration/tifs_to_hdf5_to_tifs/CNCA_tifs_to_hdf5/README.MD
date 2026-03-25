@@ -27,7 +27,7 @@ portugal_S2_data
 1. There will be a single output `hdf5` file per Sentinel-2 tile that contains all years, i.e. there will be 17 `hdf5` files for the whole Continental Portugal and Sentinel-2 time span 
 2. Ideally the output HDF5 file should store coordinates in CRS EPSG:32629 (WGS 84 / UTM zone 29N). In the current code, the CRS of the output hdf5 file is identical to the CRS of the input GeoTIFF files, but this can be changed in case the CRS of the GeoTIFF files is not EPSG:32629.
 4. Vector mask: use CNCA vector mask for Portugal with a 2 km buffer. The input vector mask (any CRS) is used to filters out TIFs with no overlap with a vector mask, rasterizes the mask to identify valid pixels, and writes the sparse pixel time series to an HDF5 file. Only pixels inside the vector mask are stored in the HDF5 file.
-5. Input and output *nodata* values (either missing data in GeoTIFF files or pixels outside the vector mask but within the output spatial grid) are defined in `hdf5_utils.INPUT_NODATA_VAL` and `hdf5_utils.OUTPUT_NODATA_VAL`.
+5. Input and output *nodata* values (either missing data in GeoTIFF files or pixels outside the vector mask but within the output spatial grid) are defined in `hdf5_utils.INPUT_NODATA_VAL` and `hdf5_utils.OUTPUT_NODATA_VAL`. Currently, `INPUT_NODATA_VAL = 65535` but this should be changed if the *nodata* value of the input GeoTIFF files. The `OUTPUT_NODATA_VAL = 65535` should be left as is.
 
 # Options
 
