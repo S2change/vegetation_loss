@@ -25,6 +25,7 @@ grid (xs, ys) is read from the existing HDF5 file and new TIFs must cover the sa
     - `h5_filename`: Path to the existing HDF5 file to append to.
     - `MIN_DATE`, `MAX_DATE`: `None` or `datetime(y, m, d)`, defining the period of interest (if None, all GeoTIFF file are processed) 
 
+<!---
 # Example File Structure
 ```
 portugal_S2_data
@@ -43,3 +44,4 @@ portugal_S2_data
     |-- vector_mask
         |-- mask_continental_portugal_3763.gpkg
 ```
+--->
