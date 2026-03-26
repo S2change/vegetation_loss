@@ -42,9 +42,9 @@
 
     </details>
 
-- 23 de março de 2026 (reunião DGT/LIP) on-line
+- 25 de março de 2026 (reunião DGT/LIP) on-line
 
-  - [Relatório sumário](documents/presentations/reuniao_ISA_LIP_25_marco_2026.md)
+  - [Relatório sumário](presentations/reuniao_ISA_LIP_25_marco_2026.md)
   - [Detalhes](https://www.notion.so/DGT-ISA-LIP-Technical-Session-HDF5-Code-Walkthrough-25-March-2026-32e70b5874e5812da74ddffdb5edb17e)
 
 ## 2025
