@@ -18,25 +18,28 @@ Filters out TIFs with no overlap with a vector mask, rasterizes the mask to iden
 valid pixels, and writes the sparse pixel time series to an HDF5 file. Only pixels
 inside the vector mask are stored.
 
-The output HDF5 file contains:
+Inputs:
+- 'folder_tifs': Directory containing the 10-band GeoTIFF files.
+- 'vector_mask_path': Path to vector file (shapefile, GeoJSON, etc.) defining the region of interest.
+- 'h5_folder': Path for the folder where the output HDF5 files will be saved.
+- 'MIN_DATE' and 'MAX_DATE': Optional date filters to only include TIFs within a certain date range, based on the timestamp in the filename.
+- `BAND_NAMES`: List of Sentinel-2 band names that will used as column names in the outputted HDF5. Order should be the same order that the bands appear in the GeoTIFF files
+
+The output HDF5 file (per tile) contains:
 - values: (time, bands, pixels) - sparse pixel array for masked pixels only
 - xs, ys: (pixels,) - coordinate arrays for masked pixels
 - ts: (time,) - ordinal dates
 - original_timestamps: (time,) - unix timestamps in milliseconds
 - band_names attribute: band names in order
 
-Inputs:
-- 'folder_path_tifs': Directory containing the 10-band GeoTIFF files.
-- 'vector_mask_path': Path to vector file (shapefile, GeoJSON, etc.) defining the region of interest.
-- 'h5_filename': Path for the output HDF5 file to be created.
-
 Note: TIFs with no overlap with the mask bounding box are discarded. TIFs that partially
 overlap are kept — the boolean pixel mask determines which pixels are written to the HDF5.
 '''
 
 root_folder = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5"
-folder_path_tifs = os.path.join(root_folder, "input_tifs")
+folder_tifs = os.path.join(root_folder, "input_tifs")
 vector_mask_path = os.path.join(root_folder, "vector_mask", "mask_continental_portugal_3763.gpkg")
+h5_folder = os.path.join(root_folder, "hdf5")
 
 MIN_DATE = None # or datetime(2017, 1, 1) # set a minimum date to filter out files with earlier timestamps; if None, all files are included regardless of date
 MAX_DATE = None # or datetime(2030, 1, 1) # set a maximum date to filter out files with later timestamps; if None, all files are included regardless of date
@@ -55,9 +58,9 @@ def main():
     """
     for tile in TILE_NAMES:
         print(f"Processing tile {tile}...")
-        h5_filename      = os.path.join(root_folder, "hdf5", f'{tile}.h5')
+        h5_filename      = os.path.join(h5_folder, f'{tile}.h5')
 
-        file_metadata = parse_and_sort_files(folder_path_tifs, tile, MIN_DATE, MAX_DATE)
+        file_metadata = parse_and_sort_files(folder_tifs, tile, MIN_DATE, MAX_DATE)
         sorted_files = [m['path'] for m in file_metadata] # we need the full path to open the files, so we stored it in file_metadata for convenience
 
         if not sorted_files:

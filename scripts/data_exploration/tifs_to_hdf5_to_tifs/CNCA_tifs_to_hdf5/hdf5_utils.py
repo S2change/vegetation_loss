@@ -3,7 +3,7 @@ import re
 import rasterio
 from datetime import datetime, timezone
 
-BAND_NAMES= ["B3", "B4", "B8", "B12"] #=["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8a", "B11", "B12"] # for testing with fewer bands
+BAND_NAMES= ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8a", "B11", "B12"] # ["B3", "B4", "B8", "B12"] for testing with fewer bands
 TILE_NAMES = ['T29SMC', 'T29TQF', 'T29SMD', 'T29TQG', 'T29SNB', 'T29TME', 'T29SNC', 'T29SND', 'T29SPB', 'T29SPC', 'T29TNE', 'T29SPD', 'T29TNF', 'T29TNG', 'T29TPE', 'T29TPF', 'T29TPG']
 
 INPUT_NODATA_VAL = 65535
