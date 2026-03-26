@@ -21,7 +21,7 @@ inside the vector mask are stored.
 Inputs:
 - 'folder_tifs': Directory containing the 10-band GeoTIFF files.
 - 'vector_mask_path': Path to vector file (shapefile, GeoJSON, etc.) defining the region of interest.
-- 'h5_folder': Path for the folder where the output HDF5 files will be saved.
+- 'folder_hdf5': Path for the folder where the output HDF5 files will be saved.
 - 'MIN_DATE' and 'MAX_DATE': Optional date filters to only include TIFs within a certain date range, based on the timestamp in the filename.
 - `BAND_NAMES`: List of Sentinel-2 band names that will used as column names in the outputted HDF5. Order should be the same order that the bands appear in the GeoTIFF files
 
@@ -39,7 +39,7 @@ overlap are kept — the boolean pixel mask determines which pixels are written 
 root_folder = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5"
 folder_tifs = os.path.join(root_folder, "input_tifs")
 vector_mask_path = os.path.join(root_folder, "vector_mask", "mask_continental_portugal_3763.gpkg")
-h5_folder = os.path.join(root_folder, "hdf5")
+folder_hdf5 = os.path.join(root_folder, "hdf5")
 
 MIN_DATE = None # or datetime(2017, 1, 1) # set a minimum date to filter out files with earlier timestamps; if None, all files are included regardless of date
 MAX_DATE = None # or datetime(2030, 1, 1) # set a maximum date to filter out files with later timestamps; if None, all files are included regardless of date
@@ -58,7 +58,7 @@ def main():
     """
     for tile in TILE_NAMES:
         print(f"Processing tile {tile}...")
-        h5_filename      = os.path.join(h5_folder, f'{tile}.h5')
+        h5_filename      = os.path.join(folder_hdf5, f'{tile}.h5')
 
         file_metadata = parse_and_sort_files(folder_tifs, tile, MIN_DATE, MAX_DATE)
         sorted_files = [m['path'] for m in file_metadata] # we need the full path to open the files, so we stored it in file_metadata for convenience
