@@ -37,9 +37,10 @@ portugal_S2_data
 1. `create_hdf5.py`: Creates a new HDF5 file from 10-band GeoTIFF files 
 
     Inputs:
-    - `folder_path_tifs`: Directory containing the 10-band GeoTIFF files.
-    - `vector_mask_path`: Path to vector file (shapefile, GeoJSON, etc, any CRS) defining the region of interest.
-    - `h5_filename`: Path for the output HDF5 file to be created.
+    - 'folder_tifs': Directory containing the 10-band GeoTIFF files.
+    - 'vector_mask_path': Path to vector file (shapefile, GeoJSON, etc.) defining the region of interest.
+    - 'h5_folder': Path for the folder where the output HDF5 files will be saved.
+    - 'MIN_DATE' and 'MAX_DATE': Optional date filters to only include TIFs within a certain date range, based on the timestamp in the filename.
     - `band_names`: List of Sentinel-2 band names that will used as column names in the outputted HDF5. Order should be the same order that the bands appear in the GeoTIFF files.
     - `MIN_DATE`, `MAX_DATE`: `None` or `datetime(y, m, d)`, defining the period of interest (if None, all GeoTIFF file are processed)
 
@@ -47,9 +48,11 @@ portugal_S2_data
 grid (xs, ys) is read from the existing HDF5 file and new TIFs must cover the same pixel footprint.
 
     Inputs:
-    - `folder_path_tifs`: Directory containing the 10-band GeoTIFF files.
-    - `h5_filename`: Path to the existing HDF5 file to append to.
-    - `MIN_DATE`, `MAX_DATE`: `None` or `datetime(y, m, d)`, defining the period of interest (if None, all GeoTIFF file are processed) 
+    - 'folder_tifs': Directory containing the 10-band GeoTIFF files.
+    - 'folder_hdf5': Path to the folder containing the existing HDF5 files (one per tile).
+    - 'MIN_DATE' and 'MAX_DATE': Optional date filters to only include TIFs within a certain date range, based on the timestamp in the filename.
+
+3. `reconstruct_tifs.py`: script to test the output hdf5 file. From the hdf5 file it creates one tif file with all bands corresponding to the first timestamp, or to the date closest to  `DATE_OUTPUT` if provided.
 
 <!---
 # Example File Structure
