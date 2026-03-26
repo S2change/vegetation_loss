@@ -1,20 +1,14 @@
-# Informação sobre organização dos dados no CNCA
+# Reunião ISA/LIP, on-line
 
 Presentes: Manuel (ISA), Gonçalo (LIP), Danilo (ISA)
 
-## Relatório
+## Tópicos abordados
 
-Como os ficheiros GeoTIGFF das imagens Sentinel-2 (MSIL2A) estão organizadas no CNCA. 
+1. Revisão do script CNCA_tifs_to_hdf5 que faz o "parsing" dos nomes dos ficheiros.
 
-Irei então rever o script que faz o "parsing" dos nomes dos ficheiros em https://github.com/S2change/vegetation_loss/tree/main/scripts/data_exploration/tifs_to_hdf5_to_tifs/CNCA_tifs_to_hdf5 para adaptar à estrutura de ficheiros no CNCA (ver abaixo). Informarei quando a versão revista do script para fazer o parsing estiver pronta para poderem então aplicar e testar.  
+2. Criar com 'create_hdf5.py'  um único ficheiro hdf5 por tile Sentinel-2, cobrindo todo o território de Portugal Continental, com um buffer de 2 km que o CNCA já usou para descarregar os GeoTiffs. Esse ficheiro único deve conter os dados pra a tile  e para a totalidade dos anos. 
 
-Entretanto, já verifiquei que posso extrair o "timestamp" (em milissegundos) simplesmente a partir do nome do ficheiro GeoTIFF e por isso não é preciso ir consultar o ficheiro de metadados.
-
-O objetivo é criar com 'create_hdf5.py'  um único ficheiro hdf5 por tile Sentinel-2, cobrindo todo o território de Portugal Continental, com um buffer de 2 km que o CNCA já usou para descarregar os GeoTiffs. Esse ficheiro único deve conter os dados pra a tile  e para a totalidade dos anos.  Depois será preciso testar a funcionalidade de 'append_hdf5.py' para adicionar ao ficheiro hdf5 a informação de geotiffs que sejam entretanto descarregadas, sem haver repetições de 'timestamps'.
-
-A previsão é que este processo esteja concluido até 1/4/2026.
-
-Este email serve de relatório de atividades que a DGT pediu até 25/3/2026
+3. Testar a funcionalidade de 'append_hdf5.py' para adicionar ao ficheiro hdf5 a informação de geotiffs que sejam entretanto descarregadas, sem haver repetições de 'timestamps'.
 
 ## Estrutura de ficheiros
 
@@ -29,6 +23,22 @@ Estrutura CACN (exemplo para um par geotiff+mask do ano 2025):
 
          |-- S2C_MSIL1C_20251007-110951_N0511_R137_T29TPE_mask_omni.tif
 ```
+
+
+## Relatório reunião
+
+Como os ficheiros GeoTIGFF das imagens Sentinel-2 (MSIL2A) estão organizadas no CNCA. 
+
+Irei então rever o script que faz o "parsing" dos nomes dos ficheiros em https://github.com/S2change/vegetation_loss/tree/main/scripts/data_exploration/tifs_to_hdf5_to_tifs/CNCA_tifs_to_hdf5 para adaptar à estrutura de ficheiros no CNCA (ver abaixo). Informarei quando a versão revista do script para fazer o parsing estiver pronta para poderem então aplicar e testar.  
+
+Entretanto, já verifiquei que posso extrair o "timestamp" (em milissegundos) simplesmente a partir do nome do ficheiro GeoTIFF e por isso não é preciso ir consultar o ficheiro de metadados.
+
+O objetivo é criar com 'create_hdf5.py'  um único ficheiro hdf5 por tile Sentinel-2, cobrindo todo o território de Portugal Continental, com um buffer de 2 km que o CNCA já usou para descarregar os GeoTiffs. Esse ficheiro único deve conter os dados pra a tile  e para a totalidade dos anos.  Depois será preciso testar a funcionalidade de 'append_hdf5.py' para adicionar ao ficheiro hdf5 a informação de geotiffs que sejam entretanto descarregadas, sem haver repetições de 'timestamps'.
+
+A previsão é que este processo esteja concluido até 1/4/2026.
+
+Este email serve de relatório de atividades que a DGT pediu até 25/3/2026
+
 
 ## Metados Sentinel-2 (parte)
 
