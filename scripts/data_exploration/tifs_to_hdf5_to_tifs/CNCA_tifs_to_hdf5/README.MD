@@ -39,7 +39,7 @@ portugal_S2_data
     Inputs:
     - 'folder_tifs': Directory containing the 10-band GeoTIFF files.
     - 'vector_mask_path': Path to vector file (shapefile, GeoJSON, etc.) defining the region of interest.
-    - 'h5_folder': Path for the folder where the output HDF5 files will be saved.
+    - 'folder_hdf5': Path for the folder where the output HDF5 files will be saved.
     - 'MIN_DATE' and 'MAX_DATE': Optional date filters to only include TIFs within a certain date range, based on the timestamp in the filename.
     - `band_names`: List of Sentinel-2 band names that will used as column names in the outputted HDF5. Order should be the same order that the bands appear in the GeoTIFF files.
     - `MIN_DATE`, `MAX_DATE`: `None` or `datetime(y, m, d)`, defining the period of interest (if None, all GeoTIFF file are processed)
