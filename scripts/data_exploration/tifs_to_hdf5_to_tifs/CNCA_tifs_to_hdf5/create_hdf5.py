@@ -1,4 +1,5 @@
 import os
+import sys
 import numpy as np
 import h5py
 import rasterio
@@ -8,7 +9,7 @@ from datetime import datetime
 from shapely.geometry import box
 import geopandas as gpd
 
-from hdf5_utils import parse_and_sort_files, read_all_bounds, INPUT_NODATA_VAL, OUTPUT_NODATA_VAL
+from hdf5_utils import parse_and_sort_files, read_all_bounds, INPUT_NODATA_VAL, OUTPUT_NODATA_VAL, BAND_NAMES, TILE_NAMES
 
 '''
 Creates a new HDF5 file from 10-band GeoTIFF files in a specified folder.
@@ -33,70 +34,97 @@ Note: TIFs with no overlap with the mask bounding box are discarded. TIFs that p
 overlap are kept — the boolean pixel mask determines which pixels are written to the HDF5.
 '''
 
-folder_path_tifs = r"E:\T29TQG\CNCA_tifs_to_hdf5_tests\T29TQG_tifs_for_testing\create_new_hdf5"
-vector_mask_path = r"C:\Users\isa127909\Downloads\mask_continental_portugal_3763.gpkg"
-h5_filename      = os.path.join(r"E:\T29TQG\CNCA_tifs_to_hdf5_tests", 'T29TQG_CNCA_test.h5')
+root_folder = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5"
+folder_path_tifs = os.path.join(root_folder, "input_tifs")
+vector_mask_path = os.path.join(root_folder, "vector_mask", "mask_continental_portugal_3763.gpkg")
 
-# B2, B3, B4, B5, B6, B7, B8, B8a, B11, B12 for 10 bands
-band_names = ["B3", "B4", "B8", "B12"]
-
-MIN_DATE = None # datetime(2017, 1, 1) # set a minimum date to filter out files with earlier timestamps
-MAX_DATE = None # datetime(2030, 1, 1) # set a maximum date to filter out files with later timestamps
+MIN_DATE = None # or datetime(2017, 1, 1) # set a minimum date to filter out files with earlier timestamps; if None, all files are included regardless of date
+MAX_DATE = None # or datetime(2030, 1, 1) # set a maximum date to filter out files with later timestamps; if None, all files are included regardless of date
 
 
 def main():
     """
     Main Steps:
-    - Parses and sorts input directory of GeoTIFFs
+    - Parses and sorts input directory of GeoTIFFs just for the specified tile, extracting timestamps from filenames
     - Identifies largest tif, uses that as a reference tif
     - Clip input vector_mask_path by reference tif
     - Filters out tifs that have no overlap with reference tif
     - Rasterize mask to get bool pixels and total pixel count
     - Iterate through input GeoTIFFs, saving pixels that overlap rasterized mask to the HDF5
-        - If any of the bands for a pixel have NODATA, then all bands are set to NODATA
+    - If any of the bands for a pixel have NODATA, then all bands are set to NODATA
     """
-    file_metadata = parse_and_sort_files(folder_path_tifs, MIN_DATE, MAX_DATE)
-    sorted_files = [m['filename'] for m in file_metadata]
+    for tile in TILE_NAMES:
+        print(f"Processing tile {tile}...")
+        h5_filename      = os.path.join(root_folder, "hdf5", f'{tile}.h5')
 
-    all_bounds = read_all_bounds(folder_path_tifs, sorted_files)
+        file_metadata = parse_and_sort_files(folder_path_tifs, tile, MIN_DATE, MAX_DATE)
+        sorted_files = [m['path'] for m in file_metadata] # we need the full path to open the files, so we stored it in file_metadata for convenience
 
-    largest_file, ref_crs, ref_transform, ref_meta = get_reference_tif(
-        folder_path_tifs, sorted_files, all_bounds
-    )
+        if not sorted_files:
+            print(f"No files found for tile {tile} in the specified date range. Skipping.")
+            continue
 
-    clipped_mask = clip_vector_mask(vector_mask_path, all_bounds[largest_file], ref_crs)
+        # all_bounds is a dict mapping file basenames to their bounding boxes (left, bottom, right, top)
+        all_bounds = read_all_bounds(sorted_files)
 
-    aligned_files = filter_by_mask_overlap(all_bounds, clipped_mask)
-    file_metadata = [m for m in file_metadata if m['filename'] in set(aligned_files)]
+        # largest_file is the file path of the largest tif, and we also get the reference CRS, transform, and metadata from that file
+        largest_file, ref_crs, ref_transform, ref_meta = get_reference_tif(sorted_files, all_bounds)
 
-    ref_meta.update({"count": 1})
-    total_masked_pixels, xs_flat, ys_flat = rasterize_mask(clipped_mask, ref_meta, ref_transform)
+        # Clip vector mask to reference tif extent to speed up later steps and avoid edge cases with files that only partially overlap the mask
+        clipped_mask = clip_vector_mask(vector_mask_path, all_bounds[os.path.basename(largest_file)], ref_crs)
 
-    write_hdf5(h5_filename, aligned_files, file_metadata, folder_path_tifs,
-               band_names, total_masked_pixels, xs_flat, ys_flat, ref_transform, ref_crs)
+        # Filter out files with no overlap with the mask bounding box, but keep those that partially overlap (the boolean pixel mask will take care of which pixels to keep)
+        # Since all_bounds keys are basenames, aligned_files will also be basenames, so we will need to match them with the full paths in file_metadata when we write the HDF5
+        aligned_files = filter_by_mask_overlap(all_bounds, clipped_mask)
+        file_metadata = [m for m in file_metadata if m['filename'] in set(aligned_files)]
+        aligned_paths = [m['path'] for m in file_metadata if m['filename'] in set(aligned_files)]
 
-    print(f"Done! Created {h5_filename} with {total_masked_pixels} masked pixels and {len(aligned_files)} timesteps.")
+        # Update ref_meta to have count=1 since we will write one band at a time to the HDF5
+        ref_meta.update({"count": 1})
+        total_masked_pixels, xs_flat, ys_flat = rasterize_mask(clipped_mask, ref_meta, ref_transform)
+
+        # aligned_paths is a list of file paths that have some overlap with the mask, and file_metadata is filtered to only include metadata for those files, so we can pass both to write_hdf5 to read the files and write the HDF5
+        write_hdf5(h5_filename, aligned_paths, file_metadata, BAND_NAMES,
+                total_masked_pixels, xs_flat, ys_flat, ref_transform, ref_crs)
+
+        print(f"Done! Created {h5_filename} with {total_masked_pixels} masked pixels and {len(aligned_files)} timesteps.")
     
 
-def get_reference_tif(folder, filenames, all_bounds):
-    """Find the largest TIF by bounding box area and return its metadata."""
+def get_reference_tif(filepaths, all_bounds):
+    """
+    Returns the path of the largest TIF by bounding box area and return its metadata.
+
+    Inputs:
+    - filenames: list of file path to TIFs
+    - all_bounds: dict mapping file basenames to their bounding boxes (left, bottom, right, top)
+
+    Outputs:
+    - largest_file: file path of the largest TIF
+    - ref_crs: CRS of the largest TIF
+    - ref_transform: Affine transform of the largest TIF
+    - ref_meta: Metadata dict of the largest TIF 
+    """
     print("Finding largest TIF as spatial reference...")
-    largest_file = max(filenames, key=lambda f: (
-        (all_bounds[f].right - all_bounds[f].left) * (all_bounds[f].top - all_bounds[f].bottom)
+    largest_file = max(filepaths, key=lambda f: (
+        (all_bounds[os.path.basename(f)].right - all_bounds[os.path.basename(f)].left) * (all_bounds[os.path.basename(f)].top - all_bounds[os.path.basename(f)].bottom)
     ))
-    with rasterio.open(os.path.join(folder, largest_file)) as ref_src:
+    with rasterio.open(largest_file) as ref_src:
         ref_crs = ref_src.crs
         ref_transform = ref_src.transform
         ref_meta = ref_src.meta.copy()
     print(f"  Reference TIF: {largest_file}")
-    print(f"  Bounds: {all_bounds[largest_file]}")
+    print(f"  Bounds: {all_bounds[os.path.basename(largest_file)]}")
     return largest_file, ref_crs, ref_transform, ref_meta
-
 
 def clip_vector_mask(vector_mask_path, ref_bounds, ref_crs):
     """Load vector mask, reproject if needed, and clip to reference TIF extent."""
     print(f"Loading vector mask: {vector_mask_path}")
-    vector_mask = gpd.read_file(vector_mask_path)
+    try:
+        vector_mask = gpd.read_file(vector_mask_path)
+    except Exception as e:
+        print(f"Error loading vector mask: {e}")
+        sys.exit(1)
+
     if vector_mask.crs != ref_crs:
         vector_mask = vector_mask.to_crs(ref_crs)
 
@@ -164,7 +192,7 @@ def rasterize_mask(clipped_mask, ref_meta, ref_transform):
     return total_masked_pixels, xs_flat, ys_flat
 
 
-def write_hdf5(h5_filename, sorted_files, file_metadata, folder_tifs,
+def write_hdf5(h5_filename, sorted_files, file_metadata, 
                band_names, total_masked_pixels, xs_flat, ys_flat, ref_transform, ref_crs):
     """Write sparse pixel time series to HDF5."""
     nbands = len(band_names)
@@ -195,7 +223,7 @@ def write_hdf5(h5_filename, sorted_files, file_metadata, folder_tifs,
         for i, filename in enumerate(sorted_files):
             print(f"Processing {i+1}/{len(sorted_files)}: {filename}")
 
-            with rasterio.open(os.path.join(folder_tifs, filename)) as src:
+            with rasterio.open(filename) as src:
                 tif_rows, tif_cols = rasterio.transform.rowcol(src.transform, xs_flat, ys_flat)
                 tif_rows = np.array(tif_rows)
                 tif_cols = np.array(tif_cols)
@@ -204,6 +232,9 @@ def write_hdf5(h5_filename, sorted_files, file_metadata, folder_tifs,
                          (tif_cols >= 0) & (tif_cols < src.width))
 
                 data_all = src.read()  # (10, H, W)
+                # if shape does not math number of bands from BAND_NAMES, raise an error
+                if data_all.shape[0] != nbands:
+                    raise ValueError(f"File {filename} has {data_all.shape[0]} bands, but expected {nbands} based on BAND_NAMES.")  
 
                 # Create a 2D mask (H, W) where True means at least one band is NoData
                 nodata_mask = np.any(data_all == INPUT_NODATA_VAL, axis=0)

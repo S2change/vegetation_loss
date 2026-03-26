@@ -5,7 +5,7 @@ import rasterio
 import rasterio.transform
 from datetime import datetime
 
-from hdf5_utils import parse_and_sort_files, INPUT_NODATA_VAL, OUTPUT_NODATA_VAL
+from hdf5_utils import TILE_NAMES, parse_and_sort_files, INPUT_NODATA_VAL, OUTPUT_NODATA_VAL
 
 '''
 Appends new timesteps to an existing HDF5 file created by create_hdf5.py.
@@ -15,16 +15,17 @@ grid (xs, ys) is read from the existing file and new TIFs must cover the same
 pixel footprint.
 
 Inputs:
-- 'folder_path_tifs': Directory containing the 10-band GeoTIFF files.
-- 'h5_filename': Path to the existing HDF5 file to append to.
+- 'folder_tifs': Directory containing the 10-band GeoTIFF files.
+- 'folder_hdf5': Path to the folder containing the existing HDF5 files (one per tile).
+- 'MIN_DATE' and 'MAX_DATE': Optional date filters to only include TIFs within a certain date range, based on the timestamp in the filename.
 '''
 
-folder_path_tifs = r"E:\T29TQG\CNCA_tifs_to_hdf5_tests\T29TQG_tifs_for_testing\append_to_hdf5"
-h5_filename      = os.path.join(r"E:\T29TQG\CNCA_tifs_to_hdf5_tests", 'T29TQG_CNCA_test_appended.h5')
+root_folder = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5"
+folder_tifs = os.path.join(root_folder, "input_tifs")
+folder_hdf5=os.path.join(root_folder, "hdf5")
 
-MIN_DATE = None
-MAX_DATE = None
-
+MIN_DATE = None # or datetime(2017, 1, 1) # set a minimum date to filter out files with earlier timestamps; if None, all files are included regardless of date
+MAX_DATE = None # or datetime(2030, 1, 1) # set a maximum date to filter out files with later timestamps; if None, all files are included regardless of date
 
 def main():
     """
@@ -33,31 +34,42 @@ def main():
     - Checks existing timestamps in HDF5 file, filters any matches input directory
     - Appends additional data to the HDF5 file
     """
-    if not os.path.exists(h5_filename):
-        raise FileNotFoundError(f"Cannot append — HDF5 file not found: {h5_filename}")
+    for tile in TILE_NAMES:
+        print(f"Processing tile {tile}...")
+   
+        h5_filename      = os.path.join(folder_hdf5, f'{tile}.h5')
 
-    file_metadata = parse_and_sort_files(folder_path_tifs, MIN_DATE, MAX_DATE)
-    sorted_files = [m['filename'] for m in file_metadata]
+        if not os.path.exists(h5_filename):
+            print(f"Cannot append — HDF5 file not found: {h5_filename}")
+            continue
+        
+        # Parse and sort input TIF files, filtering by date range if specified
+        # Reads all TIFs in the input folder, but only keeps those matching the current tile and date range
+        # Removal of already existing timestamps in HDF5 is done in append_hdf5, since we need to read the existing timestamps from the file first before we can filter the input files
+        new_metadata = parse_and_sort_files(folder_tifs, tile, MIN_DATE, MAX_DATE)
+        if not new_metadata:
+            print(f"No new files found for tile {tile} in the specified date range. Skipping.")
+            continue    
 
-    with h5py.File(h5_filename, 'r') as h5f:
-        xs_flat = h5f["xs"][:]
-        ys_flat = h5f["ys"][:]
+        with h5py.File(h5_filename, 'r') as h5f:
+            xs_flat = h5f["xs"][:]
+            ys_flat = h5f["ys"][:]
 
-    append_hdf5(h5_filename, sorted_files, file_metadata, folder_path_tifs, xs_flat, ys_flat)
+        append_hdf5(h5_filename, new_metadata, folder_tifs, xs_flat, ys_flat)
 
 
-def append_hdf5(h5_filename, new_files, new_metadata, folder_tifs, xs_flat, ys_flat):
+def append_hdf5(h5_filename, new_metadata, folder_tifs, xs_flat, ys_flat):
     """Append new timesteps to an existing HDF5 file, skipping duplicates."""
     with h5py.File(h5_filename, 'a') as h5f:
         existing_ts = set(h5f["original_timestamps"][:].tolist())
         new_metadata = [m for m in new_metadata if m['timestamp_ms'] not in existing_ts]
-        new_files    = [m['filename'] for m in new_metadata]
+        new_files    = [m['path'] for m in new_metadata] # paths to the new files to append, after filtering out those already present in HDF5 based on timestamp
 
         if not new_files:
             print("No new timesteps to append — all files already present in HDF5.")
             return
 
-        skipped = len(set(m['filename'] for m in new_metadata) - set(new_files))
+        skipped = len(set(m['path'] for m in new_metadata) - set(new_files))
         if skipped:
             print(f"Skipping {skipped} file(s) already present in HDF5.")
 
@@ -94,7 +106,6 @@ def append_hdf5(h5_filename, new_files, new_metadata, folder_tifs, xs_flat, ys_f
                 h5f["values"][current_t + i, :, :] = out
 
     print(f"Done! Appended {len(new_files)} timestep(s) to {h5_filename}.")
-
 
 if __name__ == "__main__":
     main()
