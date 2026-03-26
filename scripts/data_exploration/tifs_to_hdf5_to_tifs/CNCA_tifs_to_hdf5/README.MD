@@ -24,8 +24,9 @@ portugal_S2_data
 
 # Assumptions
 
-1. Bands in GeoTiff files are in the following order: `["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8a", "B11", "B12"]`. Otherwise, variable `band_names` has to be ro-ordered
+1. Bands in GeoTiff files are in the following order: `BAND_NAMES=["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8a", "B11", "B12"]`. Otherwise, variable `BAND_NAMES` in `hdf5_utils.py` has to be re-ordered. 
 1. There will be a single output `hdf5` file per Sentinel-2 tile that contains all years, i.e. there will be 17 `hdf5` files for the whole Continental Portugal and Sentinel-2 time span 
+2. The list of tiles is `TILE_NAMES=['T29SMC', 'T29TQF', 'T29SMD', 'T29TQG', 'T29SNB', 'T29TME', 'T29SNC', 'T29SND', 'T29SPB', 'T29SPC', 'T29TNE', 'T29SPD', 'T29TNF', 'T29TNG', 'T29TPE', 'T29TPF', 'T29TPG']` in `hdf5_utils.py`. Otherwise, it needs to be redefined.
 2. Ideally the output HDF5 file should store coordinates in CRS EPSG:32629 (WGS 84 / UTM zone 29N). In the current code, the CRS of the output hdf5 file is identical to the CRS of the input GeoTIFF files, but this can be changed in case the CRS of the GeoTIFF files is not EPSG:32629.
 4. Vector mask: use CNCA vector mask for Portugal with a 2 km buffer. The input vector mask (any CRS) is used to filters out TIFs with no overlap with a vector mask, rasterizes the mask to identify valid pixels, and writes the sparse pixel time series to an HDF5 file. Only pixels inside the vector mask are stored in the HDF5 file.
 5. Input and output *nodata* values (either missing data in GeoTIFF files or pixels outside the vector mask but within the output spatial grid) are defined in `hdf5_utils.INPUT_NODATA_VAL` and `hdf5_utils.OUTPUT_NODATA_VAL`. Currently, `INPUT_NODATA_VAL = 65535` but this should be changed if the *nodata* value of the input GeoTIFF files. The `OUTPUT_NODATA_VAL = 65535` should be left as is.
