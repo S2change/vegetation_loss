@@ -29,11 +29,13 @@ DATE_OUTPUT=None # or '2020-03-25'
 
 
 def main():
-    export_multiband_hdf5(hdf5_path, output_dir, "T29TNE_6bands", CRS, target_band_order,DATE_OUTPUT)
+    global DATE_OUTPUT, target_band_order
 
-def export_multiband_hdf5(hdf5_path, output_dir, prefix, crs, target_band_order, DATE_OUTPUT):
     num_bands = len(target_band_order)
     os.makedirs(output_dir, exist_ok=True)
+
+    # extract stem from hdf5_path for output filename prefix
+    prefix = os.path.splitext(os.path.basename(hdf5_path))[0]
 
     with h5py.File(hdf5_path, 'r') as f:
         print("Loading coordinates...")
@@ -92,7 +94,7 @@ def export_multiband_hdf5(hdf5_path, output_dir, prefix, crs, target_band_order,
             print(f"  - Band {b_idx} contains {valid_pixels:,} valid pixels.")
 
         # Cleanup timestamp for filename
-        output_path = os.path.join(output_dir, f"{prefix}_{DATE_OUTPUT}.tif")
+        output_path = os.path.join(output_dir, f"{prefix}_{ts_str_values[IDX]}.tif")
         
         print(f"Writing to GeoTIFF: {output_path}...")
         with rasterio.open(
@@ -101,7 +103,7 @@ def export_multiband_hdf5(hdf5_path, output_dir, prefix, crs, target_band_order,
             height=rows, width=cols,
             count=num_bands,
             dtype='uint16',
-            crs=crs,
+            crs=CRS,
             transform=transform,
             nodata=NODATA_VAL,
             compress='lzw'
