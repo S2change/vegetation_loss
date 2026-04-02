@@ -1,4 +1,4 @@
-#Vchips (visual chips)
+# Vchips (visual chips)
 
 These are $4 \times 4 ~km^2$ annotated chips. Each *vchip* corresponds to a date and a location. There are three components:
 1. **before**: multiband geotiff file which is a time composite *before* the date
