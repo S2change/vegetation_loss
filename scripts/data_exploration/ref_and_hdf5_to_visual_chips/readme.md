@@ -34,8 +34,6 @@ To convert 16-bit into 8-bit bands, we follow the suggestions from the authors o
      we applied a normalization strategy based on the percent clip method,  where the values are clipped at the 1.5% and 98.5% percentiles and then linearly stretched to 0-255. 
      While our model expects int8 inputs, this was primarily a practical choice to reduce the data volume and storage footprint during training; in fact, the images could also be normalized directly to a 0.0-1.0 range and the model retrained accordingly. 
 
-Best regards,
-
 Inputs for BACDM are organized in the following structure:
 
 ```
