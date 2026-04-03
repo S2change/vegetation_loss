@@ -3,7 +3,7 @@
 ## Vchip creation
 
 To create vchips the rationale is. Using reference data sets, select one feature at the time. 
-For that *reference feature*, with `Data0` and `Data 1`, search for the most significant drop of `NDVI`between `Data0`and `Data1`.
+For that *reference feature*, with `Data0` and `Data1`, search for the most significant drop of `NDVI` between `Data0` and `Data1`.
 If there is a significant drop, then use the date to create a `before` and an `after` time composite of the sprectral data (read `hdf5`file). 
 See source code (ref_and_hdf5_to_visual_chips.py)
 
