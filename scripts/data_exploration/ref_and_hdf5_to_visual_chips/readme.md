@@ -17,8 +17,7 @@ vchips are tuples (`before`, `after`, `mask`) where `before` an `after` are 16-b
 To convert 16-bit into 8-bit bands, we follow the suggestions from the authors of the BACDM paper:
 
      Dear Manuel Campagnolo,
-     Thank you for your message and for the careful follow-up questions. The first author (Liu Peng) has recently taken a position in an institution affiliated with the military, so it is currently not very convenient to communicate with him directly. 
-     Below, I summarize the final scheme that we discussed internally and agreed upon previously.
+     Thank you for your message and for the careful follow-up questions. Below, I summarize the final scheme that we discussed internally and agreed upon previously.
      2. Regarding data normalization of the image chips, we experimented with a number of different strategies. For spectral stretching in particular, we tested several options, 
      including direct truncation (e.g., clipping to a fixed range such as 350–3500, these two numbers are determined by calculated
      the histogram of all BA pixels in the dataset). After comparison, we finally adopted a percent clipping strategy using quantiles 1.5 and 98.5 per band.
@@ -29,7 +28,6 @@ To convert 16-bit into 8-bit bands, we follow the suggestions from the authors o
      Based on comparative experiments at a continental scale, we found that the last strategy—i.e., 
      computing the quantiles independently for each image chip and each band—provided the strongest generalization performance. 
      Therefore, this approach was adopted in our final workflow.
-     Kind regards, Yongxue
      
      Dear Colleagues,
      Thank you for your interest in our work; you are actually the first to raise this specific technical question regarding the input data. To convert the Sentinel-2 reflectances from GEE (0-10000) to the 8-bit range (0-255) used in our model, 
