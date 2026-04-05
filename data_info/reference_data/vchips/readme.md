@@ -6,6 +6,7 @@ These are $4 \times 4 ~km^2$ annotated chips. Each *vchip* corresponds to a date
 3. **mask**: singleband geotiff (`int8`) with the same extent that represents the visualy identifies classes of *vegetation lost* or *no change* from *before* to *after*. The classes are: 0 - *no change* ;  1 - ...
 
 Example: for 2020 reference data (94 vchips)
+
     ========================================
           MASK VALUE DISTRIBUTION
     ========================================
