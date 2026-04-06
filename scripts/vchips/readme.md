@@ -1,13 +1,44 @@
 # Vchips (visual chips) 
 
+See description of vchips at (https://github.com/S2change/vegetation_loss/tree/main/data_info/reference_data/vchips)
+
 ## Vchip creation
 
-To create vchips the rationale is. Using reference data sets, select one feature at the time. 
-For that *reference feature*, with `Data0` and `Data 1`, search for the most significant drop of `NDVI`between `Data0`and `Data1`.
-If there is a significant drop, then use the date to create a `before` and an `after` time composite of the sprectral data (read `hdf5`file). 
+To create vchips the rationale is. Using reference data sets, select one feature at the time.  For that *reference feature*, with `Data0` and `Data1`, search for the most significant drop of `NDVI`between `Data0` and `Data1`.
+If there is a significant drop, then use the date to create a `before` and an `after` time composite of spectral data (read `hdf5` file). 
+
 See source code (ref_and_hdf5_to_visual_chips.py)
 
 Using the pairs `before` and `after` and other sources, vchips were annotated manually. See (https://github.com/S2change/vegetation_loss/tree/main/data_info/reference_data/vchips)
 
 
 ## Convert vchips into chips for training
+
+`vchips_to_training_chips.py` reads vchips triplets and creates N=4 256*256 chips:
+
+1. Inputs: vchips in geotiff format
+   
+- Before and After: 4 by 4 km2 'before' and 'after' 6-band 16-bit geotiff
+- mask geotiff with classes 0,1,2,...
+- The input files have names like
+
+```
+   *) "C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\vchips\source_rasters\vchip_680435_4497955_20200704_after.tif"
+   *) "C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\vchips\source_rasters\vchip_680435_4497955_20200704_before.tif"
+   *) "C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\vchips\mask_rasters\vchip_680435_4497955_20200704_mask.tif"
+```
+
+2. Outputs:
+   
+- All files in the triplet  'before', 'after' and 'mask' need to be cropped into 256*256 aligned chips (2560 m by 2560 m).
+- Before and After: 8-bit tif files with the same bands
+- The output 'before' and 'after' files should be saved as tif files
+- The ouput mask files should be saved in png format
+- All 3 files have the same stem name, e.g. `vchip_680435_4497955_20200704_04` (x,y,date,chip index within vchip)
+
+```
+   *) "C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\training_data\before" 
+   *) "C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\training_data\after" 
+   *) C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\training_data\label
+```
+
