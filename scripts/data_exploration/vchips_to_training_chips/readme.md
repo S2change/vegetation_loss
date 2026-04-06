@@ -22,6 +22,8 @@ See description of vchips at (https://github.com/S2change/vegetation_loss/tree/m
    d. The ouput mask files should be saved in png format
    e. All 3 files have the same stem name, e.g. `vchip_680435_4497955_20200704_04` (x,y,date,chip index within vchip)
 
+```
    *) "C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\training_data\before" 
    *) "C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\training_data\after" 
    *) C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\training_data\label
+```
