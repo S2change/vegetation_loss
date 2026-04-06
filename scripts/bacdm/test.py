@@ -19,10 +19,10 @@ print("Current Time:", current_time)
 #model.load_state_dict(torch.load(AAA_Configs.Test_weight_path))
 
 if AAA_Configs.USE_CUDA:
-    model = Encoder().cuda()
+    model = Encoder(num_classes=AAA_Configs.NUM_CLASSES).cuda()
     model.load_state_dict(torch.load(AAA_Configs.Test_weight_path, map_location='cuda'))
 else:
-    model = Encoder()
+    model = Encoder(num_classes=AAA_Configs.NUM_CLASSES)
     model.load_state_dict(torch.load(AAA_Configs.Test_weight_path, map_location='cpu'))
 
 
@@ -42,6 +42,7 @@ with torch.no_grad():
             im1 = im1.cuda()    
             im2 = im2.cuda()
         label_name = label_name[0]
+        ''' adapt to more than 2 classes (see below)
         outputs = model(im1, im2)
         outputs = outputs[0][0]
         a = outputs[0].unsqueeze(0)
@@ -49,15 +50,34 @@ with torch.no_grad():
         # torchvision.utils.save_image(a, outPath + '/%s' % label_name)
         # saves to geotiff format, with names corresponding to the input tifs
         image_np = a.detach().cpu().numpy()
-        orig_path = orig_path[0] 
+        '''
 
+        # 1. Get model prediction
+        outputs = model(im1, im2)
+        
+        # 2. Extract the high-resolution output (the first item in the output list)
+        # Shape is [Batch, Classes, H, W] -> [1, 5, 256, 256]
+        output_high_res = outputs[0]
+
+        # 3. Find the winning class for each pixel (0, 1, 2, 3, or 4)
+        # argmax along the 'Classes' dimension (dim=1)
+        # result shape: [1, 256, 256]
+        prediction = torch.argmax(output_high_res, dim=1)
+
+        # 4. Remove the batch dimension to get a 2D image [256, 256]
+        # and move to CPU/Numpy
+        image_np = prediction.squeeze(0).detach().cpu().numpy()
+        
         # try one or the other of these approaches to handle nodata values, to see which gives better results (the resampling/smoothing in split_tifs.py should help make the 10m bands more similar to the original BACDM data and reduce noise, but it may still be worth trying both approaches to see if one gives better results than the other)
         image_np = np.nan_to_num(image_np, nan=255)
         #with rasterio.open(orig_path) as src:
         #    image_np[image_np == src.nodata] = 255 # scr.nodata==255.0
 
-        # Ensure the array is uint8 before saving
+        # 5. Convert to uint8 (important for GeoTIFF and storage)
         image_np = image_np.astype('uint8')
+
+        # 6. Save as GeoTIFF with geospatial metadata from the original input TIFF (assumption: read the geospatial metadata from the original input TIFF and apply it to the output GeoTIFF, so that the output GeoTIFF is properly georeferenced and can be used in GIS software or for further geospatial analysis; this also ensures that the output GeoTIFF has the same spatial resolution, coordinate reference system, and geotransform as the original input TIFF, which is important for accurate spatial alignment and analysis)
+        orig_path = orig_path[0] 
 
         # 1. Use rasterio to grab the geospatial profile (CRS + Transform)
         with rasterio.open(orig_path) as src:
@@ -77,8 +97,7 @@ with torch.no_grad():
         
         with rasterio.open(out_tif_path, 'w', **profile) as dst:
             # Rasterio expects (Bands, Height, Width)
-            dst.write(image_np.astype('uint8'))
-
+            dst.write(image_np.astype('uint8'),1) # Write to the first band
 
 # time elapsed
 elapsed_time = time.time() - time.mktime(time.strptime(current_time, "%Y-%m-%d %H:%M:%S"))

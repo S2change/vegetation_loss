@@ -1,10 +1,12 @@
+import sys
+
 import torch.nn as nn
 import torch.utils.checkpoint as checkpoint
 from einops import rearrange
-from timm.models.layers import DropPath, to_2tuple, trunc_normal_
+from timm.layers import DropPath, to_2tuple, trunc_normal_
 import copy
-from bacdm.YTYAttention import *
 import AAA_Configs
+from bacdm.YTYAttention import *
 
 # 输入的通道数
 td =AAA_Configs.channel_nums
@@ -1007,12 +1009,14 @@ class SwinTransDecoder(nn.Module):
 
         return x_p, x_pre2, x_pre3, x_pre4
 
-
+# mc: added argument num_classes to encoder1
+# mc: AAA_Configs.Train_pretrained_path was initially trained with 2 classes
+# load_from() will check if the pretrained weights match the current model architecture, and only load those that match, so it should be safe to use a pretrained model trained with 2 classes even if we change num_classes, as long as the rest of the architecture is compatible.
 class encoder1(nn.Module):
-    def __init__(self):
+    def __init__(self,num_classes):
         super(encoder1, self).__init__()
 
-        self.encoder1 = SwinTransEncoder(img_size=256, patch_size=4, in_chans=td, num_classes=2, embed_dim=128,
+        self.encoder1 = SwinTransEncoder(img_size=256, patch_size=4, in_chans=td, num_classes=num_classes, embed_dim=128,
                                          depths=[2, 2, 18, 2], depths_decoder=[4, 4, 4, 4], num_heads=[4, 8, 16, 32],
                                          window_size=8)
         self.pretrained_path = AAA_Configs.Train_pretrained_path
@@ -1020,6 +1024,7 @@ class encoder1(nn.Module):
 
         self.load_from()
 
+    r''' MC: replaced
     def load_from(self):
         pretrained_path = self.pretrained_path
         # pretrained_path = None
@@ -1057,17 +1062,55 @@ class encoder1(nn.Module):
             msg = self.encoder1.load_state_dict(full_dict, strict=False)
         else:
             print("none pretrain")
+    '''
+    # new load_from, better matching logic, and more logging
+    def load_from(self):
+        pretrained_path = self.pretrained_path
+        if pretrained_path is not None:
+            print(f"Loading pretrained model from: {pretrained_path}")
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            pretrained_dict = torch.load(pretrained_path, map_location=device)
+            
+            # If the pth was saved as a dict with a 'model' key
+            if "model" in pretrained_dict:
+                pretrained_dict = pretrained_dict['model']
+
+            model_dict = self.encoder1.state_dict()
+            new_dict = {}
+
+            # BETTER MATCHING LOGIC:
+            # Instead of stripping 17 chars, we match based on the END of the key string
+            for k_model, v_model in model_dict.items():
+                for k_pre, v_pre in pretrained_dict.items():
+                    # If the pretrained key ends with the model key name
+                    # AND the shapes match, we have a hit.
+                    if k_pre.endswith(k_model) and v_pre.shape == v_model.shape:
+                        new_dict[k_model] = v_pre
+                        break
+            
+            # Log what happened
+            skipped = len(pretrained_dict) - len(new_dict)
+            print(f"--- Successfully matched {len(new_dict)} layers ---")
+            if skipped > 0:
+                print(f"--- Skipped {skipped} layers (Head mismatch or shape change) ---")
+
+            # Load the matched weights
+            msg = self.encoder1.load_state_dict(new_dict, strict=False)
+            print(f"Missing keys: {msg.missing_keys}")
+        else:
+            print("No pretrained path provided. Training from scratch.")
+            sys.exit(0)
 
     def forward(self, img1, img2):
         x, y1, y2 = self.encoder1(img1, img2)
         return x, y1, y2
 
-
+# mc: added argument num_classes to Encoder, and pass it to encoder1
 class Encoder(nn.Module):
-    def __init__(self):
+    def __init__(self, num_classes):
         super(Encoder, self).__init__()
-        self.encoder1 = encoder1()
-        self.decoder = SwinTransDecoder()
+        self.encoder1 = encoder1(num_classes=num_classes)
+        self.decoder = SwinTransDecoder(num_classes=num_classes)
 
     def forward(self, img1, img2):
         x, x_downsample1, x_downsample2 = self.encoder1(img1, img2)
