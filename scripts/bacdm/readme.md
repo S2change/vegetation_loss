@@ -2,7 +2,7 @@
 
 1. AAA_Configs.py is at the root
 2. Test.py and MYTestData are adapted so the output of test can be a tif file (not just png)
-3. Inputs are now png with values 0 (no change), 1, 2, ...
+3. Inputs labels are now png with values 0 (no change), 1, 2, ... 
 4. Number of classes and weights are constants in `AAA_Configs.py`
 
 # References
