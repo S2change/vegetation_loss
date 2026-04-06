@@ -1,4 +1,4 @@
-# Creating chips for trining from vchips
+# Creating chips for training from vchips
 
 See description of vchips at (https://github.com/S2change/vegetation_loss/tree/main/data_info/reference_data/vchips)
 
