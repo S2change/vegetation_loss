@@ -205,7 +205,7 @@ def write_hdf5(h5_filename, sorted_files, file_metadata,
             shape=(len(sorted_files), nbands, total_masked_pixels),
             dtype='uint16',
             maxshape=(None, nbands, total_masked_pixels),  # None = Additional time steps can be appended in future
-            chunks=(1, nbands, min(1000000, total_masked_pixels)),
+            chunks=(1, nbands, total_masked_pixels),
             compression="lzf"
         )
 
