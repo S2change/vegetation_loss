@@ -17,23 +17,25 @@ The script processes the HDF5 data to create a 3D grid (bands x rows x cols) and
 '''
 
 # --- CONFIGURATION ---
-hdf5_path = r"E:\T29TQG\CNCA_tifs_to_hdf5_tests\T29TQG_CNCA_test_appended.h5"
+hdf5_path = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\hdf5\T29TNE.h5"
 # where tifs will be saved
-output_dir = r"E:\T29TQG\CNCA_tifs_to_hdf5_tests\T29TQG_reconstructed_tifs\appended_hdf5"
+output_dir = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\reconstructed_tifs"
 CRS = "EPSG:32629"
 # Order of bands in hdf5
-target_band_order = ["B3", "B4", "B8", "B12"]
+target_band_order = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8a", "B11", "B12"] # ["B3", "B4", "B8", "B12", "B2", "B11"] for testing with fewer bands and different order
 NODATA_VAL = 65535 
 # select timestamp to determine which timestamp is going to be processed; if None, will process the first timestamp in the hdf5 file
-DATE_OUTPUT=None
+DATE_OUTPUT=None # or '2020-03-25'
 
 
 def main():
-    export_multiband_hdf5(hdf5_path, output_dir, "T29TQG_CNCA_appended_2", CRS, target_band_order,DATE_OUTPUT)
+    global DATE_OUTPUT, target_band_order
 
-def export_multiband_hdf5(hdf5_path, output_dir, prefix, crs, target_band_order, DATE_OUTPUT):
     num_bands = len(target_band_order)
     os.makedirs(output_dir, exist_ok=True)
+
+    # extract stem from hdf5_path for output filename prefix
+    prefix = os.path.splitext(os.path.basename(hdf5_path))[0]
 
     with h5py.File(hdf5_path, 'r') as f:
         print("Loading coordinates...")
@@ -53,8 +55,8 @@ def export_multiband_hdf5(hdf5_path, output_dir, prefix, crs, target_band_order,
             DATE_OUTPUT = ts_str_values[IDX]  # Update DATE_OUTPUT to the actual closest date found in the HDF5
             print(f"Selected timestamp '{DATE_OUTPUT}' found at index {IDX}.")  
         else:
-            IDX = 4
-            DATE_OUTPUT = ts_str_values[IDX]
+            IDX = 0
+            DATE_OUTPUT = ts_str_values[0]
             print(f"No DATE_OUTPUT specified. Defaulting to first timestamp at date {DATE_OUTPUT}.")
 
         ts_val = f['ts'][IDX]  # Get the single global timestamp
@@ -92,7 +94,7 @@ def export_multiband_hdf5(hdf5_path, output_dir, prefix, crs, target_band_order,
             print(f"  - Band {b_idx} contains {valid_pixels:,} valid pixels.")
 
         # Cleanup timestamp for filename
-        output_path = os.path.join(output_dir, f"{prefix}_{DATE_OUTPUT}.tif")
+        output_path = os.path.join(output_dir, f"{prefix}_{ts_str_values[IDX]}.tif")
         
         print(f"Writing to GeoTIFF: {output_path}...")
         with rasterio.open(
@@ -101,7 +103,7 @@ def export_multiband_hdf5(hdf5_path, output_dir, prefix, crs, target_band_order,
             height=rows, width=cols,
             count=num_bands,
             dtype='uint16',
-            crs=crs,
+            crs=CRS,
             transform=transform,
             nodata=NODATA_VAL,
             compress='lzw'

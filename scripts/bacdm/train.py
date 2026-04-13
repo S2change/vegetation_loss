@@ -14,8 +14,8 @@ import numpy as np
 import AAA_Configs
 from bacdm.swin_ynet import Encoder
 from bacdm.data.dataset_swin_GZ import MyData
-from bacdm.my_scheduler import LR_Scheduler
-from bacdm import pytorch_iou
+#from bacdm.my_scheduler import LR_Scheduler
+from bacdm import pytorch_iou, pytorch_dice
 
 if __name__ == '__main__':
 
@@ -38,6 +38,8 @@ if __name__ == '__main__':
     # 权重保存的路径
     weight_path = AAA_Configs.Train_weight_path
 
+    alpha=AAA_Configs.ALPHA # weight of the cross-entropy loss vs the dice loss in the overall objective function for training; you can experiment with different values for alpha to see how it affects training performance and model learning, especially in terms of how well the model learns from the imbalanced classes in your dataset; for example, if you find that the model is struggling to learn from the rarer classes, you might try increasing the weight of the dice loss (which can help with imbalanced data) by using a lower value for alpha, such as 0.5 or 0.3, to give more emphasis to the dice loss during training; conversely, if you find that the model is learning well from all classes and you want to prioritize overall accuracy, you might try a higher value for alpha, such as 0.9, to give more emphasis to the cross-entropy loss during training
+
     warnings.filterwarnings("ignore")
     # mc: added argument num_classes to Encoder and encoder1, and set it to 5 for our 5 classes (0-4) in the training data;
     model = Encoder(num_classes=AAA_Configs.NUM_CLASSES).cuda()
@@ -52,12 +54,15 @@ if __name__ == '__main__':
     
     # mc: not used for multi-class problems, but you can experiment with adding it back in if you want to try a combined loss function approach; just keep in mind that IOU loss is typically more suited for binary segmentation problems, and using it for multi-class problems can be tricky and may require modifications to the loss function or the way the outputs are processed before calculating IOU
     # iou_loss = pytorch_iou.IOU().cuda()
+    dice_loss = pytorch_dice.MultiClassDiceLoss(num_classes=AAA_Configs.NUM_CLASSES).cuda()
 
     LR = AAA_Configs.LearningRate
     EPOCH = AAA_Configs.EPOCH
 
     _num = len(os.listdir(im_path1))
-    scheduler = LR_Scheduler('cos', LR, EPOCH, _num // 10 + 1)
+    # scheduler = LR_Scheduler('cos', LR, EPOCH, _num // 10 + 1)
+    
+    #original
     optimizer = optim.SGD(model.parameters(), lr=LR, momentum=0.9, weight_decay=0.0005, nesterov=False)
 
 
@@ -73,6 +78,9 @@ if __name__ == '__main__':
             params += [{"params": [value], "lr": lr}]
         optimizer = getattr(torch.optim, "SGD")(params, momentum=0.9, weight_decay=0.0005, nesterov=False)
         return optimizer
+    
+    # sugestão gemini para usar otimizador com diferentes learning rates para encoder1 vs o resto do modelo, para potencialmente melhorar a estabilidade do treinamento e o aprendizado a partir dos pesos pré-treinados, especialmente se você estiver usando um LR relativamente alto como 0.01; isso pode ajudar a evitar que os pesos pré-treinados sejam "bagunçados" muito rapidamente no início do treinamento, permitindo que o modelo aprenda de forma mais estável e eficaz a partir dos pesos pré-treinados, enquanto ainda permite que as outras partes do modelo aprendam com um LR mais alto para potencialmente melhorar a velocidade de convergência e o desempenho geral do modelo; você pode experimentar com diferentes multiplicadores de LR para o encoder1 (como 0.1 ou 0.01) para ver como isso afeta o treinamento e o desempenho do modelo
+    #optimizer = make_optimizer(LR, model)
 
 
     train_loader = DataLoader(MyData(im_path1, im_path2, lb_path), shuffle=True, batch_size=AAA_Configs.batch_size, pin_memory=True, num_workers=AAA_Configs.num_workers)
@@ -85,15 +93,29 @@ if __name__ == '__main__':
     losses9 = 0
     losses10 = 0
     losses11 = 0
+            
 
     print(len(train_loader))
 
-
+    # original
     def adjust_learning_rate(optimizer, epoch, start_lr):
         if epoch % 20 == 0:  # epoch != 0 and
             for param_group in optimizer.param_groups:
                 param_group["lr"] = param_group["lr"] * 0.1
             print(param_group["lr"])
+    
+    # mc: new 4abril
+    def adjust_learning_rate(optimizer, epoch, start_lr):
+        '''
+        Refinement Schedule:
+        Drops LR by 0.5 (instead of 0.1) every 15 epochs.
+        Prevents the first-epoch drop.
+        '''
+        if epoch > 0 and epoch % 15 == 0:
+            for param_group in optimizer.param_groups:
+                # Using 0.5 for a gentler decay during refinement
+                param_group["lr"] = param_group["lr"] * 0.5
+                print(f"Decaying LR to: {param_group['lr']}")
 
 
     loss_least = 100000
@@ -111,12 +133,9 @@ if __name__ == '__main__':
         for i_batch, (im1, im2, label0, label1, label2, label3) in enumerate(
                 tqdm.tqdm(train_loader, ncols=60, postfix=show_dict)):
             
-            # print number of pixels in label0 that are different than 0:
-            print(f"Batch {i_batch} - Non-background pixels in label0: {(label0 != 0).sum().item()}") # this can help you see how many pixels in this batch belong to the rarer classes (1-4) vs the background class (0), which can give you insight into the imbalance in the training data and how the model is learning from it
-
             if im1.shape[-2:] != (256, 256) or im2.shape[-2:] != (256, 256):
                 sys.exit(f"ERROR: Found odd shape {im1.shape} or {im2.shape} in batch {i_batch}")
-            
+
             im1, im2 = im1.cuda(), im2.cuda()
             label0 = label0.cuda()
             label1 = label1.cuda()
@@ -125,27 +144,46 @@ if __name__ == '__main__':
 
             # --- TRAINING STEP ---
             outputs = model(im1, im2)
+
+            '''
+            print(f"Input im1 range: {im1.min().item()} to {im1.max().item()}")
+            print(f"Input im1 mean: {im1.mean().item()}")
+            print(f"Output[0] raw logits (first 5 values): {outputs[0][0, :, 0, 0]}")
+            sys.exit()
+            '''
             loss0 = ce_loss(outputs[0], label0.long())
             loss1 = ce_loss(outputs[1], label1.long())
             loss2 = ce_loss(outputs[2], label2.long())
             loss3 = ce_loss(outputs[3], label3.long())
+            # mc: multiclass Dice loss
+            loss8 = dice_loss(outputs[0], label0.long())
+            loss9 = dice_loss(outputs[1], label1.long())
+            loss10 = dice_loss(outputs[2], label2.long())
+            loss11 = dice_loss(outputs[3], label3.long())
             # remove iou_loss to prevent multiclass problems (MC 5abr2016)
             #loss8 = iou_loss(deal(outputs[0]), label0)
             #loss9 = iou_loss(deal(outputs[1]), label1)
             #loss10 = iou_loss(deal(outputs[2]), label2)
             #loss11 = iou_loss(deal(outputs[3]), label3)
-            loss = loss0 + loss1 + loss2 + loss3  # + loss8 + loss9 + loss10 + loss11 # objective function for training; you can modify this to give different weights to the different loss components if you want to prioritize certain aspects of the training, or if you want to experiment with different combinations of loss functions for potentially improved performance
+            loss = alpha * (loss0 + loss1 + loss2 + loss3) + (1 - alpha) * (loss8 + loss9 + loss10 + loss11) # objective function for training; you can modify this to give different weights to the different loss components if you want to prioritize certain aspects of the training, or if you want to experiment with different combinations of loss functions for potentially improved performance
+            
             loss_all = loss_all + loss.item()
             losses0 += loss0.item()
             losses1 += loss1.item()
             losses2 += loss2.item()
             losses3 += loss3.item()
-            #losses8 += loss8.item()
-            #losses9 += loss9.item()
-            #losses10 += loss10.item()
-            #losses11 += loss11.item()
+            losses8 += loss8.item()
+            losses9 += loss9.item()
+            losses10 += loss10.item()
+            losses11 += loss11.item()
+            
             optimizer.zero_grad()
             loss.backward()
+
+            # mc 4 abril --- CRITICAL STABILIZER ---
+            # Limits the magnitude of updates to prevent distribution collapse
+            # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
             optimizer.step()
             # scheduler.step(epoch_num * len(train_loader) + i_batch) # if you want to use the learning rate scheduler that updates every 
             # iteration instead of every epoch, you can uncomment this line and comment out the adjust_learning_rate function 
@@ -164,7 +202,10 @@ if __name__ == '__main__':
                     global_preds[c] += np.sum(pred_batch == c)
                     global_labels[c] += np.sum(label_batch == c)
             
-            # reset losses every 100 batches to monitor training progress more granularly and to prevent the loss values from becoming too large to interpret meaningfully over the course of an entire
+            # print number of pixels in label0 that are different than 0:
+            print(f"Batch {i_batch} - Global Preds: {global_preds.tolist()}; Labels: {global_labels.tolist()}") # this can help you see how many pixels in this batch belong to the rarer classes (1-4) vs the background class (0), which can give you insight into the imbalance in the training data and how the model is learning from it
+
+            # reset losses every 100 batches to monitor training progress more granularly and to prevent the loss values from becoming too large to interpret meaningfully over the course of an entire epoch
             if i_batch % 100 == 0:
                 print(i_batch, '|', 'losses0: {:.3f}'.format(losses0), '|', 'losses1: {:.3f}'.format(losses1),
                       '|', 'losses2: {:.3f}'.format(losses2), '|', 'losses3: {:.3f}'.format(losses3), '|',
@@ -178,6 +219,8 @@ if __name__ == '__main__':
                 losses9 = 0
                 losses10 = 0
                 losses11 = 0
+            
+            # 
         
         # --- END OF EPOCH SUMMARY ---
         print(f'\n=== Epoch {epoch_num} Global Summary ===')

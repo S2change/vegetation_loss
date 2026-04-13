@@ -11,7 +11,7 @@ The input files have names like
 Let's apply now the transfor to the 'before' and 'after' file. I want to  convert them to 8-bit tif files with the same bands. The original band order is b3, b4, b8, b12, b2, b11, but I want the bands to be re-ordered as b12, b11, b8, b4, b3, b2. The original geotiff have NoData=65535 and the new tif should have NoData=255. To quantize from 16-bit to 8-bit, I want to apply a q0.02-q0.98 rescaling, for each image independently, so that the 2% darkest image are transform into (0,0,0,0,0,0) and the 2% brightest images are converted into (254,254,254,254,254,254), since 255 is reserved for NoData. 
 The mask input does not need to be transformed since it is already in 8-bit format (the labels are small numbers starting at 0).
 All files in the triplet  'before', 'after' and 'mask' need to be cropped into 256*256 aligned chips (2560 m by 2560 m). There should be an input N that determines how many chips we create. WE can  start by creating a function that works for N=4 and later replace it by a more general function if we want. The output chip stem names should end with _01, _02, _03, _04. For N=4, the 4 chips should include respectively the 4 corners of the original 4 by 4 km input to minimize overlap.
-The output 'befofre' and 'after' files should be saved as tif files in folders "C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\training_data\before" and "C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\training_data\after" respectively.
+The output 'before' and 'after' files should be saved as tif files in folders "C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\training_data\before" and "C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\training_data\after" respectively.
 The ouput mask files should be saved in png format in folder C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\training_data\label
 Now, all output file names for the same 256*256 chip should have exactly the same stem. They are identified as 'before', 'after' and 'label'  just by the folder they belong to as usual to be accessed later by a dataloader.
 '''
@@ -27,10 +27,34 @@ from rasterio.windows import Window
 from pathlib import Path
 from PIL import Image
 
+# which folders to use to read vchips and write chips; set TRAIN to True to read from vchips\source_rasters and vchips\mask_rasters and write to training_data\before, training_data\after and training_data\label; set TRAIN to False to read from vchips\source_rasters_test and vchips\mask_rasters_test and write to testing_data\before, testing_data\after and testing_data\label
+TRAIN=False
+
+def main():
+    input_root = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\vchips"
+    if TRAIN:
+        output_root = Path(r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\training_data")
+    else:
+        output_root = Path(r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testing_data")
+
+    
+    triplets = get_file_pairs(input_root)
+    print(f"Processing {len(triplets)} triplets...")
+    for triplet in triplets:
+        process_triplet(triplet, output_root)
+    print("Chipping complete.")
+
 def get_file_pairs(base_dir):
-    source_dir = Path(base_dir) / "source_rasters"
-    mask_dir = Path(base_dir) / "mask_rasters"
-    after_files = list(source_dir.glob("*_after.tif"))
+    if TRAIN:
+        source_dir = Path(base_dir) / "source_rasters"
+        mask_dir = Path(base_dir) / "mask_rasters"
+    else:
+        source_dir = Path(base_dir) / "source_rasters_test"
+        mask_dir = Path(base_dir) / "mask_rasters_test"
+    
+    # Only want to search in subfolder "source_rasters" for files ending with "_after.tif" 
+    # I don't want to search in subfolders of that folder: using pattern * and not **, since ** would search in all subfolders recursively, which is not what we want here since we know the files are directly in source_rasters and not in subfolders of source_rasters; this will give us a list of all the 'after' files that we need to process, and we can then use the naming convention to find the corresponding 'before' and 'mask' files for each 'after' file to create our triplets for processing
+    after_files = list(source_dir.glob("*_after.tif")) # using glob to find files that match the pattern *_after.tif in the source_rasters folder; this will give us a list of all the 'after' files that we need to process, and we can then use the naming convention to find the corresponding 'before' and 'mask' files for each 'after' file to create our triplets for processing
     triplets = []
     
     for after_path in after_files:
@@ -112,15 +136,6 @@ def process_triplet(triplet, output_base, num_chips=4):
             label_path.parent.mkdir(parents=True, exist_ok=True)
             Image.fromarray(mask_chip.astype(np.uint8), mode='L').save(label_path)
 
-def main():
-    input_root = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\vchips"
-    output_root = Path(r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\training_data")
-    
-    triplets = get_file_pairs(input_root)
-    print(f"Processing {len(triplets)} triplets...")
-    for triplet in triplets:
-        process_triplet(triplet, output_root)
-    print("Chipping complete.")
 
 if __name__ == "__main__":
     main()

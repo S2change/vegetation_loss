@@ -1,215 +1,156 @@
-from ctypes.wintypes import RGB
 import os
+import random
 import sys
 from pathlib import Path
+from PIL import Image
 import numpy as np
 import rasterio
-from qgis.core import QgsProject, QgsRasterLayer
-from qgis.utils import iface
 from qgis.core import (QgsProject, QgsRasterLayer, QgsRasterMinMaxOrigin, 
-                       QgsMultiBandColorRenderer, QgsSingleBandGrayRenderer)
-from qgis.core import QgsPalettedRasterRenderer, QgsColorRampShader, QgsRasterBlock
+                       QgsMultiBandColorRenderer, QgsPalettedRasterRenderer)
+from qgis.utils import iface
 from PyQt5.QtGui import QColor
+from qgis.core import QgsRectangle
 
-'''
-Script to load before and after 6-channel geo-referenced TIF files and predicted change maps into QGIS, 
-organized in groups for better visualization and comparison.
+# --- PATHS AND CONFIGS ---
+label_dir = r'C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\training_data\label'
 
-Inputs:
-- The paths to the folders containing the before and after TIF files (configured in AAA_Configs.py as Test_im_pathA and Test_im_pathB); 
-these folders will contain the 6-channel geo-referenced TIF files that represent the before and after conditions of the area of interest, 
-respectively; the TIF files should have a valid CRS defined within them for accurate loading and visualization in QGIS
-- The path to the folder where the predicted change maps are stored (configured in AAA_Configs.py as Test_det_path); 
-this folder should contain the predicted change maps as TIF files that represent the predicted changes between the before and after conditions; 
-the TIF files should have a valid CRS defined within them for accurate loading and visualization in QGIS
-
-Outputs:
-- The before and after TIF files will be loaded into QGIS and organized in separate groups named "before" and "after" for better visualization and comparison; 
-the predicted change maps will be loaded into a group named "prediction" and placed above the before and after groups in the layer stack for easy comparison; 
-the RGB symbology with 1.5% cumulative cut will be applied to the before and after TIF files for better visualization of the changes, 
-while the predicted change maps will be displayed with a default singleband gray symbology without custom stretch to allow for clear visualization of the predicted changes; 
-all layers will be added to the current QGIS project and can be further customized or analyzed as needed.   
-'''
-
-F=0 # index of first image (0 is the one with most non-0s in predicted)
-N=10 # number of images after that (F+N) should be less than the total number of prediction images
-
-######################################### determine working_dir from script location
+# (Working directory and AAA_Configs logic remains same as your snippet)
 import inspect
-# 1. Get the path of the current script file
-# This is more robust than __file__ inside QGIS Editor
 try:
-    # Frame 0 is the current execution frame
     script_path = inspect.getfile(inspect.currentframe())
 except:
-    # Absolute Fallback: Hardcode the path during debugging if all else fails
-    # script_path = r"C:\Your\Path\To\Script.py"
     import console
     script_path = iface.mainWindow().findChild(console.console.PythonConsole).findChild(console.console_editor.EditorTabWidget).currentWidget().file_path()
 
 working_dir = os.path.dirname(os.path.abspath(script_path))
-print(f"Working directory identified as: {working_dir}")
 
-if working_dir not in sys.path:
-    sys.path.append(working_dir)
-
-print(working_dir)
-
-#########################################
-
-def get_active_prediction_rankings(pred_folder):
-    """
-    Scans the specified folder for .tif files, counts the number of pixels with values > 0 in each file, 
-    and ranks the files based on this count. Files with no pixels > 0 are counted but not included in the ranking.
-    """
-    pred_path = Path(pred_folder)
-    tif_files = list(pred_path.glob("*.tif"))
-    
-    rankings = []
-    empty_count = 0
-
-    print(f"Analyzing {len(tif_files)} prediction files...")
-
-    for fpath in tif_files:
-        try:
-            with rasterio.open(fpath) as src:
-                data = src.read(1)
-                
-                # Count pixels where class is 1, 2, 3, or 4
-                change_pixel_count = np.count_nonzero(data > 0)
-                
-                if change_pixel_count > 0:
-                    rankings.append({
-                        'filename': fpath.name,
-                        'change_count': int(change_pixel_count),
-                        'percent': (change_pixel_count / data.size) * 100
-                    })
-                else:
-                    empty_count += 1
-                    
-        except Exception as e:
-            print(f"Error reading {fpath.name}: {e}")
-
-    # Sort descending by change_count
-    sorted_rankings = sorted(rankings, key=lambda x: x['change_count'], reverse=True)
-
-    r'''print("\n--- Predictions Ranked by Activity (Excluding Empty) ---")
-    print("\n--- Predictions Ranked by Activity (Excluding Empty) ---")
-    print(f"{'Filename':<45} | {'Pixels > 0':<12} | {'% Coverage'}")
-    print("-" * 75)
-
-    for item in sorted_rankings:
-        print(f"{item['filename']:<45} | {item['change_count']:>12,} | {item['percent']:>8.2f}%")
-    
-    print("\n" + "="*30)
-    print(f"Total Files Scanned: {len(tif_files)}")
-    print(f"Active Files (Shown): {len(sorted_rankings)}")
-    print(f"Empty Files (Hidden): {empty_count}")
-    print("="*30)
-    '''
-    return sorted_rankings
-
-######################################## read variable names from AAA_Configs
-Test_im_pathA, Test_im_pathB, Test_det_path=None,None,None # to be updated by AAA_Configs.py
-# open 'AAA_Configs.py' which is in the parent directory of the current script
+# Load AAA_Configs
+Test_im_pathA, Test_im_pathB, Test_det_path = None, None, None
 with open(os.path.join(os.path.dirname(working_dir), 'AAA_Configs.py')) as f: 
-    exec(f.read()) # reads Test_im_pathA, Test_im_pathB, Test_det_path
+    exec(f.read())
 
-# Resolve relative to script if it starts with '.'
 def resolve_path(base_dir, relative_path):
-    """Joins and normalizes a path if it starts with a dot."""
     if relative_path.startswith('.'):
         return os.path.normpath(os.path.join(base_dir, relative_path))
     return relative_path
 
-# Applying the function to your variables
 Test_im_pathA = resolve_path(working_dir, Test_im_pathA)
 Test_im_pathB = resolve_path(working_dir, Test_im_pathB)
 Test_det_path = resolve_path(working_dir, Test_det_path)
-######################################
 
-print(Test_im_pathA, Test_im_pathB, Test_det_path)
+# --- HELPER FUNCTIONS ---
 
-# --- CLEANUP ---
-# Closes the current project and removes all layers/groups from the legend
-QgsProject.instance().clear()
+def get_comparison_rankings(pred_folder, label_folder):
+    results = []
+    pred_files = [f for f in os.listdir(pred_folder) if f.endswith('.tif')]
+    for f_name in pred_files:
+        stem = os.path.splitext(f_name)[0]
+        label_path = os.path.join(label_folder, f"{stem}.png")
+        pred_path = os.path.join(pred_folder, f_name)
+        if not os.path.exists(label_path): continue
+        with rasterio.open(pred_path) as p_src:
+            pred_arr = p_src.read(1)
+        label_arr = np.array(Image.open(label_path))
+        mask = (label_arr != 0)
+        total_non_bg = np.sum(mask)
+        acc = (np.sum((label_arr == pred_arr) & mask) / total_non_bg * 100) if total_non_bg > 0 else 0.0
+        results.append({'filename': f_name, 'accuracy': acc, 'non_zero_pixels': int(total_non_bg)})
+    return results
 
-# Optional: Refresh the map canvas to ensure it's visually empty
-iface.mapCanvas().refresh()
+def select_stratified_samples(results):
+    sorted_acc = sorted(results, key=lambda x: x['accuracy'])
+    n = len(sorted_acc)
+    tiers = [sorted_acc[:n//3], sorted_acc[n//3 : 2*n//3], sorted_acc[2*n//3:]]
+    final_selection = []
+    for tier in tiers:
+        tier_sorted = sorted(tier, key=lambda x: x['non_zero_pixels'])
+        m = len(tier_sorted)
+        final_selection.extend(random.sample(tier_sorted[:m//2], min(2, m//2)))
+        final_selection.extend(random.sample(tier_sorted[m//2:], min(2, m-m//2)))
+    return final_selection
 
-
-def load_tifs_to_group(folder_path, filenames, group_name, RGB=True, position=None):
-    """Loads .tif files. Applies RGB 3-4-5 with 1.5% cut only if RGB=True."""
+def load_layers_to_group(folder_path, filenames, group_name, RGB=True, position=None, extension_override=None):
     root = QgsProject.instance().layerTreeRoot()
-    
-    # 1. Handle Group Creation/Finding
     group = root.findGroup(group_name)
     if not group:
-        if position == 0:
-            group = root.insertGroup(0, group_name)
-        else:
-            group = root.addGroup(group_name)
+        group = root.insertGroup(0, group_name) if position == 0 else root.addGroup(group_name)
             
     absolute_folder = os.path.normpath(os.path.join(working_dir, folder_path))
     
-    # 4. Iterate through the top chips
     for item in filenames:
-        f_name = item['filename']  # Extract the string filename from the dict
-        path = os.path.join(absolute_folder, f_name)
-        layer = QgsRasterLayer(path, f_name)
+        stem = os.path.splitext(item['filename'])[0]
+        ext = extension_override if extension_override else os.path.splitext(item['filename'])[1]
+        f_full = f"{stem}{ext}"
+        
+        path = os.path.join(absolute_folder, f_full)
+        layer = QgsRasterLayer(path, f_full)
         
         if layer.isValid():
-            # 3. Apply Symbology Logic
-            if RGB and layer.bandCount() >= 5:
-                renderer = QgsMultiBandColorRenderer(layer.dataProvider(), 3, 4, 5)                
-                layer.setRenderer(renderer)
-                
-                # Apply Cumulative Cut only for RGB
-                min_max_origin = QgsRasterMinMaxOrigin()
-                min_max_origin.setLimits(QgsRasterMinMaxOrigin.CumulativeCut)
-                min_max_origin.setCumulativeCutLower(0.015)
-                min_max_origin.setCumulativeCutUpper(0.985)
-                layer.renderer().setMinMaxOrigin(min_max_origin)
-            else:
-                # 1. Define your classes and their corresponding colors
-                # Class 0: Transparent/Black, 1: Red, 2: Green, 3: Blue, 4: Yellow (Burned)
-                class_map = {
-                    0: {'color': QColor(0, 0, 0, 0), 'label': 'Unchanged'},     # Transparent
-                    1: {'color': QColor(255, 0, 0, 255), 'label': 'Clear Cut'}, # Red
-                    2: {'color': QColor(0, 255, 0, 255), 'label': 'Other 1'},  # Green
-                    3: {'color': QColor(0, 0, 255, 255), 'label': 'Other 2'},     # Blue
-                    4: {'color': QColor(255, 255, 0, 255), 'label': 'Burned'}   # Yellow
-                }
+            # 1. ADD TO PROJECT FIRST
+            # This ensures subsequent changes are "registered" to the project instance
+            QgsProject.instance().addMapLayer(layer, False)
+            group.addLayer(layer)
 
-                # 2. Create the color classes for the renderer
-                classes = []
-                for val, info in class_map.items():
-                    classes.append(QgsPalettedRasterRenderer.Class(val, info['color'], info['label']))
+            # 2. CRS AND GEOTRANSFORM FIX
+            if ext.lower() == '.png':
+                prediction_path = os.path.join(Test_det_path, f"{stem}.tif")
+                if os.path.exists(prediction_path):
+                    with rasterio.open(prediction_path) as src:
+                        # Apply CRS
+                        crs_wkt = src.crs.to_wkt()
+                        qgis_crs = QgsCoordinateReferenceSystem()
+                        qgis_crs.createFromWkt(crs_wkt)
+                        layer.setCrs(qgis_crs)
+                        
+                        # Apply Extent
+                        b = src.bounds
+                        rect = QgsRectangle(b.left, b.bottom, b.right, b.top)
+                        layer.setExtent(rect)
+
+            # 3. SYMBOLOGY & VISIBILITY
+            # 3. SYMBOLOGY & VISIBILITY
+            if not RGB:
+                # --- AGGRESSIVE VISIBILITY FIX ---
+                # 1. Clear any existing NoData/Transparency masks
+                layer.dataProvider().setNoDataValue(1, -9999) # Set to a value that doesn't exist
+                
+                # 2. Disable the "Transparency Band" (often band 2 or 4 in PNGs)
+                layer.renderer().setAlphaBand(-1) 
+                
+                # 3. Ensure the layer is 100% opaque regardless of internal alpha
+                layer.renderer().setOpacity(1.0)
+
+                # 4. Define the class map
+                class_map = {
+                    0: {'color': QColor(0, 0, 0, 0), 'label': 'Unchanged'},
+                    1: {'color': QColor(255, 0, 0, 255), 'label': 'Clear Cut'},
+                    2: {'color': QColor(0, 255, 0, 255), 'label': 'Other 1'},
+                    3: {'color': QColor(0, 0, 255, 255), 'label': 'Other 2'},
+                    4: {'color': QColor(255, 255, 0, 255), 'label': 'Burned'}
+                }
+                
+                classes = [QgsPalettedRasterRenderer.Class(v, c['color'], c['label']) for v, c in class_map.items()]
                 renderer = QgsPalettedRasterRenderer(layer.dataProvider(), 1, classes)
                 layer.setRenderer(renderer)
             
-            # 4. Add to Project and Group
-            QgsProject.instance().addMapLayer(layer, False)
-            group.addLayer(layer)
+            # 4. FINAL REFRESH
             layer.triggerRepaint()
-        else:
-            print(f"Failed to load: {f_name}")
 
 # --- EXECUTION ---
+all_stats = get_comparison_rankings(Test_det_path, label_dir)
+selected_filenames = select_stratified_samples(all_stats)
 
-# 0) determine names of chips we want to read based on the number of pixels > 0 in the predicted change maps, and only load the top N most active predictions to avoid overwhelming QGIS with too many layers; this also ensures we focus on the most significant predictions for visualization and analysis
-active_list = get_active_prediction_rankings(Test_det_path)
-# Take the top N most active chips
-filenames = active_list[F:(F+N)] 
-print(filenames)
+QgsProject.instance().clear()
 
-# 1) Load 'after' group (Bottom)
-load_tifs_to_group(Test_im_pathB, filenames,'after')
+# 1) Background Images
+load_layers_to_group(Test_im_pathB, selected_filenames, 'after')
+load_layers_to_group(Test_im_pathA, selected_filenames, 'before')
 
-# 2) Load 'before' group (Middle)
-load_tifs_to_group(Test_im_pathA, filenames, 'before')
+# 2) Ground Truth Labels (PNGs) - Positioned below predictions
+load_layers_to_group(label_dir, selected_filenames, 'label', RGB=False, position=0, extension_override='.png')
 
-# 3) Load 'prediction' group (Top - Position 0)
-load_tifs_to_group(Test_det_path, filenames, 'prediction', position=0)
+# 3) Predictions (TIFs) - Top Position
+load_layers_to_group(Test_det_path, selected_filenames, 'prediction', RGB=False, position=0)
 
-print("Layers loaded successfully.")
+iface.mapCanvas().refresh()
+print(f"Loaded {len(selected_filenames)} sets of comparison layers.")

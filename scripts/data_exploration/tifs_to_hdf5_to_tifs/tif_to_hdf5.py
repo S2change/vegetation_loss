@@ -9,6 +9,38 @@ from datetime import datetime, timezone
 from shapely.geometry import box
 import geopandas as gpd
 import sys
+import logging
+import ctypes
+
+# --- Configuration ---
+LOG_DIR = r"C:\Users\mlc\OneDrive - Universidade de Lisboa\Documents\investigacao-projectos-reviews-alunos-juris\projetos\DGT-S2CHANGE_2023\partilhado\logs"
+os.makedirs(LOG_DIR, exist_ok=True)
+
+#------------------------------------------------------------------------ logging setup
+# Create a unique log file name (e.g., log_20260321_1545.txt)
+log_filename = f"log_{datetime.now().strftime('%Y%m%d_%H%M')}.txt"
+log_path = os.path.join(LOG_DIR, log_filename)
+
+# Configure logging to write to both the file AND your console
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_path),
+        logging.StreamHandler() # This keeps the print-outs visible on your office PC screen
+    ]
+)
+logging.info("--- S2 Change Project: Script Started ---")
+#----------------------------------------------------------------------- ctypes setup to prevent Windows from showing "This app is preventing shutdown" dialog
+def prevent_sleep():
+    # ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED
+    # This tells Windows the system is busy and should not sleep.
+    ctypes.windll.kernel32.SetThreadExecutionState(0x80000001 | 0x00000040)
+
+def allow_sleep():
+    # Returns the system to normal power management
+    ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
+#------------------------------------------------------------------------ main script
 
 '''
 This script reads pairs of 4-band and 2-band GeoTIFF files from specified folders, filters out
@@ -32,22 +64,21 @@ Note: TIFs with no overlap with the mask bounding box are discarded. TIFs that p
 overlap are kept — the boolean pixel mask determines which pixels are written to the HDF5.
 '''
 
-folder_path_4bands = r"D:\s2_images\T29TQG"
-folder_path_2bands = r"C:\Users\Public\Documents\s2_images_B2_B11\T29TQG"
-vector_mask_path   = r"C:\path\to\your\mask.shp"
-h5_filename        = os.path.join(r"E:\T29TQG", 'T29TQG_6bands_masked.h5')
 
 ##########
-folder_path = r'C:\Users\mlc\OneDrive - Universidade de Lisboa\Documents\temp\test_tif_to_hdf5'
-folder_path_4bands = os.path.join(folder_path, '4bands')
-folder_path_2bands = os.path.join(folder_path, '2bands')
-h5_filename = os.path.join(folder_path, 'test_1667647823345_6bands.h5')
+#folder_path_4bands = os.path.join(folder_path, '4bands')
+#folder_path_2bands = os.path.join(folder_path, '2bands')
+#h5_filename = os.path.join(folder_path, 'test_1667647823345_6bands.h5')
 
 folder_path_4bands = r"H:\s2_images\T29TNE" # fileneme like S2SR_image_1667647823345.tif
 folder_path_2bands = r"D:\s2_images_B2_B11\T29TNE"
-h5_filename = os.path.join(folder_path, 'T29TNE_6bands_20210101_20210630.h5') # output in folder_path (to be changed)
 
-vector_mask_path   = os.path.join(folder_path, 'portugal_continental_32629.gpkg')
+#folder_path = r'C:\Users\mlc\Downloads\temp\test_tif_to_hdf5'
+#h5_filename = os.path.join(folder_path, 'T29TNE_6bands_20180630_20211231.h5') # output in folder_path (to be changed)
+
+#vector_mask_path   = os.path.join(folder_path, 'portugal_continental_32629.gpkg')
+#vector_mask_path   = os.path.join(folder_path, 'convex_hull_BDR_expanded_32629.gpkg')
+# test_mask_32629
 #########
 
 # Folder '4bands' (B3, B4, B8, B12) followed by Folder '2bands' (B2, B11)
@@ -55,9 +86,62 @@ band_names = ["B3", "B4", "B8", "B12", "B2", "B11"]
 NODATA_VAL = 65535
 APPLY_MASK_FILTER = True # Set to True to exclude files with mismatched headers (potentially due to mask filtering)
 
-# MC 2026-08-03: Added date filtering to exclude files with timestamps outside a specified range.
-MIN_DATE=datetime(2021, 1, 1).date() # datetime(2017, 1, 1) # set a minimum date to filter out files with earlier timestamps
-MAX_DATE=datetime(2021, 6, 30).date() # datetime(2030, 1, 1) # set a maximum date to filter out files with later timestamps
+folder_path = r'C:\Users\mlc\Downloads\temp\test_tif_to_hdf5'
+vector_mask_path   = os.path.join(folder_path, 'portugal_continental_32629.gpkg')
+
+# B2, B3, B4, B5, B6, B7, B8, B8a, B11, B12 for 10 bands
+MIN_DATE=datetime(2020, 10, 31).date() #datetime(2018, 6, 30).date() # datetime(2017, 1, 1) # set a minimum date to filter out files with earlier timestamps
+MAX_DATE=datetime(2023, 2, 28).date() # datetime(2030, 1, 1) # set a maximum date to filter out files with later timestamps
+
+# from    
+tile_list =['T29SND', 'T29TPE', 'T29SPD', 'T29TNE', 'T29SNB', 'T29TPF', 'T29TNF', 'T29SMD', 'T29SNC']
+
+def main():
+    prevent_sleep()
+    try:
+        for tile in tile_list:
+            print(tile)
+            h5_filename      = os.path.join(r"H:\outputs_ROI\hdf5", tile, f'{tile}_{MIN_DATE.strftime("%Y%m%d")}_{MAX_DATE.strftime("%Y%m%d")}.h5')
+            folder_path_4bands = os.path.join(r"H:\s2_images",tile) #\T29TNE" # fileneme like S2SR_image_1667647823345.tif
+            folder_path_2bands = os.path.join(r"D:\s2_images_B2_B11",tile) #\T29TNE"
+            
+            try:
+                process_tile(folder_path_4bands, folder_path_2bands,h5_filename)
+                logging.info(f"Finished processing tile {tile}. Input HDF5: {h5_filename}")
+            except Exception as e:
+                # This is critical for remote monitoring: it logs the exact error if a tile fails
+                logging.error(f"FAILED Tile: {tile}. Error: {str(e)}")
+    finally:
+        allow_sleep()
+
+def process_tile(folder_path_4bands, folder_path_2bands,h5_filename):
+    print(h5_filename)
+    file_metadata = parse_and_sort_files(folder_path_4bands, MIN_DATE, MAX_DATE)
+    sorted_files = [m['filename'] for m in file_metadata]
+
+    all_bounds = read_all_bounds(folder_path_4bands, sorted_files)
+
+    largest_file, ref_crs, ref_transform, ref_meta = get_reference_tif(
+        folder_path_4bands, sorted_files, all_bounds
+    )
+
+    clipped_mask = clip_vector_mask(vector_mask_path, all_bounds[largest_file], ref_crs)
+
+    aligned_files = filter_by_mask_overlap(all_bounds, clipped_mask)
+    file_metadata = [m for m in file_metadata if m['filename'] in set(aligned_files)]
+
+    ref_meta.update({"count": 1})
+    total_masked_pixels, xs_flat, ys_flat = rasterize_mask(clipped_mask, ref_meta, ref_transform)
+
+    sorted_files = check_header_compatibility(folder_path_4bands, folder_path_2bands, aligned_files, apply_mask_filter=APPLY_MASK_FILTER)
+    
+    file_metadata = [m for m in file_metadata if m['filename'] in set(sorted_files)]
+
+    write_hdf5(h5_filename, sorted_files, file_metadata, folder_path_4bands, folder_path_2bands,
+            band_names, total_masked_pixels, xs_flat, ys_flat)
+
+    print(f"Done! Created {h5_filename} with {total_masked_pixels} masked pixels and {len(sorted_files)} timesteps.")
+
 
 def parse_and_sort_files(folder,min_date, max_date):
     """Parse timestamps from filenames and return metadata sorted by date."""
@@ -211,7 +295,6 @@ def write_hdf5(h5_filename, sorted_files, file_metadata, folder_4b, folder_2b,
             "values",
             shape=(len(sorted_files), nbands, total_masked_pixels),
             dtype='uint16',
-            maxshape=(None, nbands, total_masked_pixels), # None = Additional time steps can be appended in future
             chunks=(1, nbands, min(1000000, total_masked_pixels)),
             compression="lzf"
         )
@@ -219,11 +302,10 @@ def write_hdf5(h5_filename, sorted_files, file_metadata, folder_4b, folder_2b,
         h5f.attrs['band_names'] = [n.encode('ascii') for n in band_names]
         h5f.create_dataset("xs", data=xs_flat, dtype='int32')
         h5f.create_dataset("ys", data=ys_flat, dtype='int32')
-        h5f.create_dataset("ts", data=[m['ordinal'] for m in file_metadata], dtype='int32', maxshape=(None,))
+        h5f.create_dataset("ts", data=[m['ordinal'] for m in file_metadata], dtype='int32')
         h5f.create_dataset("original_timestamps",
                            data=[m['timestamp_ms'] for m in file_metadata],
-                           dtype='int64',
-                           maxshape=(None,))
+                           dtype='int64')
 
         for i, filename in enumerate(sorted_files):
             print(f"Processing {i+1}/{len(sorted_files)}: {filename}")
@@ -255,28 +337,4 @@ def write_hdf5(h5_filename, sorted_files, file_metadata, folder_4b, folder_2b,
 
 
 if __name__ == "__main__":
-    file_metadata = parse_and_sort_files(folder_path_4bands, MIN_DATE, MAX_DATE)
-    sorted_files = [m['filename'] for m in file_metadata]
-
-    all_bounds = read_all_bounds(folder_path_4bands, sorted_files)
-
-    largest_file, ref_crs, ref_transform, ref_meta = get_reference_tif(
-        folder_path_4bands, sorted_files, all_bounds
-    )
-
-    clipped_mask = clip_vector_mask(vector_mask_path, all_bounds[largest_file], ref_crs)
-
-    aligned_files = filter_by_mask_overlap(all_bounds, clipped_mask)
-    file_metadata = [m for m in file_metadata if m['filename'] in set(aligned_files)]
-
-    ref_meta.update({"count": 1})
-    total_masked_pixels, xs_flat, ys_flat = rasterize_mask(clipped_mask, ref_meta, ref_transform)
-
-    sorted_files = check_header_compatibility(folder_path_4bands, folder_path_2bands, aligned_files, apply_mask_filter=APPLY_MASK_FILTER)
-    
-    file_metadata = [m for m in file_metadata if m['filename'] in set(sorted_files)]
-
-    write_hdf5(h5_filename, sorted_files, file_metadata, folder_path_4bands, folder_path_2bands,
-            band_names, total_masked_pixels, xs_flat, ys_flat)
-
-    print(f"Done! Created {h5_filename} with {total_masked_pixels} masked pixels and {len(sorted_files)} timesteps.")
+    main()

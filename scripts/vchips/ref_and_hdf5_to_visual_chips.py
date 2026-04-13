@@ -55,7 +55,10 @@ changes from v0:
 
 GPKG_PATH = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\harmonized\Data_ref_2020_nvg_v2.gpkg" # r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\harmonized\BDR_expanded_v1.gpkg"
 GPKG_PATH = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\harmonized\Data_ref_2020_icnf.gpkg" # r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\harmonized\BDR_expanded_v1.gpkg"
-LABEL_REF_DATASET="icnf_2020"z
+GPKG_PATH = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\harmonized\Data_ref_2021_nvg_v2.gpkg"
+GPKG_PATH = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\harmonized\Data_ref_2021_icnf.gpkg"
+
+LABEL_REF_DATASET="icnf_2021"
 
 S2TILES_PATH = os.path.join(r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5", "sentinel2_tiles_PT_32629.gpkg")
 

@@ -335,7 +335,6 @@ class PatchEmbed(nn.Module):
             flops += Ho * Wo * self.embed_dim
         return flops
 
-
 class PatchMerging(nn.Module):
     r""" Patch Merging Layer.
 
@@ -1070,11 +1069,12 @@ class encoder1(nn.Module):
             print(f"Loading pretrained model from: {pretrained_path}")
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
             pretrained_dict = torch.load(pretrained_path, map_location=device)
-            
+
             # If the pth was saved as a dict with a 'model' key
             if "model" in pretrained_dict:
                 pretrained_dict = pretrained_dict['model']
-
+            
+            
             model_dict = self.encoder1.state_dict()
             new_dict = {}
 
@@ -1087,19 +1087,58 @@ class encoder1(nn.Module):
                     if k_pre.endswith(k_model) and v_pre.shape == v_model.shape:
                         new_dict[k_model] = v_pre
                         break
-            
-            # Log what happened
-            skipped = len(pretrained_dict) - len(new_dict)
+         
+            # LOGGING
             print(f"--- Successfully matched {len(new_dict)} layers ---")
+            skipped = len(pretrained_dict) - len(new_dict)
             if skipped > 0:
-                print(f"--- Skipped {skipped} layers (Head mismatch or shape change) ---")
-
+                print(f"--- Skipped {skipped} layers (typically head mismatches) ---")
+            
+            
             # Load the matched weights
             msg = self.encoder1.load_state_dict(new_dict, strict=False)
             print(f"Missing keys: {msg.missing_keys}")
+            
+            if len(msg.missing_keys) > 0:
+                print(f"--- WARNING: Missing {len(msg.missing_keys)} keys (Initialized randomly) ---")
+                # Optional: print a few missing keys to see if they are important
+                print(f"Sample missing keys: {msg.missing_keys[:5]}")
+            else:
+                print("--- All layers loaded successfully! ---")
+
         else:
             print("No pretrained path provided. Training from scratch.")
             sys.exit(0)
+
+    def new_load_from(self):
+        pretrained_path = self.pretrained_path
+        if pretrained_path is not None:
+            print(f"Loading pretrained model from: {pretrained_path}")
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            checkpoint = torch.load(pretrained_path, map_location=device)
+            pretrained_dict = checkpoint['model'] if "model" in checkpoint else checkpoint
+
+            model_dict = self.state_dict()
+            new_dict = {}
+
+            # Strategy: Match by shape and suffix only
+            # This bypasses all 'encoder1.' vs 'module.' naming issues
+            for k_model, v_model in model_dict.items():
+                target_shape = v_model.shape
+                for k_pre, v_pre in pretrained_dict.items():
+                    if v_pre.shape == target_shape:
+                        # If the suffix matches (e.g., 'layers.0.blocks.0.norm1.weight')
+                        if k_pre.endswith(k_model) or k_model.endswith(k_pre):
+                            new_dict[k_model] = v_pre
+                            break
+            
+            msg = self.load_state_dict(new_dict, strict=False)
+            print(f"--- Successfully matched {len(new_dict)} layers ---")
+            
+            if len(msg.missing_keys) > 0:
+                print(f"--- WARNING: {len(msg.missing_keys)} layers are still random! ---")
+            else:
+                print("--- Full Model Loaded Successfully! ---")
 
     def forward(self, img1, img2):
         x, y1, y2 = self.encoder1(img1, img2)

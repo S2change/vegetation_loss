@@ -1,8 +1,4 @@
-## Create before, after and predicted layers
-1.  Update `AAA_Configs.py`, namely `Test_im_pathA, Test_im_pathB, Test_det_path`. This last folder is where predictions by BACDM are stored
-2. Execute in QGIS `scripts\qgis\qgis_load_before_after_prediction.py`. One can set `F,N` to choose a set of chips depending on the number of predicted changed pixels
-
-## Instructions to get a pair before/after for a reference data set feature
+# Instructions to get a pair before/after for a reference data set feature
 
 1. Update `AAA_Configs.py`, namely
   ```
@@ -31,7 +27,10 @@ temp_raster_reference= os.path.join(working_dir, "harmonized_to_tifs") # tempora
 
 
 
-## Other available scripts
+# other possibilities
+
+   
+# B. Access chips and apply DL model
 
 2. (optional if A) Execute in QGIS `qgis_read_reference_data_set_and_CCD_vector.py`. Set `CLEAR=True` to clear the current QGIS project. The legend for the burned area indicates the month and the labels indicate the day. If available, add to the map the vectorized CCD raw results results for the same ROI and time period of the reference data. Use same legend for both reference and vectorized CCD datasets (but `width` is different to distinguish both data sets).
 3. In QGIS, execute `qgis_add_chips_boundaries_to_project.py` to create a layer that shows the locations of the available chips available in `chip_source_folder`; 
