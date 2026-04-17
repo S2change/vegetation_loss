@@ -38,7 +38,7 @@ module_path = os.path.abspath(os.path.join('..'))
 if module_path not in sys.path:
    sys.path.append(module_path)
 from pyccd.shared.read_files import read_tif_files_gee
-from ccd_results_utils.segment_identification import yyyymmdd_to_ordinal
+from scripts.utils.ccd_results_utils.segment_identification import yyyymmdd_to_ordinal
 
 
 ## SCRIPT CONFIGS ##
