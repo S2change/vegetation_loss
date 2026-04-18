@@ -7,7 +7,7 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 import pandas as pd
-from scripts.utils.ccd_results_utils.segment_identification import combine_parquet_files
+from scripts.ccd_results_utils.segment_identification import combine_parquet_files
 
 # Show all rows and columns
 pd.set_option('display.max_rows', None)

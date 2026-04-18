@@ -13,8 +13,8 @@ from PyQt5.QtGui import QColor
 
 
 # --- NEW DIRECTORY FOR GEOTIFF LABELS ---
-label_png_dir = r'C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\training_data\label'
-label_tif_dir = r'C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\training_data\label_tif'
+label_png_dir = r'C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testing_data\label'
+label_tif_dir = r'C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testing_data\label_tif'
 if not os.path.exists(label_tif_dir):
     os.makedirs(label_tif_dir)
 

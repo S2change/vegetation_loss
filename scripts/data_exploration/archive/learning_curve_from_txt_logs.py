@@ -32,12 +32,12 @@ def extract_epoch_and_stats(file_path):
         raise ValueError(f"Global Preds or Global Labels not found in file content: {file_path}")
 
 def main():   
-    directory = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\training_data\bacdm_weights"
+    directory = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\bacdm\bacdm_weights"
     epoch_stats = []
     
     # Iterate through all files in the directory
     for filename in os.listdir(directory):
-        if filename.endswith("_stats.txt") and filename.startswith("chips_"):  # Ensure we only process the relevant stats files
+        if filename.endswith("_stats.txt") and filename.startswith("341_"):  # Ensure we only process the relevant stats files
             file_path = os.path.join(directory, filename)
             try:
                 epoch, global_preds, global_labels = extract_epoch_and_stats(file_path)
