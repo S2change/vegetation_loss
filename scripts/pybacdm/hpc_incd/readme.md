@@ -1,1 +1,1 @@
-* scripts to be executed on INCD
+* Execution on the INCD platform
