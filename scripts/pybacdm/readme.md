@@ -1,1 +1,1 @@
-* Apply trained bacdm model to hdf5 spectral data files
+* Apply trained modified BACDM model to hdf5 spectral data files available at INCD
