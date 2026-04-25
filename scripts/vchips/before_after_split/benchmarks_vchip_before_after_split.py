@@ -144,15 +144,29 @@ class Bench:
                 'note': note,
             })
 
-    def report(self, total_wall=None):
-        """Print one row per stage, sorted by total wall time."""
+    def report(self, total_wall=None, streams=None):
+        """Print one row per stage, sorted by total wall time.
+
+        Parameters
+        ----------
+        streams : iterable of file-like, optional
+            Writable streams to emit the report to. Defaults to [sys.stdout].
+            Pass [sys.stdout, open(path, 'w')] to also save the report to disk.
+        """
+        if streams is None:
+            streams = [sys.stdout]
+
+        def emit(line=""):
+            for s in streams:
+                s.write(line + "\n")
+
         if not self.records:
-            print("\n(no benchmark records collected)")
+            emit("\n(no benchmark records collected)")
             return
 
-        print("\n" + "=" * 120)
-        print("BENCHMARK REPORT")
-        print("=" * 120)
+        emit("\n" + "=" * 120)
+        emit("BENCHMARK REPORT")
+        emit("=" * 120)
 
         rows = []
         for stage, records in self.records.items():
@@ -187,48 +201,60 @@ class Bench:
                   f"{'%wall':>6s} {'mean_ms':>9s} {'first_ms':>9s} "
                   f"{'rest_ms':>9s} {'read_MB':>9s} {'write_MB':>9s} "
                   f"{'pyPeak_MB':>10s} {'rssD_MB':>9s}")
-        print(header)
-        print("-" * len(header))
+        emit(header)
+        emit("-" * len(header))
         for r in rows:
             pct = (r['total_wall'] / total_wall * 100.0) if total_wall else 0.0
             rest = r['rest_mean_wall']
             # rest_mean_wall is NaN when there's only one call; check via self-equality.
             rest_str = f"{rest * 1000:9.2f}" if rest == rest else f"{'-':>9s}"
-            print(f"{r['stage'][:42]:42s} {r['calls']:6d} "
-                  f"{r['total_wall']:9.3f} {r['total_cpu']:8.3f} "
-                  f"{pct:6.2f} {r['mean_wall'] * 1000:9.2f} "
-                  f"{r['first_wall'] * 1000:9.2f} {rest_str} "
-                  f"{r['total_read_mb']:9.2f} {r['total_write_mb']:9.2f} "
-                  f"{r['max_py_peak_mb']:10.2f} {r['max_rss_delta_mb']:9.2f}")
+            emit(f"{r['stage'][:42]:42s} {r['calls']:6d} "
+                 f"{r['total_wall']:9.3f} {r['total_cpu']:8.3f} "
+                 f"{pct:6.2f} {r['mean_wall'] * 1000:9.2f} "
+                 f"{r['first_wall'] * 1000:9.2f} {rest_str} "
+                 f"{r['total_read_mb']:9.2f} {r['total_write_mb']:9.2f} "
+                 f"{r['max_py_peak_mb']:10.2f} {r['max_rss_delta_mb']:9.2f}")
 
         if total_wall:
-            print(f"\nTotal pipeline wall time: {total_wall:.3f}s")
+            emit(f"\nTotal pipeline wall time: {total_wall:.3f}s")
 
-    def report_loop(self, stage):
+    def report_loop(self, stage, streams=None):
         """Per-iteration breakdown for a stage timed inside a tight loop.
 
         Useful for the HDF5 slice loop — flags warmup spikes (first call much
         slower than rest = chunk cache / lazy-load cost) and shows whether
         bytes-read per iteration matches the theoretical minimum.
+
+        Parameters
+        ----------
+        streams : iterable of file-like, optional
+            Writable streams to emit to. Defaults to [sys.stdout].
         """
+        if streams is None:
+            streams = [sys.stdout]
+
+        def emit(line=""):
+            for s in streams:
+                s.write(line + "\n")
+
         records = self.records.get(stage, [])
         if not records:
             return
         walls_ms = [r['wall'] * 1000 for r in records]
         reads_kb = [r['read_bytes'] / 1024 for r in records]
-        print(f"\nPer-call breakdown for '{stage}' ({len(records)} calls):")
-        print(f"  first call : {walls_ms[0]:.2f} ms  read={reads_kb[0]:.1f} KB")
+        emit(f"\nPer-call breakdown for '{stage}' ({len(records)} calls):")
+        emit(f"  first call : {walls_ms[0]:.2f} ms  read={reads_kb[0]:.1f} KB")
         if len(walls_ms) > 1:
             tail = walls_ms[1:]
             tail_reads = reads_kb[1:]
-            print(f"  rest mean  : {sum(tail) / len(tail):.2f} ms  "
-                  f"read={sum(tail_reads) / len(tail_reads):.1f} KB")
-            print(f"  rest median: {median(tail):.2f} ms")
-            print(f"  rest max   : {max(tail):.2f} ms")
+            emit(f"  rest mean  : {sum(tail) / len(tail):.2f} ms  "
+                 f"read={sum(tail_reads) / len(tail_reads):.1f} KB")
+            emit(f"  rest median: {median(tail):.2f} ms")
+            emit(f"  rest max   : {max(tail):.2f} ms")
             ratio = walls_ms[0] / (sum(tail) / len(tail)) if tail else 1.0
             if ratio > 2.0:
-                print(f"  >>> first call is {ratio:.1f}x slower than rest — "
-                      f"likely cache warmup / lazy-load cost")
+                emit(f"  >>> first call is {ratio:.1f}x slower than rest — "
+                     f"likely cache warmup / lazy-load cost")
 
 
 # ============================================================================
@@ -285,11 +311,17 @@ def main():
     # Total wall is summed from the outer 'pipeline.total' stage so the %wall
     # column means "fraction of all pipeline time across all runs".
     total_wall = sum(r['wall'] for r in bench.records.get('pipeline.total', []))
-    bench.report(total_wall=total_wall)
-    # The two slice-per-timestep stages get a separate per-iteration report
-    # because that's where lazy-load amplification, if it exists, will show up.
-    bench.report_loop('hdf5.slice_per_timestep.first_in_vchip')
-    bench.report_loop('hdf5.slice_per_timestep')
+
+    # Write report to stdout AND a timestamped file
+    report_path = f"benchmark_report_{datetime.now():%Y%m%d_%H%M%S}.txt"
+    with open(report_path, 'w') as f:
+        streams = [sys.stdout, f]
+        bench.report(total_wall=total_wall, streams=streams)
+        # The two slice-per-timestep stages get a separate per-iteration report
+        # because that's where lazy-load amplification, if it exists, will show up.
+        bench.report_loop('hdf5.slice_per_timestep.first_in_vchip', streams=streams)
+        bench.report_loop('hdf5.slice_per_timestep', streams=streams)
+    print(f"\nReport saved to: {report_path}")
 
 
 def run_pipeline(vchip_dir, hdf5_dir, before_output, after_output, bench):
