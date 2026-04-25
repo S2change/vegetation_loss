@@ -25,13 +25,13 @@ module load python/3.10
 source /users1/cpca070342024/shared/vchips/venv/bin/activate
 
 # -------------------------------------------------------
-VCHIP_DIR="/users1/cpca070342024/shared/vchips/masks_tif"
+VCHIP_DIR="/users1/cpca070342024/shared/vchips/benchmark_tests/vchips_tests"
 HDF5_DIR="/users1/dgt/hdf5"
-BEFORE_OUTPUT_DIR="/users1/cpca070342024/shared/vchips/before_B12_to_B2_nodata_65535"
-AFTER_OUTPUT_DIR="/users1/cpca070342024/shared/vchips/after_B12_to_B2_nodata_65535"
+BEFORE_OUTPUT_DIR="/users1/cpca070342024/shared/vchips/benchmark_tests/before_tifs"
+AFTER_OUTPUT_DIR="/users1/cpca070342024/shared/vchips/benchmark_tests/after_tifs"
 # -------------------------------------------------------
 
-src='vchip_before_after_split.py'
+src='benchmarks_vchip_before_after_split.py'
 
 echo "=== Running ==="
 if [ ! -e "$src" ]; then
