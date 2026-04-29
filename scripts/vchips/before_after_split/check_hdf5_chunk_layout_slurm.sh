@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=benchmarks_vchip_before_after_split
+#SBATCH --job-name=vchip_before_after_split
 #SBATCH --time=1:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -25,14 +25,11 @@ module load python/3.10
 source /users1/cpca070342024/shared/vchips/venv/bin/activate
 
 # -------------------------------------------------------
-VCHIP_DIR="/users1/cpca070342024/shared/vchips/benchmark_tests/vchips_tests"
-HDF5_DIR="/users1/dgt/hdf5"
-BEFORE_OUTPUT_DIR="/users1/cpca070342024/shared/vchips/benchmark_tests/before_tifs"
-AFTER_OUTPUT_DIR="/users1/cpca070342024/shared/vchips/benchmark_tests/after_tifs"
-LABEL="first_run"
+HDF5_FILE_PATH="/users1/dgt/hdf5/T29TNE.h5"
+VCHIP_FILE_PATH="/users1/cpca070342024/shared/vchips/benchmark_tests/vchips_tests/vchip_667265_4424475_20220126_mask.tif"
 # -------------------------------------------------------
 
-src='benchmarks_vchip_before_after_split.py'
+src='check_hdf5_chunk_layout.py'
 
 echo "=== Running ==="
 if [ ! -e "$src" ]; then
@@ -40,13 +37,12 @@ if [ ! -e "$src" ]; then
     exit 1
 fi
 
-for d in "$VCHIP_DIR" "$HDF5_DIR" "$BEFORE_OUTPUT_DIR" "$AFTER_OUTPUT_DIR"; do
-    if [ ! -d "$d" ]; then
-        echo "Error: Directory $d not found"
-        exit 1
-    fi
+if [ ! -e "$HDF5_FILE_PATH" ]; then
+    echo "Error: HDF5 file $HDF5_FILE_PATH not found"
+    exit 1
+fi
 done
 
-python "$src" "$VCHIP_DIR" "$HDF5_DIR" "$BEFORE_OUTPUT_DIR" "$AFTER_OUTPUT_DIR" --label "$LABEL"
+python "$src" "$HDF5_FILE_PATH" "$VCHIP_FILE_PATH"
 
 echo "Finished with job $SLURM_JOBID"

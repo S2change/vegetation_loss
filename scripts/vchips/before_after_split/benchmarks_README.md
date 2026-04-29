@@ -166,7 +166,7 @@ Per-call breakdown for 'hdf5.slice_per_timestep' (272 calls):
 ### What this run reveals
 
 - **88% of total wall time is in the HDF5 slice loop.** Everything else combined is under 10%.
-- **Each slice reads ~19 MB.** Theoretical minimum for a typical vchip is ~1.3 MB (n_bands × n_chip_pixels × 2 bytes). The ~15× over-read confirms HDF5 is loading whole chunks because the access pattern straddles chunk boundaries.
+- **Each slice reads ~19 MB.** This is the compressed size of the chunk. Each chunk is about ~40 MB decompressed (1 timestep x 10 bands x 2,000,00 pixels x 2 bytes). While this is more data decompressed than is needed for a single chip, it does show that only one chunk is getting loaded to process the area, which was the goal for this chunk sizing.
 - **`hdf5.slice_per_timestep` is CPU-bound** (`wall=193.5 s`, `cpu=191.2 s`). The cost is decompression of those over-read chunks, not waiting on disk.
 - **`first_ms < rest_ms`** for the slice stage (361 ms vs 712 ms) — the very first call benefits from chunks loaded by `slice_per_timestep.first_in_vchip`. Steady-state calls pay full cache-thrash cost.
 - **No meaningful warmup penalty between vchips** (`first_in_vchip` rest_mean ≈ regular slice rest_mean ≈ 720 ms).

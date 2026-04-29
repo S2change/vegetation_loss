@@ -28,6 +28,7 @@ Output bands (same for before and after):
 import os
 import sys
 import re
+import csv
 import glob
 import time
 import tracemalloc
@@ -50,12 +51,18 @@ import rasterio as rio
 USAGE = (
     "Usage: python benchmarks_vchip_before_after_split.py "
     "<vchip_dir> <hdf5_dir> <before_output_dir> <after_output_dir> "
-    "[--runs N] [--cold]\n"
-    "  --runs N   Repeat the full pipeline N times (default 2). Run 0 is\n"
-    "             cold, runs 1+ are warm (OS page cache populated).\n"
-    "  --cold     Pause between runs so you can drop the OS file cache\n"
-    "             manually (`sync && sudo purge` on macOS)."
+    "[--runs N] [--cold] [--label NAME]\n"
+    "  --runs N      Repeat the full pipeline N times (default 2). Run 0 is\n"
+    "                cold, runs 1+ are warm (OS page cache populated).\n"
+    "  --cold        Pause between runs so you can drop the OS file cache\n"
+    "                manually (`sync && sudo purge` on macOS).\n"
+    "  --label NAME  Tag this run with a label. Included in the .txt report\n"
+    "                filename and as a column in benchmark_results.csv,\n"
+    "                so multiple experiments can be compared."
 )
+
+# Shared CSV file appended to by every run, regardless of label
+RESULTS_CSV = "benchmark_results.csv"
 
 # Temporal compositing parameters
 TEMPORAL_WINDOW_DAYS = 45
@@ -218,6 +225,52 @@ class Bench:
         if total_wall:
             emit(f"\nTotal pipeline wall time: {total_wall:.3f}s")
 
+    def write_csv(self, csv_path, label, timestamp):
+        """Append one row per stage to a shared CSV for cross-run comparison.
+
+        File is created with a header on first write; subsequent runs just
+        append. Each row carries `label` and `timestamp` so multiple runs
+        can be filtered/grouped in spreadsheet tools.
+        """
+        fieldnames = [
+            'label', 'timestamp', 'stage', 'calls',
+            'total_wall_s', 'total_cpu_s',
+            'mean_wall_ms', 'first_wall_ms', 'rest_mean_wall_ms', 'max_wall_ms',
+            'total_read_MB', 'total_write_MB',
+            'max_py_peak_MB', 'max_rss_delta_MB',
+        ]
+        write_header = not os.path.exists(csv_path)
+        with open(csv_path, 'a', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            if write_header:
+                writer.writeheader()
+            for stage, records in self.records.items():
+                walls = [r['wall'] for r in records]
+                cpus = [r['cpu'] for r in records]
+                reads = [r['read_bytes'] for r in records]
+                writes = [r['write_bytes'] for r in records]
+                py_peaks = [r['py_peak'] for r in records]
+                rss_deltas = [r['rss_delta'] for r in records]
+                n = len(records)
+                total = sum(walls)
+                rest_mean = sum(walls[1:]) / (n - 1) if n > 1 else float('nan')
+                writer.writerow({
+                    'label': label,
+                    'timestamp': timestamp,
+                    'stage': stage,
+                    'calls': n,
+                    'total_wall_s': f"{total:.6f}",
+                    'total_cpu_s': f"{sum(cpus):.6f}",
+                    'mean_wall_ms': f"{(total / n) * 1000:.3f}",
+                    'first_wall_ms': f"{walls[0] * 1000:.3f}",
+                    'rest_mean_wall_ms': f"{rest_mean * 1000:.3f}" if rest_mean == rest_mean else "",
+                    'max_wall_ms': f"{max(walls) * 1000:.3f}",
+                    'total_read_MB': f"{sum(reads) / 1e6:.3f}",
+                    'total_write_MB': f"{sum(writes) / 1e6:.3f}",
+                    'max_py_peak_MB': f"{max(py_peaks) / 1e6:.3f}",
+                    'max_rss_delta_MB': f"{max(rss_deltas) / 1e6:.3f}",
+                })
+
     def report_loop(self, stage, streams=None):
         """Per-iteration breakdown for a stage timed inside a tight loop.
 
@@ -262,9 +315,10 @@ class Bench:
 # ============================================================================
 
 def parse_args(argv):
-    """Pull --runs N and --cold out of argv, return (positional, runs, cold)."""
+    """Pull --runs N, --cold, --label NAME out of argv. Return (positional, runs, cold, label)."""
     runs = 2
     cold = False
+    label = None
     positional = []
     i = 1
     while i < len(argv):
@@ -275,28 +329,29 @@ def parse_args(argv):
         elif a == '--cold':
             cold = True
             i += 1
+        elif a == '--label':
+            label = argv[i + 1]
+            i += 2
         else:
             positional.append(a)
             i += 1
-    return positional, runs, cold
+    return positional, runs, cold, label
 
 
 def main():
-    positional, runs, cold = parse_args(sys.argv)
+    positional, runs, cold, label = parse_args(sys.argv)
     if len(positional) != 4:
         print(USAGE, file=sys.stderr)
         sys.exit(1)
     vchip_dir, hdf5_dir, before_output, after_output = positional
 
-    # One Bench instance is shared across runs, so the final aggregated report
-    # reflects all cold + warm calls. Inspect bench.records directly if you
-    # need to separate them.
+    # One Bench instance is shared across runs
     bench = Bench()
 
     for run_idx in range(runs):
-        label = "COLD" if run_idx == 0 else f"WARM #{run_idx}"
+        run_kind = "COLD" if run_idx == 0 else f"WARM #{run_idx}"
         print("\n" + "#" * 100)
-        print(f"# RUN {run_idx + 1}/{runs} ({label})")
+        print(f"# RUN {run_idx + 1}/{runs} ({run_kind})")
         print("#" * 100)
 
         if cold and run_idx > 0:
@@ -312,8 +367,11 @@ def main():
     # column means "fraction of all pipeline time across all runs".
     total_wall = sum(r['wall'] for r in bench.records.get('pipeline.total', []))
 
-    # Write report to stdout AND a timestamped file
-    report_path = f"benchmark_report_{datetime.now():%Y%m%d_%H%M%S}.txt"
+    # Write report to stdout AND a timestamped file. Filename includes the
+    # --label tag so multiple experiments in one directory stay distinct.
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    label_part = f"_{label}" if label else ""
+    report_path = f"benchmark_report{label_part}_{timestamp}.txt"
     with open(report_path, 'w') as f:
         streams = [sys.stdout, f]
         bench.report(total_wall=total_wall, streams=streams)
@@ -322,6 +380,10 @@ def main():
         bench.report_loop('hdf5.slice_per_timestep.first_in_vchip', streams=streams)
         bench.report_loop('hdf5.slice_per_timestep', streams=streams)
     print(f"\nReport saved to: {report_path}")
+
+    # Append per-stage rows to the shared CSV
+    bench.write_csv(RESULTS_CSV, label=label or "", timestamp=timestamp)
+    print(f"CSV row(s) appended to: {RESULTS_CSV}")
 
 
 def run_pipeline(vchip_dir, hdf5_dir, before_output, after_output, bench):
