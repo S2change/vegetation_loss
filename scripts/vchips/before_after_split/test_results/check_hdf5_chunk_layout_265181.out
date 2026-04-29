@@ -1,0 +1,76 @@
+* ----------------------------------------------------------------
+* Running PROLOG for vchip_before_after_split on Tue Apr 28 23:55:03 WEST 2026
+*    JOB_NAME                : vchip_before_after_split
+*    JOB_ID                  : 265181
+*    JOB_PARTITION           : fct
+*    JOB_USER                : domwelsh
+*    JOB_ACCOUNT             : cpca070342024
+*    JOB_QOS                 : cpca070342024
+*    NODE_LIST               : hpc016
+*    SLURM_NNODES            : 1
+*    SLURM_NPROCS            : 1
+*    SLURM_NTASKS            : 1
+*    SLURM_CPUS_ON_NODE      : 1
+*    SLURM_TASKS_PER_NODE    : 1
+*    SLURM_JOB_CPUS_PER_NODE : 1
+*    SLURM_MEM_PER_CPU       : 5333
+*    SUBMIT_HOST             : ui101.d.incd.pt
+*    WORK_DIR                : /users1/cpca070342024/shared/vchips
+*    JOB_SCRIPT              : /users1/cpca070342024/shared/vchips/check_hdf5_chunk_layout_slurm.sh
+* ----------------------------------------------------------------
+=== Running ===
+
+=== HDF5 file: /users1/dgt/hdf5/T29TNE.h5 ===
+
+Dataset 'values':
+  shape        = (n_timesteps=1559, n_bands=10, n_pixels=111,898,320)
+  chunks       = (1, 10, 2810880)
+  dtype        = uint16
+  compression  = lzf
+  n_timesteps  = 1559
+  n_pixels (xs) = 111,898,320
+  n_pixels (ys) = 111,898,320
+  chunk pixel-axis size = 2,810,880
+  chunks along pixel axis = 40
+  uncompressed chunk size = 56.22 MB
+
+=== Pixel storage order ===
+
+  Unique y values: 10,980  (range 4390210 -> 4500000)
+  Unique x values: 10,980  (range 499980 -> 609770)
+  Implied pixel size: 10.00 x 10.00
+  Implied tile dims: width=10980 x height=10980
+
+First 16 (x, y) pairs in the file:
+  [     0]  x=518130  y=4500000
+  [     1]  x=518140  y=4500000
+  [     2]  x=518150  y=4500000
+  [     3]  x=518160  y=4500000
+  [     4]  x=518170  y=4500000
+  [     5]  x=518180  y=4500000
+  [     6]  x=518190  y=4500000
+  [     7]  x=518200  y=4500000
+  [     8]  x=518210  y=4500000
+  [     9]  x=518220  y=4500000
+  [    10]  x=518230  y=4500000
+  [    11]  x=518240  y=4500000
+  [    12]  x=518250  y=4500000
+  [    13]  x=518260  y=4500000
+  [    14]  x=518270  y=4500000
+  [    15]  x=518280  y=4500000
+
+  Of first 1000 entries, 999 share the same y as their predecessor.
+  Of those, 999 step exactly +10 in x (100.0%).
+  -> Pixels look ROW-MAJOR (within a row, x increments by one pixel).
+
+=== Chunk-straddle check for vchip: vchip_667265_4424475_20220126_mask.tif ===
+
+  vchip dims    : 400 x 400  (160000 pixels)
+  vchip bounds  : x=[665265, 669265]  y=[4422475, 4426475]
+  HDF5 pixels covered : 0
+  WARNING: no HDF5 pixels fall in this vchip — wrong tile?
+Finished with job 265181
+
+* ----------------------------------------------------------------
+* Running EPILOG for vchip_before_after_split on Tue Apr 28 23:55:51 WEST 2026
+* ----------------------------------------------------------------
