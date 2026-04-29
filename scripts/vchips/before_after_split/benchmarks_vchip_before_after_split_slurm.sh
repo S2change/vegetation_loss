@@ -29,7 +29,8 @@ VCHIP_DIR="/users1/cpca070342024/shared/vchips/benchmark_tests/vchips_tests"
 HDF5_DIR="/users1/dgt/hdf5"
 BEFORE_OUTPUT_DIR="/users1/cpca070342024/shared/vchips/benchmark_tests/before_tifs"
 AFTER_OUTPUT_DIR="/users1/cpca070342024/shared/vchips/benchmark_tests/after_tifs"
-LABEL="first_run"
+TILE_GPKG="/users1/cpca070342024/shared/auxiliary_data/sentinel2_tiles_PT_32629.gpkg"
+LABEL="bbox_from_gpkg"
 # -------------------------------------------------------
 
 src='benchmarks_vchip_before_after_split.py'
@@ -47,6 +48,11 @@ for d in "$VCHIP_DIR" "$HDF5_DIR" "$BEFORE_OUTPUT_DIR" "$AFTER_OUTPUT_DIR"; do
     fi
 done
 
-python "$src" "$VCHIP_DIR" "$HDF5_DIR" "$BEFORE_OUTPUT_DIR" "$AFTER_OUTPUT_DIR" --label "$LABEL"
+if [ ! -e "$TILE_GPKG" ]; then
+    echo "Error: Geopackage file $TILE_GPKG not found"
+    exit 1
+fi
+
+python "$src" "$VCHIP_DIR" "$HDF5_DIR" "$BEFORE_OUTPUT_DIR" "$AFTER_OUTPUT_DIR" "$TILE_GPKG" --label "$LABEL"
 
 echo "Finished with job $SLURM_JOBID"
