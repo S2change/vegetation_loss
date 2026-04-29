@@ -59,10 +59,17 @@ with torch.no_grad():
         # Shape is [Batch, Classes, H, W] -> [1, 5, 256, 256]
         output_high_res = outputs[0]
 
-        # 3. Find the winning class for each pixel (0, 1, 2, 3, or 4)
-        # argmax along the 'Classes' dimension (dim=1)
-        # result shape: [1, 256, 256]
-        prediction = torch.argmax(output_high_res, dim=1)
+        # 3. Find the winning class for each pixel via argmax, then optionally
+        # override with a lower threshold for the Cuts class so that boundary
+        # pixels with moderate P(Cuts) are not silently assigned to background.
+        probs      = torch.softmax(output_high_res, dim=1)  # [1, C, H, W]
+        prediction = torch.argmax(probs, dim=1)             # [1, H, W]
+
+        cuts_threshold = getattr(AAA_Configs, 'CUTS_THRESHOLD', None)
+        if cuts_threshold is not None:
+            cuts_id = next((k for k, v in AAA_Configs.CLASS_NAMES.items() if v == 'Cuts'), None)
+            if cuts_id is not None:
+                prediction[probs[:, cuts_id] > cuts_threshold] = cuts_id
 
         # 4. Remove the batch dimension to get a 2D image [256, 256]
         # and move to CPU/Numpy

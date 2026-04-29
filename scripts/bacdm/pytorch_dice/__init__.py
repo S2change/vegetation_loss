@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import AAA_Configs
 
 # dice loss that was used for 100-epock pretty good model, but had some issues with "bloating" of predicted change areas; the stabilized version below with Tversky parameters should help mitigate this issue by penalizing false positives more heavily, which is likely contributing to the bloating you are seeing in the predictions; you can experiment with the alpha and beta parameters in the stabilized version to find the best balance for your specific dataset and model behavior
 def _dice_loss(pred, target, num_classes=5, smooth=1e-6):
@@ -37,28 +38,35 @@ def _dice_loss(pred, target, num_classes=5, smooth=1e-6):
     return torch.stack(dice_per_class).mean()
 
 # new loss function with Tversky parameters to help mitigate bloating by penalizing false positives more heavily; you can experiment with the alpha and beta parameters to find the best balance for your specific dataset and model behavior
-def _stabilized_dice_loss(pred, target, num_classes=5, smooth=1e-6):
+def _stabilized_dice_loss(pred, target, num_classes=5, smooth=1e-6, mask=None):
     probs = F.softmax(pred, dim=1)
     target_one_hot = F.one_hot(target.long(), num_classes).permute(0, 3, 1, 2).float()
-    
-    # Tversky parameters: alpha=0.3 (False Negatives), beta=0.7 (False Positives)
-    # High beta penalizes the "bloating" you are seeing.
-    alpha = 0.3
-    beta = 0.7
-    
+
+    if mask is not None:
+        # mask: [B, H, W] bool, True = valid pixel.
+        # Zeroing both probs and target at invalid positions excludes those
+        # pixels from tp, fp, and fn without biasing the Tversky index.
+        m = mask.float().unsqueeze(1)   # [B, 1, H, W]
+        probs = probs * m
+        target_one_hot = target_one_hot * m
+
+    tversky_params  = getattr(AAA_Configs, 'TVERSKY_PARAMS',  {})
+    tversky_default = getattr(AAA_Configs, 'TVERSKY_DEFAULT', (0.6, 0.4))
+
     loss_per_class = []
-    # ONLY loop through change classes (1-4)
     for c in range(1, num_classes):
+        alpha, beta = tversky_params.get(c, tversky_default)
+
         p = probs[:, c, :, :]
         t = target_one_hot[:, c, :, :]
-        
+
         tp = torch.sum(p * t, dim=(1, 2))
         fp = torch.sum(p * (1 - t), dim=(1, 2))
         fn = torch.sum((1 - p) * t, dim=(1, 2))
-        
+
         tversky_index = (tp + smooth) / (tp + alpha * fn + beta * fp + smooth)
         loss_per_class.append(1.0 - tversky_index)
-        
+
     return torch.stack(loss_per_class).mean()
 
 
@@ -67,11 +75,6 @@ class MultiClassDiceLoss(nn.Module):
         super(MultiClassDiceLoss, self).__init__()
         self.num_classes = num_classes
 
-    def forward(self, pred, target):
-        #return _dice_loss(pred, target, self.num_classes)
-
-        # 1. Get the raw stabilized dice/tversky value
-        # (Using your range(1, num_classes) logic)
-        score = _stabilized_dice_loss(pred, target, self.num_classes)
-        # 2. Wrap the final score in Log-Cosh
+    def forward(self, pred, target, mask=None):
+        score = _stabilized_dice_loss(pred, target, self.num_classes, mask=mask)
         return torch.log(torch.cosh(score))

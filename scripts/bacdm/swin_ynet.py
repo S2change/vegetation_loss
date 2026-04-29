@@ -852,6 +852,11 @@ class SwinTransDecoder(nn.Module):
             self.up_1 = FinalPatchExpand_X4_1(input_resolution=(32, 32), dim_scale=1, dim=256, patchsize=1)
             self.up_2 = FinalPatchExpand_X4_1(input_resolution=(16, 16), dim_scale=1, dim=512, patchsize=1)
             self.output = nn.Conv2d(in_channels=embed_dim, out_channels=self.num_classes, kernel_size=1, bias=False)
+            self.boundary_head = nn.Sequential(
+                nn.Conv2d(embed_dim, 32, kernel_size=3, padding=1),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(32, 1, kernel_size=1),
+            )
             self.output_0 = nn.Conv2d(in_channels=128, out_channels=self.num_classes, kernel_size=1, bias=False)
             self.output_1 = nn.Conv2d(in_channels=256, out_channels=self.num_classes, kernel_size=1, bias=False)
             self.output_2 = nn.Conv2d(in_channels=512, out_channels=self.num_classes, kernel_size=1, bias=False)
@@ -953,9 +958,10 @@ class SwinTransDecoder(nn.Module):
             x = self.up(x)
             x = x.view(B, pz * H, pz * W, -1)
             x = x.permute(0, 3, 1, 2)  # B,C,H,W
+            boundary_map = self.boundary_head(x)
             x = self.output(x)
 
-        return x
+        return x, boundary_map
 
     def up_x4_1(self, x, pz):
         H, W = self.patches_resolution
@@ -1001,12 +1007,12 @@ class SwinTransDecoder(nn.Module):
     def forward(self, x, x_down1, x_down2):
         x, x_upsample = self.forward_up_features(x, x_down1, x_down2)
 
-        x_p = self.up_x4(x, self.patch_size)
+        x_p, boundary_map = self.up_x4(x, self.patch_size)
         x_pre2 = self.up_x4_1(x_upsample[2], 1)
         x_pre3 = self.up_x8(x_upsample[1], 1)
         x_pre4 = self.up_x16(x_upsample[0], 1)
 
-        return x_p, x_pre2, x_pre3, x_pre4
+        return x_p, boundary_map, x_pre2, x_pre3, x_pre4
 
 # mc: added argument num_classes to encoder1
 # mc: AAA_Configs.Train_pretrained_path was initially trained with 2 classes
@@ -1153,6 +1159,6 @@ class Encoder(nn.Module):
 
     def forward(self, img1, img2):
         x, x_downsample1, x_downsample2 = self.encoder1(img1, img2)
-        x_p, x_2, x_3, x_4 = self.decoder(x, x_downsample1, x_downsample2)
+        x_p, boundary_map, x_2, x_3, x_4 = self.decoder(x, x_downsample1, x_downsample2)
 
-        return x_p, x_2, x_3, x_4
+        return x_p, boundary_map, x_2, x_3, x_4

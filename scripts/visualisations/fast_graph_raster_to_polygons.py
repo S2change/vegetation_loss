@@ -19,20 +19,21 @@ from datetime import datetime
 import time
 import numpy as np
 import rasterio
-from rasterio.features import shapes
+from rasterio.features import shapes # fast polygonize
 from shapely.geometry import shape
 import geopandas as gpd
 import networkx as nx
 from scipy.spatial import cKDTree
 import glob
 from datetime import datetime, timedelta
+import pandas as pd
 
 ## SCRIPT CONFIGS ##
 ##################################
 
 input_raster = r"H:\new_parquets_2017_2025\tabular\T29TNE\processed_outputs\rasters"
 output_vector = r"H:\new_parquets_2017_2025\tabular\T29TNE\processed_outputs\vectors"
-input_raster = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG\processed_outputs\rasters" 
+input_raster = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG\processed_outputs\rasters"
 output_vector = r"C:\Users\Public\Documents\outputs_ROI\tabular\T29TQG\processed_outputs\vectors"
 N_input_rasters=1 # None or integer # Number of rasters to process (set to None to process all), starting with the most recent (first in sorted list)
 
@@ -210,184 +211,127 @@ def create_spatial_temporal_groups(raster_array, date_range_days=0, connectivity
 
     return raster_array, labels
 
+
+
 def raster_to_polygons(input_raster, output_vector, band_1=1, band_2=2, date_range_days=0,
                        min_area_ha=0.5, nodata_value=-9999, connectivity=8):
     '''
-    Converts a multi-band raster to vector polygons.
-    The function processes two bands of the input raster, converts them to datetime values,
-    and then creates polygons from the resulting data.  
+    Converts a raster to polygons using a graph-based clustering algorithm for spatial-temporal grouping.
+    The function reads a raster file, clusters pixels based on spatial connectivity and temporal similarity,    
+    and then polygonizes the clusters while calculating statistics for each polygon.    
     Parameters:
-    - input_raster: Path to the input raster file (must contain at least two bands with date values)
-    - output_vector: Path to the output vector file (e.g., .shp, .gpkg, .geojson)
-    - band_1: Index of the first band to process (default: 1)   
-    - band_2: Index of the second band to process (default: 2)
+    - input_raster: Path to the input raster file (TIFF)    
+    - output_vector: Path to the output vector file (GPKG)    
+    - band_1: First band index containing date values (default: 1)  
+    - band_2: Second band index containing date values (default: 2)
     - date_range_days: Maximum number of days difference to consider pixels as part of the same cluster (default: 0, which means no temporal grouping)
     - min_area_ha: Minimum area in hectares for polygons to be retained (default: 0.5 ha)
-    - nodata_value: Value in the raster to be treated as nodata and ignored in processing (default: -9999)
+    - nodata_value: Value in the raster that represents no data (default: -9999)
     - connectivity: 4 for edge-only connectivity, 8 for edge+diagonal connectivity (default: 8)
-
+    Returns:
+    - gdf: GeoDataFrame containing the resulting polygons and their attributes
     '''
-
 
     print(f"Processing raster: {input_raster}")
 
     start_time = time.time()
     with rasterio.open(input_raster) as src:
-        print(f"Raster has {src.count} band(s)")
-        
-        print("Reading band 1...")
         band1 = src.read(band_1)
-        print("Reading band 2...")
         band2 = src.read(band_2)
-        
         transform = src.transform
         crs = src.crs
-        print(f"Raster shape: {band1.shape}")
-        print(f"Raster CRS: {crs}")
-    elapsed = time.time() - start_time
-    print(f"Raster reading took {elapsed:.2f} seconds\n")
-
-    # Convert bands to datetime
-    dt1, mask1 = yyyymmdd_to_datetime(band1, nodata_value)
-    dt2, mask2 = yyyymmdd_to_datetime(band2, nodata_value)
-
+    
+    # --- Vectorized Date Processing ---
+    # We use a simplified vectorized approach for the mean date
+    # Instead of looping, we use NumPy masks
+    mask1 = (band1 != nodata_value) & (band1 != 0)
+    mask2 = (band2 != nodata_value) & (band2 != 0)
     combined_mask = mask1 & mask2
 
-    # Calculate the average of valid dates
-    mean_dt = np.full(band1.shape, None, dtype=object)
-    for idx in zip(*np.where(combined_mask)):
-        delta1 = dt1[idx] - datetime(1970,1,1)
-        delta2 = dt2[idx] - datetime(1970,1,1)
-        mean_days = (delta1.days + delta2.days) / 2
-        mean_dt[idx] = datetime(1970,1,1) + timedelta(days=int(round(mean_days)))
+    # Calculate mean dates in "days since 1970"
+    days1 = date_to_days_vectorized(band1)
+    days2 = date_to_days_vectorized(band2)
+    mean_days = np.full(band1.shape, -9999, dtype=np.int32)
+    mean_days[combined_mask] = (days1[combined_mask] + days2[combined_mask]) // 2
 
-    # Convert back to yyyymmdd
-    raster_data = datetime_to_yyyymmdd(mean_dt, nodata_value)
-
+    # Cluster the labels
     if date_range_days > 0:
-        raster_data, cluster_labels = create_spatial_temporal_groups(raster_data, date_range_days, connectivity)
+        _, cluster_labels = create_spatial_temporal_groups(band1, date_range_days, connectivity)
     else:
-        cluster_labels = raster_data
+        cluster_labels = band1.copy()
 
-    print("\nFiltering clusters by minimum area...")
-    start_time = time.time()
-
-    # Calculate pixel area from transform
-    pixel_area_m2 = abs(transform[0] * transform[4])  # pixel width * pixel height
-    pixel_area_ha = pixel_area_m2 / 10000
+    # --- Fast Area Filtering ---
+    pixel_area_ha = abs(transform[0] * transform[4]) / 10000
     min_pixels = int(np.ceil(min_area_ha / pixel_area_ha))
+    
+    unique_labels, counts = np.unique(cluster_labels, return_counts=True)
+    valid_clusters = unique_labels[(counts >= min_pixels) & (unique_labels >= 0)]
+    
+    # Mask out invalid clusters
+    filtered_labels = np.where(np.isin(cluster_labels, valid_clusters), cluster_labels, -1)
 
-    # Count pixels per cluster
-    unique_labels, label_counts = np.unique(cluster_labels[cluster_labels >= 0], return_counts=True)
+    # --- THE FAST POLYGONIZATION STEP ---
+    print("\nVectorizing all clusters in one pass...")
+    start_poly = time.time()
+    
+    # 1. Generate all shapes in one pass
+    shape_gen = shapes(filtered_labels.astype(np.int32), 
+                       mask=(filtered_labels >= 0), 
+                       transform=transform, 
+                       connectivity=connectivity)
+    
+    # 2. Extract into a list of geometries and IDs
+    results = [{"geometry": shape(s), "cluster_id": int(v)} for s, v in shape_gen]
+    gdf = gpd.GeoDataFrame.from_features(results, crs=crs)
 
-    # Filter clusters by minimum pixel count
-    valid_clusters = unique_labels[label_counts >= min_pixels]
+    # --- FAST STATISTICS CALCULATION (Avoids the loop) ---
+    # We create a mapping of ClusterID -> Stats using Pandas/NumPy
+    print("Calculating statistics for all clusters...")
+    
+    # Flatten arrays for tabular processing
+    flat_labels = filtered_labels.flatten()
+    flat_days = mean_days.flatten()
+    
+    # Only look at valid pixels
+    valid_idx = flat_labels >= 0
+    df_pixels = pd.DataFrame({
+        'cluster_id': flat_labels[valid_idx],
+        'days': flat_days[valid_idx]
+    })
 
-    # Create filtered cluster labels using vectorized operations (set small clusters to -1)
-    filtered_labels = np.full_like(cluster_labels, -1, dtype=np.int32)
-    valid_mask = np.isin(cluster_labels, valid_clusters)
-    filtered_labels[valid_mask] = cluster_labels[valid_mask]
+    # Group by cluster to get min, max, and mode (most common date)
+    # Using 'days' because YYYYMMDD doesn't average/sort as naturally
+    stats = df_pixels.groupby('cluster_id')['days'].agg(
+        min_days='min',
+        max_days='max',
+        mode_days=lambda x: x.value_counts().index[0]
+    ).reset_index()
 
-    num_filtered_out = len(unique_labels) - len(valid_clusters)
-    print(f"  Filtered out {num_filtered_out} small clusters (< {min_area_ha} ha)")
-    print(f"  Remaining clusters: {len(valid_clusters)}")
-    elapsed = time.time() - start_time
-    print(f"  Filtering took {elapsed:.2f} seconds")
+    # Merge stats back to the GeoDataFrame
+    gdf = gdf.merge(stats, on='cluster_id', how='left')
 
-    print("\nConverting raster to polygons...")
-    start_time = time.time()
+    # --- Convert "Days" back to YYYYMMDD for final output ---
+    def days_to_yyyymmdd(days_series):
+        ref_date = datetime(2000, 1, 1) # Align with your date_to_days logic
+        return days_series.apply(lambda d: int((ref_date + timedelta(days=int(d))).strftime('%Y%m%d')))
 
-    polygons = []
-    values = []
-    areas_ha = []
-    min_dates = []
-    max_dates = []
-    date_diffs = []
+    gdf['min_date'] = days_to_yyyymmdd(gdf['min_days'])
+    gdf['max_date'] = days_to_yyyymmdd(gdf['max_days'])
+    gdf['date_value'] = days_to_yyyymmdd(gdf['mode_days'])
+    gdf['date_diff_days'] = gdf['max_days'] - gdf['min_days']
+    gdf['area_ha'] = gdf.geometry.area / 10000
 
-    # takes a long time; can we use some faster method like polygonize?
-    for geom, cluster_id in shapes(filtered_labels, mask=(filtered_labels >= 0),
-                                   connectivity=connectivity,
-                                   transform=transform):
-        poly = shape(geom)
-        area_ha = poly.area / 10000
+    # Clean up columns and save
+    final_cols = ['date_value', 'area_ha', 'min_date', 'max_date', 'date_diff_days', 'geometry']
+    gdf = gdf[final_cols]
+    
+    # Add formatted string dates
+    gdf['date_formatted'] = pd.to_datetime(gdf['date_value'], format='%Y%m%d').dt.strftime('%Y-%m-%d')
 
-        cluster_mask = (cluster_labels == cluster_id)
-        cluster_dates = raster_data[cluster_mask]
+    print(f"Polygon conversion took {time.time() - start_poly:.2f} seconds")
+    gdf.to_file(output_vector, driver='GPKG')
+    return gdf
 
-        if cluster_dates.size > 0:
-            unique_dates, counts = np.unique(cluster_dates, return_counts=True)
-            most_common_date = unique_dates[np.argmax(counts)]
-
-            # Calculate min, max dates and difference
-            min_date = int(np.min(unique_dates))
-            max_date = int(np.max(unique_dates))
-
-            # Parse dates and calculate difference in days
-            min_date_obj = parse_date_value(min_date)
-            max_date_obj = parse_date_value(max_date)
-
-            if min_date_obj and max_date_obj:
-                date_diff_days = (max_date_obj - min_date_obj).days
-            else:
-                date_diff_days = -9999  # Use nodata value for invalid dates
-
-            polygons.append(poly)
-            values.append(int(most_common_date))
-            areas_ha.append(area_ha)
-            min_dates.append(min_date)
-            max_dates.append(max_date)
-            date_diffs.append(date_diff_days)
-
-    elapsed = time.time() - start_time
-    print(f"Polygon conversion took {elapsed:.2f} seconds")
-    print(f"Created {len(polygons)} polygons after filtering\n")
-
-    gdf = gpd.GeoDataFrame({
-        'date_value': values,
-        'area_ha': areas_ha,
-        'min_date': min_dates,
-        'max_date': max_dates,
-        'date_diff_days': date_diffs
-    }, geometry=polygons, crs=crs)
-
-    def format_date(x):
-        date_obj = parse_date_value(x)
-        return date_obj.strftime('%Y-%m-%d') if date_obj else 'Invalid'
-
-    gdf['date_formatted'] = gdf['date_value'].apply(format_date)
-    gdf['min_date_formatted'] = gdf['min_date'].apply(format_date)
-    gdf['max_date_formatted'] = gdf['max_date'].apply(format_date)
-
-    print(f"Saving {len(gdf)} polygons to: {output_vector}")
-
-    start_time = time.time()
-    if output_vector.endswith('.shp'):
-        gdf.to_file(output_vector, driver='ESRI Shapefile')
-    elif output_vector.endswith('.gpkg'):
-        gdf.to_file(output_vector, driver='GPKG')
-    elif output_vector.endswith('.geojson'):
-        gdf.to_file(output_vector, driver='GeoJSON')
-    else:
-        gdf.to_file(output_vector, driver='ESRI Shapefile')
-    elapsed = time.time() - start_time
-    print(f"File writing took {elapsed:.2f} seconds\n")
-
-    print("Summary Statistics:")
-    print(f"Total polygons: {len(gdf)}")
-    print(f"Total area: {gdf['area_ha'].sum():.2f} ha")
-    print(f"Average polygon area: {gdf['area_ha'].mean():.2f} ha")
-    print(f"Minimum polygon area: {gdf['area_ha'].min():.2f} ha")
-    print(f"Maximum polygon area: {gdf['area_ha'].max():.2f} ha")
-
-    if len(gdf) > 0:
-        print(f"Date range: {gdf['date_formatted'].min()} to {gdf['date_formatted'].max()}")
-        print(f"\nDate Difference Statistics:")
-        valid_diffs = gdf[gdf['date_diff_days'] != -9999]['date_diff_days']
-        if len(valid_diffs) > 0:
-            print(f"  Average date difference: {valid_diffs.mean():.2f} days")
-            print(f"  Minimum date difference: {valid_diffs.min()} days")
-            print(f"  Maximum date difference: {valid_diffs.max()} days")
-            print(f"  Polygons with date span > 0: {(valid_diffs > 0).sum()}")
 
 def main():
     overall_start = time.time()

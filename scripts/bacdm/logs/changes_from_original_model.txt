@@ -1,0 +1,56 @@
+
+Add boundary loss (18 april 2026)
+
+Everything looks correct. Here's a summary of all changes made:
+
+swin_ynet.py
+
+SwinTransDecoder.__init__ — added self.boundary_head (Conv 128→32→1) alongside self.output
+SwinTransDecoder.up_x4 — extracts the shared feature map, runs both self.output and self.boundary_head, returns (x_p, boundary_map)
+SwinTransDecoder.forward — unpacks the new return value, passes boundary_map through; now returns 5 values instead of 4
+Encoder.forward — updated to propagate the 5 values
+train.py
+
+Added boundary_loss_fn = nn.BCEWithLogitsLoss() and BOUNDARY_LOSS_WEIGHT (default 0.1, overridable via AAA_Configs.BOUNDARY_LOSS_WEIGHT)
+Updated outputs[1..3] → outputs[2..4] for the auxiliary scale outputs (since outputs[1] is now boundary_map)
+Added inline boundary label computation (morphological gradient via max/min pooling) and loss_boundary term to the total loss
+test.py needed no changes — it only uses outputs[0] which is still x_p.
+
+#######################
+
+Revise checkpoints:
+
+Yes, strongly recommended — especially for HPC runs where you can't monitor closely.
+
+The main reasons in your specific case:
+
+Your loss_least variable (line 134) is initialized but never used — you're saving every epoch's checkpoint with no way to select the best one. Validation loss gives you that signal.
+You're using high class weights (rare classes) which makes overfitting more likely and harder to detect from training loss alone.
+On HPC you'll want automatic best-checkpoint saving rather than manually inspecting dozens of .pth files.
+Practical recommendation: a 90/10 or 85/15 train/val split is typical for segmentation. The tradeoff is that with very few samples of rare classes (your classes 1–4 sound sparse), a random split risks putting all rare-class examples in one partition — so a stratified split at the chip level (by dominant class or by geographic region) is safer than pure random.
+
+For implementation, the cleanest approach is:
+
+Split the chip file list into train/val at the dataset level (in MyData or via a pre-generated text file listing train vs val chips)
+After each epoch, run inference on the val set with torch.no_grad(), compute val loss and per-class IoU
+Save checkpoint only when val loss improves (replacing your unused loss_least logic)
+Want me to add a validation loop to train.py? I'd need to see dataset_swin_GZ.py briefly to wire it in cleanly.
+
+###########################
+
+Everything looks correct. Here's a summary of all changes made:
+
+AAA_Configs.py
+
+CLASS_WEIGHTS: [1.0, 10.0, 2.0] → [1.0, 4.0, 2.0] — removes the competing force against the Tversky FP penalty
+Added TVERSKY_ALPHA = 0.6, TVERSKY_BETA = 0.4 — flipped from the previous (0.3, 0.7) that was causing the shrinkage
+pytorch_dice/__init__.py
+
+Tversky α/β now read from AAA_Configs instead of being hardcoded. Old values penalised FP heavily (→ shrinkage); new values penalise FN more (→ preserved extent)
+train.py
+
+Added global_tp counter per batch alongside the existing global_preds/global_labels
+EMA update (ema_decay=0.999) called after every optimizer.step() — smooths the per-epoch oscillation
+End-of-epoch: computes per-class precision, recall, F1 and prints them
+Saves three checkpoint variants per epoch: regular _NN.pth (unchanged), _ema.pth (overwritten each epoch with latest EMA), and _best.pth (overwritten only when Cuts F1 improves)
+After training you can compare _best.pth (sharpest training-time Cuts performance), _ema.pth (temporally smoothed), and the epoch-by-epoch animation to pick the final model.

@@ -1,5 +1,5 @@
 """
-Aletred MC feb 2026: Revised version of ccd_to_raster.py to allow passing end and start band values to output 
+Altered MC feb 2026: Revised version of ccd_to_raster.py to allow passing end and start band values to output 
 
 PURPOSE:
 This script processes parquet files containing change detection results from satellite imagery analysis.
@@ -73,7 +73,7 @@ import sys
 module_path = os.path.abspath(os.path.join('..'))
 if module_path not in sys.path:
    sys.path.append(module_path)
-from scripts.utils.ccd_results_utils.segment_identification import generate_date_ranges, ndvi_loss_calculation
+from ccd_results_utils.segment_identification import generate_date_ranges, ndvi_loss_calculation
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 ## SCRIPT CONFIGS ##
@@ -85,7 +85,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 input_directory = r"H:\new_parquets_2017_2025\tabular\T29TQF" # small tile for tests
 input_directory = r"H:\new_parquets_2017_2025\tabular\T29TNE" # UPDATE
 output_raster_file = r"H:\new_parquets_2017_2025\tabular\T29TNE\processed_outputs\rasters\output_raster_ccd.tif" # dates will be inserted into the filename based on the date range
-output_raster_file=r"C:\Users\mlc\Downloads\TNE_raster_ccd_20_bands.tif"
+#output_raster_file=r"C:\Users\mlc\Downloads\TNE_raster_ccd_20_bands.tif"
 
 # Vector file is not set up
 output_vector_file = None # Add path if vector file is wanted, to check which points were processed to make the raster
@@ -95,12 +95,12 @@ output_vector_file = None # Add path if vector file is wanted, to check which po
 # Raster will be created for each date range pair
 
 # Example 1 – use a fixed range (no splitting):
-date_ranges = generate_date_ranges([("2018-09-30", "2021-12-31")],auto_intervals=False)
+date_ranges = generate_date_ranges([("2021-03-01", "2021-04-30")],auto_intervals=False)
 
 # bands names in parquets see https://github.com/S2change/vegetation_loss/tree/main/data_info
 # if empty, no additional bands will be added to the output raster (only the 4 main bands: last_tEnd, last_tBreak, is_break, ndvi_last_segment)
-start_bands= ["greenStart", "greenStart2", "redStart", "redStart2", "nirStart", "nirStart2" , "swir2Start", "swir2Start2"] # MC additional bands to add to the output raster (values at segment start)
-end_bands= ["greenEnd", "greenEnd2", "redEnd", "redEnd2", "nirEnd", "nirEnd2" , "swir2End", "swir2End2"] # MC additional bands to add to the output raster (values at segment end)
+start_bands= [] # ["greenStart", "greenStart2", "redStart", "redStart2", "nirStart", "nirStart2" , "swir2Start", "swir2Start2"] # MC additional bands to add to the output raster (values at segment start)
+end_bands= [] # ["greenEnd", "greenEnd2", "redEnd", "redEnd2", "nirEnd", "nirEnd2" , "swir2End", "swir2End2"] # MC additional bands to add to the output raster (values at segment end)
 nan_tuple = (np.nan,) * (len(end_bands) + len(start_bands)) # tuple of zeros for additional bands in no-break case (i.e. is_break not 1)
 
 SOURCE_CRS = "EPSG:32629" # CRS of input coordinates (UTM zone 29N)

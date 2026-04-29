@@ -57,8 +57,12 @@ GPKG_PATH = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\harmonized\Data_ref_2
 GPKG_PATH = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\harmonized\Data_ref_2020_icnf.gpkg" # r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\harmonized\BDR_expanded_v1.gpkg"
 GPKG_PATH = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\harmonized\Data_ref_2021_nvg_v2.gpkg"
 GPKG_PATH = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\harmonized\Data_ref_2021_icnf.gpkg"
+GPKG_PATH = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\harmonized\Data_ref_2022_icnf.gpkg"
+GPKG_PATH = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\harmonized\Data_ref_2022_nvg_v2.gpkg"
+GPKG_PATH = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\harmonized\Data_ref_2019_nvg_v2.gpkg"
+GPKG_PATH = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\harmonized\Data_ref_2023_nvg_v2.gpkg"
 
-LABEL_REF_DATASET="icnf_2021"
+LABEL_REF_DATASET="nvg_v2_2023"
 
 S2TILES_PATH = os.path.join(r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5", "sentinel2_tiles_PT_32629.gpkg")
 

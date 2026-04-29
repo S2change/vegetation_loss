@@ -12,6 +12,10 @@ from qgis.utils import iface
 from PyQt5.QtGui import QColor
 
 
+# --- FILTER: select examples belonging to this vegetation-loss type ---
+# Set to any value in CLASS_GROUPING_NAMES, e.g. "Cuts" or "Fires"
+TYPE = "Cuts"
+
 # --- NEW DIRECTORY FOR GEOTIFF LABELS ---
 label_png_dir = r'C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testing_data\label'
 label_tif_dir = r'C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testing_data\label_tif'
@@ -30,7 +34,8 @@ working_dir = os.path.dirname(os.path.abspath(script_path))
 
 # Load AAA_Configs
 Test_im_pathA, Test_im_pathB, Test_det_path = None, None, None
-with open(os.path.join(os.path.dirname(working_dir), 'AAA_Configs.py')) as f: 
+CLASS_REMAP, CLASS_NAMES, CLASS_COLORS = None, {}, {}  # defaults; overwritten by exec below
+with open(os.path.join(os.path.dirname(working_dir), 'AAA_Configs.py')) as f:
     exec(f.read())
 
 def resolve_path(base_dir, relative_path):
@@ -41,6 +46,11 @@ def resolve_path(base_dir, relative_path):
 Test_im_pathA = resolve_path(working_dir, Test_im_pathA)
 Test_im_pathB = resolve_path(working_dir, Test_im_pathB)
 Test_det_path = resolve_path(working_dir, Test_det_path)
+
+# Resolve TYPE to the corresponding class ID from the loaded config
+type_class_id = next((k for k, v in CLASS_NAMES.items() if v == TYPE), None)
+if type_class_id is None:
+    raise ValueError(f"TYPE='{TYPE}' not found in CLASS_NAMES: {CLASS_NAMES}")
 
 # --- HELPER FUNCTIONS ---
 
@@ -63,12 +73,14 @@ def convert_png_to_geotiff(filenames, png_dir, ref_tif_dir, output_dir):
                 meta.update(driver='GTiff', dtype='uint8', count=1, compress='lzw')
                 
                 label_data = np.array(Image.open(png_path))
-                
+                if CLASS_REMAP is not None:
+                    label_data = CLASS_REMAP[label_data].astype(np.uint8)
+
                 with rasterio.open(out_path, 'w', **meta) as dest:
                     dest.write(label_data.astype('uint8'), 1)
 
 
-def get_comparison_rankings(pred_folder, label_folder):
+def get_comparison_rankings(pred_folder, label_folder, type_class_id):
     results = []
     pred_files = [f for f in os.listdir(pred_folder) if f.endswith('.tif')]
     for f_name in pred_files:
@@ -79,10 +91,14 @@ def get_comparison_rankings(pred_folder, label_folder):
         with rasterio.open(pred_path) as p_src:
             pred_arr = p_src.read(1)
         label_arr = np.array(Image.open(label_path))
-        mask = (label_arr != 0)
-        total_non_bg = np.sum(mask)
-        acc = (np.sum((label_arr == pred_arr) & mask) / total_non_bg * 100) if total_non_bg > 0 else 0.0
-        results.append({'filename': f_name, 'accuracy': acc, 'non_zero_pixels': int(total_non_bg)})
+        if CLASS_REMAP is not None:
+            label_arr = CLASS_REMAP[label_arr].astype(np.uint8)
+        mask = (label_arr == type_class_id)
+        total_type_pixels = np.sum(mask)
+        if total_type_pixels == 0:
+            continue  # skip tiles with no pixels of the selected type
+        acc = np.sum((pred_arr == type_class_id) & mask) / total_type_pixels * 100
+        results.append({'filename': f_name, 'accuracy': acc, 'non_zero_pixels': int(total_type_pixels)})
     return results
 
 def select_stratified_samples(results):
@@ -114,17 +130,14 @@ def load_layers_to_group(folder_path, filenames, group_name, RGB=True, position=
             group.addLayer(layer)
 
             if RGB and layer.bandCount() >= 5:
-                renderer = QgsMultiBandColorRenderer(layer.dataProvider(), 3, 4, 5)                
+                renderer = QgsMultiBandColorRenderer(layer.dataProvider(), 3, 8,9) # for 6 bands: 3,4,5                
                 layer.setRenderer(renderer)
                 # (Add cumulative cut logic if needed)
             else:
-                # Paletted Symbology for discrete values
+                # Paletted Symbology for discrete values (driven by AAA_Configs)
                 class_map = {
-                    0: {'color': QColor(0, 0, 0, 0), 'label': 'Unchanged'},
-                    1: {'color': QColor(255, 0, 0, 255), 'label': 'Clear Cut'},
-                    2: {'color': QColor(0, 255, 0, 255), 'label': 'Other 1'},
-                    3: {'color': QColor(0, 0, 255, 255), 'label': 'Other 2'},
-                    4: {'color': QColor(255, 255, 0, 255), 'label': 'Burned'}
+                    v: {'color': QColor(*CLASS_COLORS[v]), 'label': CLASS_NAMES[v]}
+                    for v in CLASS_NAMES
                 }
                 classes = [QgsPalettedRasterRenderer.Class(v, c['color'], c['label']) for v, c in class_map.items()]
                 layer.setRenderer(QgsPalettedRasterRenderer(layer.dataProvider(), 1, classes))
@@ -133,7 +146,7 @@ def load_layers_to_group(folder_path, filenames, group_name, RGB=True, position=
 
 # --- EXECUTION ---
 # 1. Get stats and select 12
-all_stats = get_comparison_rankings(Test_det_path, label_png_dir) # Use previous logic
+all_stats = get_comparison_rankings(Test_det_path, label_png_dir, type_class_id)
 selected_filenames = select_stratified_samples(all_stats)
 
 # 2. Convert ONLY the 12 selected PNGs to GeoTIFF
