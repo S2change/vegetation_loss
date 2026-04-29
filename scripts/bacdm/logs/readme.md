@@ -1,1 +1,0 @@
-The models weight files are in \partilhado\BACDM\logs
