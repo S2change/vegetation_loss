@@ -44,14 +44,16 @@ SKIP_IF_EXISTS = True
 TEMPORAL_WINDOW_DAYS = 45
 MAX_IMAGES_PER_PERIOD = 9
 
-#B2_VALID_MAX used for filtering out clouds when SELECTION_BAND_INDEX = 0
-B2_VALID_MAX = 5000
 HDF5_NODATA = 65535
 OUTPUT_NODATA = 65535
 
 # Input HDF5 file has bands in ascending order
 # B2, 3, 4, 5, 6, 7, 8, 8a, 11, 12
 SELECTION_BAND_INDEX = 0  # B2 (Blue)
+
+#B2_VALID_MAX used instead of HDF5_NODATA when SELECTION_BAND_INDEX = 0
+#in order to filter out clouds
+B2_VALID_MAX = 5000
 
 # Output band descriptions, aligned with the reversed (descending) band order
 BAND_NAMES = ('B12', 'B11', 'B8A', 'B8', 'B7', 'B6', 'B5', 'B4', 'B3', 'B2')
