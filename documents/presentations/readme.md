@@ -1,4 +1,4 @@
-# Apresentações no quadro do projeto
+# Apresentações e relatórios externos informais
 
 ## 2026
 

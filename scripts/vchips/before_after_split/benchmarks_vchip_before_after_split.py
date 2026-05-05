@@ -30,6 +30,7 @@ import sys
 import re
 import csv
 import glob
+import geopandas as gpd
 import time
 import tracemalloc
 from contextlib import contextmanager
@@ -50,8 +51,11 @@ import rasterio as rio
 # command line — see USAGE below.
 USAGE = (
     "Usage: python benchmarks_vchip_before_after_split.py "
-    "<vchip_dir> <hdf5_dir> <before_output_dir> <after_output_dir> "
+    "<vchip_dir> <hdf5_dir> <before_output_dir> <after_output_dir> <tiles_gpkg> "
     "[--runs N] [--cold] [--label NAME]\n"
+    "  <tiles_gpkg>  Path to a GeoPackage of S2 tile polygons. Must have a\n"
+    "                column 'Name' with tile IDs (e.g. T29SMC) matching the\n"
+    "                HDF5 filenames, and CRS EPSG:32629.\n"
     "  --runs N      Repeat the full pipeline N times (default 2). Run 0 is\n"
     "                cold, runs 1+ are warm (OS page cache populated).\n"
     "  --cold        Pause between runs so you can drop the OS file cache\n"
@@ -340,10 +344,10 @@ def parse_args(argv):
 
 def main():
     positional, runs, cold, label = parse_args(sys.argv)
-    if len(positional) != 4:
+    if len(positional) != 5:
         print(USAGE, file=sys.stderr)
         sys.exit(1)
-    vchip_dir, hdf5_dir, before_output, after_output = positional
+    vchip_dir, hdf5_dir, before_output, after_output, tiles_gpkg = positional
 
     # One Bench instance is shared across runs
     bench = Bench()
@@ -361,7 +365,7 @@ def main():
                   "terminal run: `sync && sudo purge`")
             input("Press Enter once cache is dropped to continue...")
 
-        run_pipeline(vchip_dir, hdf5_dir, before_output, after_output, bench)
+        run_pipeline(vchip_dir, hdf5_dir, before_output, after_output, tiles_gpkg, bench)
 
     # Total wall is summed from the outer 'pipeline.total' stage so the %wall
     # column means "fraction of all pipeline time across all runs".
@@ -386,12 +390,12 @@ def main():
     print(f"CSV row(s) appended to: {RESULTS_CSV}")
 
 
-def run_pipeline(vchip_dir, hdf5_dir, before_output, after_output, bench):
+def run_pipeline(vchip_dir, hdf5_dir, before_output, after_output, tiles_gpkg, bench):
     """One full pass of the production pipeline, end-to-end, instrumented."""
     with bench.time_block('pipeline.total'):
         with bench.time_block('tile_index.build_total'):
             print("Building tile index...")
-            tile_index = build_tile_index(hdf5_dir, bench)
+            tile_index = build_tile_index(tiles_gpkg, hdf5_dir, bench)
 
         vchip_files = sorted(glob.glob(os.path.join(vchip_dir, "vchip_*_mask.tif")))
         print(f"\nFound {len(vchip_files)} vchip files\n")
@@ -461,40 +465,50 @@ def run_pipeline(vchip_dir, hdf5_dir, before_output, after_output, bench):
 # TILE INDEX
 # ============================================================================
 
-def build_tile_index(hdf5_dir, bench):
+def build_tile_index(tiles_gpkg, hdf5_dir, bench):
     """
-    Read the bounding box of every HDF5 tile file in hdf5_dir.
+    Read tile bounding boxes from a GeoPackage of S2 tile polygons.
 
-    Only xs and ys are read — the large values array is never touched.
+    The GeoPackage must have a 'Name' column with tile IDs (e.g. T29SMC) and
+    geometry in EPSG:32629. Each row's polygon bounds become the tile's bbox,
+    and tile centers are precomputed for the closest-center tiebreaker.
+
+    Parameters
+    ----------
+    tiles_gpkg : str
+        Path to the GeoPackage of tile polygons.
+    hdf5_dir : str
+        Directory containing the per-tile .h5 files. Used only to construct
+        the path to each tile's HDF5 file (no files are read here).
+    bench : Bench
+        Timing harness instance.
 
     Returns
     -------
     dict mapping tile_id (str, e.g. 'T29SMC') to
-        {'path': str, 'xmin': float, 'xmax': float, 'ymin': float, 'ymax': float}
+        {'path': str, 'xmin': float, 'xmax': float, 'ymin': float, 'ymax': float,
+         'cx': float, 'cy': float}
     """
+    with bench.time_block('tile_index.read_gpkg'):
+        gdf = gpd.read_file(tiles_gpkg)
+
+    if 'Name' not in gdf.columns:
+        raise ValueError(f"Expected 'Name' column in {tiles_gpkg}; got {list(gdf.columns)}")
+
     index = {}
-    h5_files = glob.glob(os.path.join(hdf5_dir, "*.h5"))
-    if not h5_files:
-        raise FileNotFoundError(f"No .h5 files found in {hdf5_dir}")
-
-    for path in h5_files:
-        tile_id = os.path.splitext(os.path.basename(path))[0]  # e.g. 'T29SMC'
-        # Per-file timing here lets the report flag any one tile that's an
-        # outlier (e.g. on slow storage or with anomalous coordinate sizes).
-        with bench.time_block('tile_index.read_one_file', note=tile_id):
-            with h5py.File(path, 'r') as h5f:
-                xs: np.ndarray = h5f['xs'][:]  # type: ignore[index]
-                ys: np.ndarray = h5f['ys'][:]  # type: ignore[index]
-
+    for _, row in gdf.iterrows():
+        tile_id = row['Name']
+        minx, miny, maxx, maxy = row.geometry.bounds
         index[tile_id] = {
-            'path': path,
-            'xmin': float(xs.min()),
-            'xmax': float(xs.max()),
-            'ymin': float(ys.min()),
-            'ymax': float(ys.max()),
+            'path': os.path.join(hdf5_dir, f"{tile_id}.h5"),
+            'xmin': float(minx),
+            'xmax': float(maxx),
+            'ymin': float(miny),
+            'ymax': float(maxy),
+            'cx': float((minx + maxx) / 2),
+            'cy': float((miny + maxy) / 2),
         }
-        print(f"  {tile_id}: x=[{index[tile_id]['xmin']:.0f}, {index[tile_id]['xmax']:.0f}]  "
-              f"y=[{index[tile_id]['ymin']:.0f}, {index[tile_id]['ymax']:.0f}]")
+        print(f"  {tile_id}: x=[{minx:.0f}, {maxx:.0f}]  y=[{miny:.0f}, {maxy:.0f}]")
 
     print(f"Tile index built: {len(index)} tiles")
     return index
@@ -504,8 +518,10 @@ def find_tile_for_point(x, y, tile_index):
     """
     Return the tile_id whose bounding box contains (x, y).
 
-    If the point falls in more than one tile (edge overlap), the first match
-    is returned. Returns None if no tile covers the point.
+    Tile polygons in the source gpkg overlap, so a point may fall inside
+    multiple bboxes. Tiebreaker: pick the tile whose center is closest to
+    the point (squared distance, no sqrt). This favors tiles where the
+    vchip sits squarely inside, avoiding edge tiles with more missing data.
 
     Parameters
     ----------
@@ -518,10 +534,17 @@ def find_tile_for_point(x, y, tile_index):
     -------
     str or None
     """
+    best_tile = None
+    best_dist_sq = float('inf')
     for tile_id, bbox in tile_index.items():
         if bbox['xmin'] <= x <= bbox['xmax'] and bbox['ymin'] <= y <= bbox['ymax']:
-            return tile_id
-    return None
+            dx = x - bbox['cx']
+            dy = y - bbox['cy']
+            dist_sq = dx * dx + dy * dy
+            if dist_sq < best_dist_sq:
+                best_dist_sq = dist_sq
+                best_tile = tile_id
+    return best_tile
 
 
 # ============================================================================
@@ -568,6 +591,133 @@ def ordinal_array_to_yyyymmdd(ordinal_array, nodata):
 # ============================================================================
 # HDF5 LOADING
 # ============================================================================
+
+def compute_vchip_pixel_mapping(xs, ys, vchip_transform, vchip_width, vchip_height):
+    """
+    Determine which HDF5 pixels fall in the vchip and where they map to.
+
+    Returns (pixel_indices, rows, cols, n_chip_pixels), or None if no HDF5
+    pixels fall inside the vchip's bounds.
+    """
+    xmin = vchip_transform.c
+    ymax = vchip_transform.f
+    pixel_size_x = vchip_transform.a
+    pixel_size_y = -vchip_transform.e
+    xmax = xmin + vchip_width * pixel_size_x
+    ymin = ymax - vchip_height * pixel_size_y
+
+    pixel_mask = (xs >= xmin) & (xs < xmax) & (ys > ymin) & (ys <= ymax)
+    pixel_indices = np.where(pixel_mask)[0]
+    if len(pixel_indices) == 0:
+        return None
+
+    xs_chip = xs[pixel_mask]
+    ys_chip = ys[pixel_mask]
+
+    cols = np.floor((xs_chip - xmin) / pixel_size_x).astype(int)
+    rows = np.floor((ymax - ys_chip) / pixel_size_y).astype(int)
+    cols = np.clip(cols, 0, vchip_width - 1)
+    rows = np.clip(rows, 0, vchip_height - 1)
+    return pixel_indices, rows, cols, len(pixel_indices)
+
+
+def cascade_one_side(values_ds, pixel_indices, rows, cols,
+                     vchip_height, vchip_width, n_bands,
+                     time_indices, ordinals, side_label,
+                     bench, vchip_idx):
+    """
+    Load timesteps in cascade order and stop early once every eligible pixel
+    has a valid value.
+
+    `time_indices` and `ordinals` must already be in cascade-priority order:
+    descending date for pre-break (most recent first), ascending for post-break.
+    `select_temporal_indices` already returns them in that order.
+
+    For each timestep:
+      1. Read the (n_bands, n_chip_pixels) slice from HDF5.
+      2. Determine which pixels are still unfilled AND have valid SELECTION_BAND
+         data this timestep.
+      3. Fill those pixels in `selected` and `timestamps`, then mark them filled.
+      4. If no pixels remain unfilled, break out — skip remaining timesteps.
+
+    Output band order is reversed at fill time (descending B12 -> B2) so the
+    consumer doesn't need to re-reverse later.
+
+    Parameters
+    ----------
+    values_ds : h5py.Dataset
+        Open (time, band, pixel) HDF5 dataset.
+    pixel_indices : ndarray
+        HDF5 pixel indices that fall inside the vchip.
+    rows, cols : ndarray
+        Each pixel's (row, col) destination in the vchip grid.
+    vchip_height, vchip_width, n_bands : int
+        Output dimensions.
+    time_indices : ndarray
+        HDF5 time-axis indices, in cascade-priority order.
+    ordinals : ndarray
+        Ordinal dates corresponding to time_indices, same order.
+    side_label : str
+        'pre' or 'post' — used in benchmark stage names.
+    bench : Bench
+    vchip_idx : int
+        Position of this vchip within its tile group (for note annotation).
+
+    Returns
+    -------
+    (selected, timestamps)
+        selected   : (n_bands, vchip_height, vchip_width) int64, descending band order
+        timestamps : (vchip_height, vchip_width) int64 ordinal dates
+        Both use OUTPUT_NODATA where no valid observation was found.
+    """
+    selected = np.full((n_bands, vchip_height, vchip_width), OUTPUT_NODATA, dtype=np.int64)
+    timestamps = np.full((vchip_height, vchip_width), OUTPUT_NODATA, dtype=np.int64)
+
+    # Track which vchip-grid pixels still need a value. Only pixels that have
+    # an HDF5 source are eligible; everything else stays NODATA.
+    unfilled = np.zeros((vchip_height, vchip_width), dtype=bool)
+    unfilled[rows, cols] = True
+
+    timesteps_loaded = 0
+    timesteps_skipped = 0
+
+    # SELECTION_BAND_INDEX refers to the descending output order. Translate
+    # back to the ascending HDF5 order for the validity check.
+    ascending_sel_band = (n_bands - 1) - SELECTION_BAND_INDEX
+
+    with bench.time_block(f'cascade.{side_label}.loop_total'):
+        for i, (t_idx, t_ord) in enumerate(zip(time_indices, ordinals)):
+            if not unfilled.any():
+                timesteps_skipped = len(time_indices) - i
+                break
+
+            stage = (f'cascade.{side_label}.slice_per_timestep.first_in_vchip'
+                     if i == 0 else f'cascade.{side_label}.slice_per_timestep')
+            with bench.time_block(stage):
+                # (n_bands, n_chip_pixels), ascending band order
+                pixel_data: np.ndarray = values_ds[int(t_idx), :, pixel_indices]  # type: ignore[index]
+
+                valid_per_pixel = pixel_data[ascending_sel_band] < HDF5_NODATA   # (n_chip_pixels,)
+                still_unfilled_per_pixel = unfilled[rows, cols]
+                fill_now = valid_per_pixel & still_unfilled_per_pixel
+
+                if fill_now.any():
+                    fill_rows = rows[fill_now]
+                    fill_cols = cols[fill_now]
+                    # pixel_data[::-1] is a stride view — flip ascending -> descending
+                    # without copying. Then index pixels we want to fill.
+                    selected[:, fill_rows, fill_cols] = pixel_data[::-1][:, fill_now]
+                    timestamps[fill_rows, fill_cols] = int(t_ord)
+                    unfilled[fill_rows, fill_cols] = False
+
+                timesteps_loaded += 1
+
+    bench.records[f'cascade.{side_label}.loop_total'][-1]['note'] = (
+        f"vchip_idx={vchip_idx} loaded={timesteps_loaded} skipped={timesteps_skipped} "
+        f"unfilled_remaining={int(unfilled.sum())}"
+    )
+    return selected, timestamps
+
 
 def load_hdf5_for_vchip(xs, ys, values_ds, vchip_transform, vchip_width, vchip_height,
                         time_indices, bench, vchip_idx):
@@ -725,30 +875,31 @@ def process_vchip(vchip_path, xs, ys, ts, values_ds,
 
         print(f"    {len(pre_indices)} pre-break and {len(post_indices)} post-break timesteps selected")
 
-        # Load only the required timesteps, placed onto the vchip grid
-        all_indices = np.concatenate([pre_indices, post_indices])
-        with bench.time_block('vchip.load_hdf5_total'):
-            chip = load_hdf5_for_vchip(
-                xs, ys, values_ds, vchip_transform, vchip_width, vchip_height,
-                all_indices, bench, vchip_idx,
+        # Compute vchip pixel mapping once; both sides reuse it.
+        with bench.time_block('vchip.compute_pixel_mapping'):
+            mapping = compute_vchip_pixel_mapping(
+                xs, ys, vchip_transform, vchip_width, vchip_height
             )
-        if chip is None:
+        if mapping is None:
             print(f"  No HDF5 pixels found within vchip bounds — skipping")
             return
+        pixel_indices, rows, cols, _ = mapping
+        n_bands = values_ds.shape[1]  # type: ignore[union-attr]
 
-        values = chip['values']   # (n_pre+n_post, n_bands, vchip_height, vchip_width)
-        n_bands = chip['n_bands']
-
-        # Split values back into pre and post
-        n_pre = len(pre_indices)
-        pre_data = values[:n_pre]
-        post_data = values[n_pre:]
-
-        # Cascading composite: pick first valid observation per pixel
-        with bench.time_block('vchip.cascading_selection'):
-            pre_selected, post_selected, pre_ts, post_ts = cascading_selection_optimized(
-                pre_data, post_data, pre_ordinals, post_ordinals,
-                SELECTION_BAND_INDEX, HDF5_NODATA, OUTPUT_NODATA
+        # Cascading composite with early termination — one side at a time.
+        # Stops loading timesteps once every eligible pixel is filled.
+        with bench.time_block('vchip.cascade_total'):
+            pre_selected, pre_ts = cascade_one_side(
+                values_ds, pixel_indices, rows, cols,
+                vchip_height, vchip_width, n_bands,
+                pre_indices, pre_ordinals, 'pre',
+                bench, vchip_idx,
+            )
+            post_selected, post_ts = cascade_one_side(
+                values_ds, pixel_indices, rows, cols,
+                vchip_height, vchip_width, n_bands,
+                post_indices, post_ordinals, 'post',
+                bench, vchip_idx,
             )
         # pre_selected / post_selected: (n_bands, vchip_height, vchip_width), dtype int64
         # pre_ts / post_ts: (vchip_height, vchip_width) ordinal dates
