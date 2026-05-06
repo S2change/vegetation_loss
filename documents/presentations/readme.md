@@ -47,6 +47,8 @@
   - [Relatório sumário](reuniao_ISA_LIP_25_marco_2026.md)
   - [Detalhes](https://www.notion.so/DGT-ISA-LIP-Technical-Session-HDF5-Code-Walkthrough-25-March-2026-32e70b5874e5812da74ddffdb5edb17e)
 
+- 6 de maio de 2026: relatório atividades abril e plano de trabalhos maio 2026, em resposta ao email de 30 de março de 2026 (Ricardo Pinho, DGT) 
+
 ## 2025
 
 - (18 de junho de 2025) Reunião com DGT/CNCA: [Presentation (pdf)](Reuniao_DGT_CNCA_ISA_18_junho_2025.pdf)
