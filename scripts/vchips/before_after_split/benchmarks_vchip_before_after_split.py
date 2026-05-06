@@ -75,11 +75,13 @@ MAX_IMAGES_PER_PERIOD = 9
 HDF5_NODATA = 65535
 OUTPUT_NODATA = 65535
 
-# Input HDF5 file has bands in ascending order, output order is reversed to match BACDM setup
-# Reversal happens before cascading_selection, so use reverse order for picking
-# band to check for pixel's having NoData in cascading_selection
-# B12, 11, 8a, 8, 7, 6, 5, 4, 3, 2
-SELECTION_BAND_INDEX = 3  # B8 (NIR)
+# Input HDF5 file has bands in ascending order
+# B2, 3, 4, 5, 6, 7, 8, 8a, 11, 12
+SELECTION_BAND_INDEX = 0  # B2 (Blue)
+
+#B2_VALID_MAX used instead of HDF5_NODATA when SELECTION_BAND_INDEX = 0
+#in order to filter out clouds
+B2_VALID_MAX = 5000
 
 # Output band descriptions, aligned with the reversed (descending) band order
 BAND_NAMES = ('B12', 'B11', 'B8A', 'B8', 'B7', 'B6', 'B5', 'B4', 'B3', 'B2')
@@ -681,10 +683,6 @@ def cascade_one_side(values_ds, pixel_indices, rows, cols,
     timesteps_loaded = 0
     timesteps_skipped = 0
 
-    # SELECTION_BAND_INDEX refers to the descending output order. Translate
-    # back to the ascending HDF5 order for the validity check.
-    ascending_sel_band = (n_bands - 1) - SELECTION_BAND_INDEX
-
     with bench.time_block(f'cascade.{side_label}.loop_total'):
         for i, (t_idx, t_ord) in enumerate(zip(time_indices, ordinals)):
             if not unfilled.any():
@@ -697,7 +695,10 @@ def cascade_one_side(values_ds, pixel_indices, rows, cols,
                 # (n_bands, n_chip_pixels), ascending band order
                 pixel_data: np.ndarray = values_ds[int(t_idx), :, pixel_indices]  # type: ignore[index]
 
-                valid_per_pixel = pixel_data[ascending_sel_band] < HDF5_NODATA   # (n_chip_pixels,)
+                if SELECTION_BAND_INDEX == 0:
+                    valid_per_pixel = pixel_data[SELECTION_BAND_INDEX] < B2_VALID_MAX
+                else:
+                    valid_per_pixel = pixel_data[SELECTION_BAND_INDEX] < HDF5_NODATA  # (n_chip_pixels,)
                 still_unfilled_per_pixel = unfilled[rows, cols]
                 fill_now = valid_per_pixel & still_unfilled_per_pixel
 
