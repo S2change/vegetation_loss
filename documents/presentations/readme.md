@@ -44,14 +44,14 @@
 
 - 25 de março de 2026 (reunião DGT/LIP) on-line
 
-  - [Relatório sumário](https://github.com/S2change/vegetation_loss/edit/main/documents/presentations/2026)
+  - [Relatório sumário](https://github.com/S2change/vegetation_loss/tree/main/documents/presentations/2026)
   - [Detalhes](https://www.notion.so/DGT-ISA-LIP-Technical-Session-HDF5-Code-Walkthrough-25-March-2026-32e70b5874e5812da74ddffdb5edb17e)
 
 - 6 de maio de 2026: relatório atividades abril e plano de trabalhos maio 2026, em resposta ao email de 30 de março de 2026 (Ricardo Pinho, DGT) -- ver em (https://github.com/S2change/vegetation_loss/edit/main/documents/presentations/2026)
 
 ## 2025
 
-- (18 de junho de 2025) Reunião com DGT/CNCA: [Presentation (pdf)](https://github.com/S2change/vegetation_loss/edit/main/documents/presentations/2025)
+- (18 de junho de 2025) Reunião com DGT/CNCA: [Presentation (pdf)](https://github.com/S2change/vegetation_loss/tree/main/documents/presentations/2025)
 
     <details>
     
@@ -81,10 +81,10 @@
 
 ## 2024
 
--  (20 fev 2024) [Base Dados Referência NVG](https://github.com/S2change/vegetation_loss/edit/main/documents/presentations/2024). Descrição e organização das tabelas da BDR NVG original.
-- (20 fev 2024)  [Deteção de alterações com CCD, ficheiro PPT](https://github.com/S2change/vegetation_loss/edit/main/documents/presentations/2024)
-- (23 maio 2024) [PyCCD: Análise do desempenho e dos tempos de computação](https://github.com/S2change/vegetation_loss/edit/main/documents/presentations/2024). Discussão de diferentes formatos de input/output para uma máquina local (**não HPC**). Componentes do pyCCD mais exigentes em recursos computacionais. Estratágias para reduzir o tempo de computação (leitura dados, LASSO, ...)
-- (23 de maio de 2024) [Melhoramento da BDR NVG usando informação espetral](https://github.com/S2change/vegetation_loss/edit/main/documents/presentations/2024)  Implementação de técnicas baseadas nas quedas médias de NVDI em cada sub-talhão (posteriormente, o trabalho evoluiu para análise ao nível do pixel).
-- (4 de julho de 2024) [Reunião DGT/INCD/LIP](https://github.com/S2change/vegetation_loss/edit/main/documents/presentations/2024). Descrição do problema de criação do produto de perdas de vegetação: dados de referência, dados de satélite, algoritmos (CCD, etapas de processamento), estimativa de recursos computacionais
+-  (20 fev 2024) [Base Dados Referência NVG](https://github.com/S2change/vegetation_loss/tree/main/documents/presentations/2024). Descrição e organização das tabelas da BDR NVG original.
+- (20 fev 2024)  [Deteção de alterações com CCD, ficheiro PPT](https://github.com/S2change/vegetation_loss/tree/main/documents/presentations/2024)
+- (23 maio 2024) [PyCCD: Análise do desempenho e dos tempos de computação](https://github.com/S2change/vegetation_loss/tree/main/documents/presentations/2024). Discussão de diferentes formatos de input/output para uma máquina local (**não HPC**). Componentes do pyCCD mais exigentes em recursos computacionais. Estratágias para reduzir o tempo de computação (leitura dados, LASSO, ...)
+- (23 de maio de 2024) [Melhoramento da BDR NVG usando informação espetral](https://github.com/S2change/vegetation_loss/tree/main/documents/presentations/2024)  Implementação de técnicas baseadas nas quedas médias de NVDI em cada sub-talhão (posteriormente, o trabalho evoluiu para análise ao nível do pixel).
+- (4 de julho de 2024) [Reunião DGT/INCD/LIP](https://github.com/S2change/vegetation_loss/tree/main/documents/presentations/2024). Descrição do problema de criação do produto de perdas de vegetação: dados de referência, dados de satélite, algoritmos (CCD, etapas de processamento), estimativa de recursos computacionais
 
 
