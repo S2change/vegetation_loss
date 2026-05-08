@@ -1,1 +1,2 @@
+- Dominic, May 7, 2026 - create and process chips in INCD; duplicate dates in hdf5
 - Jesus, Mon, 27 Apr 2026 19:12:57 -0600: problems with 10 bands vchips -- adapt code on CNCA for cut vchips and non-filtered clouds (exclude pixels b2>6000 ?)
