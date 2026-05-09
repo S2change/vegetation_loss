@@ -1,4 +1,4 @@
-- `create_hdf5.py` edited by Gonçalo Barradas/INCD
+- `create_hdf5.py` edited by Gonçalo Barradas (to be run on the INCD platform; this script read a report file with cloud cover estimates per tile and date and applies a 60% threshold)
 - `append_hdf5.py` : to be tested
 - `hdf5_utils.py`: auxiliary functions and constants
 
