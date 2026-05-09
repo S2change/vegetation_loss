@@ -12,7 +12,52 @@ Chip-chunked (48, 10, 65536), padding=-9999
 
 File size (T29TPG): 329.8 GB
 
-## Claude's explanation
+## Chunking strategy comparison
+
+| | Original `(1, 10, 2 810 880)` | Chip-chunked `(48, 10, 65 536)` |
+|---|---|---|
+| **Chunk uncompressed** | 56 MB | 63 MB |
+| **Chunk on disk (LZF)** | ~9 MB | ~7.6 MB |
+| **File size** | 427 GB | 338 GB |
+| **Total chunks** | 2 232 × 21 = 46 872 | 959 × 47 = 45 073 |
+| **Natural parallel unit** | timestep | chip |
+
+---
+
+**Read cost for key access patterns**
+
+| Operation | Original | Chip-chunked |
+|---|---|---|
+| 1 chip, 48 ts | 48 × 21 chunks = 56 GB decompressed | **1 chunk = 63 MB** |
+| 1 chip, all 2 232 ts | 2 232 × 21 chunks = 2.6 TB | **47 chunks = 3 GB** |
+| Full tile, 1 ts | 21 chunks = 1.18 GB | 959 chunks = 60 GB |
+| Full tile, 48 ts | 1 008 chunks = 9.2 GB disk | 959 chunks = 7.3 GB disk |
+
+---
+
+**HPC memory budget per CPU (5 GB), chip classification workflow**
+
+| Item | Original | Chip-chunked |
+|---|---|---|
+| Per-ts read buffer (unavoidable) | **1.18 GB** (full tile) | 63 MB (one chip) |
+| Accumulator (N chips × 48 ts × 10 bands, float32) | N × 0.12 GB | N × 0.12 GB |
+| BACDM model weights + activations | ~1.5 GB | ~1.5 GB |
+| Remaining for data at 5 GB | ~2.3 GB → **≤ 19 chips** | ~3.4 GB → **≤ 28 chips** |
+| Full-ts buffer forced even for 1 chip | **yes** | no |
+
+---
+
+**HPC parallelization**
+
+| | Original | Chip-chunked |
+|---|---|---|
+| Split strategy | awkward — each job must read the full tile per ts regardless of how many chips it owns | natural — assign a contiguous chip range `[c_start, c_end)` per job; reads are independent |
+| Jobs share data? | all jobs decompress the same chunks (no benefit from splitting) | each job reads a disjoint set of chunks (zero overlap) |
+| Embarrassingly parallel? | no — full-tile reads create implicit coupling | **yes** — chip ranges are fully independent |
+| Suggested job sizing | — | `ceil(959 / n_cpus)` chips per job |
+	
+
+## Claude's explanation for the different in size of the compressed files
 
 ### Two compounding effects both push the output smaller, more than offsetting the 6.4 % padding overhead:
 
