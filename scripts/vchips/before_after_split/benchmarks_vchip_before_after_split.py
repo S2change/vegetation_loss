@@ -713,10 +713,12 @@ def cascade_one_side(values_ds, pixel_indices, rows, cols,
 
                 timesteps_loaded += 1
 
-    bench.records[f'cascade.{side_label}.loop_total'][-1]['note'] = (
+    note_msg = (
         f"vchip_idx={vchip_idx} loaded={timesteps_loaded} skipped={timesteps_skipped} "
         f"unfilled_remaining={int(unfilled.sum())}"
     )
+    print(f"    cascade.{side_label}: {note_msg}")
+    bench.records[f'cascade.{side_label}.loop_total'][-1]['note'] = note_msg
     return selected, timestamps
 
 
