@@ -1,3 +1,7 @@
+1. `preprocess_to_n_ts_chip_chunked.py`: Rewrites an HDF5 time series from temporal chunks  (1,  B, P_all) into chip-oriented chunks (T_CHUNK, B, CHIP_SIZE), just for a set of timestamps (say, N_TS=48)
+2.  `rechunk_hdf5_chip_oriented.py`: Similar, but converts all data (all timestamps) from the input file
+
+
 # Hdf5, compression and chunks
 
 Prompt: data (sentinel 2 images with a time stamp) are acquired every few days. Right now, the new images are added to the current hdf5 files with chunks (1, 10, 2 810 880). This makes sense because one can update the file after a new ne acquisitions. However, for the particular project I'm working on, I need to process the most recent  n_ts timestamps, since I need to build a "before" and an "after" time composite to detect if chenges occur. For this processing step it's clearly better to have the data Chip-chunked (n_ts, 10, 65 536), with n_ts=48 or lower. Since in practice I only need a temporal slice of the original data, would it make sense to have a pre-processing step that would write to the disk the timestamps I need with the adequate chunks of (n_ts, 10, 65 536)? And how can be this done in HPC with a RAM budget of 5 GB per cpu?
@@ -59,7 +63,7 @@ Prompt: data (sentinel 2 images with a time stamp) are acquired every few days. 
 
 ## Pre-processing: extract recent timestamps with chip-oriented chunking
 
-The idea is to pre-process the original hdf5 file to create a temporary file in disk just with `N_TS` timestamps for processing. See script `extract_recent_chip_chunked.py`. For T29TPG and `N_TS=48`, if took 4:50 in local PC (2 batches). The output file is `T29TPG_48ts_20251028_20251229.h5` (4.6 GB).
+The idea is to pre-process the original hdf5 file to create a temporary file in disk just with `N_TS` timestamps for processing. See script `preprocess_to_n_ts_chip_chunked.py`. For T29TPG and `N_TS=48`, if took 4:50 in local PC (2 batches). The output file is `T29TPG_48ts_20251028_20251229.h5` (4.6 GB).
 
 
 ### Motivation
