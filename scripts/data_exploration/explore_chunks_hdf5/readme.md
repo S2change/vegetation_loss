@@ -1,4 +1,4 @@
-1. `preprocess_to_n_ts_chip_chunked.py`: Rewrites an HDF5 time series from temporal chunks  (1,  B, P_all) into chip-oriented chunks (T_CHUNK, B, CHIP_SIZE), just for a set of timestamps (say, N_TS=48)
+1. `rechunk_hdf5_chip_oriented_N_TS_timestamps.py`: Rewrites an HDF5 time series from temporal chunks  (1,  B, P_all) into chip-oriented chunks (T_CHUNK, B, CHIP_SIZE), just for a set of timestamps (say, N_TS=48)
 2.  `rechunk_hdf5_chip_oriented.py`: Similar, but converts all data (all timestamps) from the input file
 
 Notice that re-structuring the chunks implies data padding (-9999)
