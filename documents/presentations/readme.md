@@ -49,6 +49,10 @@
 
 - 6 de maio de 2026: relatório atividades abril e plano de trabalhos maio 2026, em resposta ao email de 30 de março de 2026 (Ricardo Pinho, DGT) -- [visualizar pdf ou descarregar Word](https://github.com/S2change/vegetation_loss/tree/main/documents/presentations/2026)
 
+- 10 de maio de 2026: reunião DGT/LIP , com participação ISA no início
+
+- 11 de maio de 2026: reunião técnica LIP/ISA: ver relatório
+
 ## 2025
 
 - (18 de junho de 2025) Reunião com DGT/CNCA: [Presentation (pdf)](https://github.com/S2change/vegetation_loss/tree/main/documents/presentations/2025)
