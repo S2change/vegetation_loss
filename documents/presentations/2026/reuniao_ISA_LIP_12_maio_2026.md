@@ -1,15 +1,20 @@
+Presentes: Manuel Campagnolo, Gonçalo Barradas, João Pina
+
+
 # Criação de ficheiros hdf5
 
-## Tester append_hdf5.py
+- Gonçalo vai testar o script `append_hdf5.py` sobre tile T29TQG usando o critério corrente de seleção de tiffs. Assim será possível verificar que podem ser adicionadas novos "timestamps" a um ficheiro hdf5 na ordem correta
 
-## Tiles e órbitas, e máscara Portugal
+- Problemas identificados nos hdf5 atuais relativamente ao número muito elevado de timestamps. Sem qualquer filtragem, o hdf5 acumula uma "layer temporal (timestamp)" por cada ficheiro geotiff (ESA). Para uma mesma data e para a mesma tile, podem existir vários ficheiros por dois motivos:
+  - os ficheiros geotiff (ESA) são particionados em mais do que um ficheiro (todos com mesma timestamp)
+  - cada tile é coberta por mais do que uma órbita, cada uma com o seu timestamp
 
-## Estimação da proporção de nuvens (CLOUD_REPORT)
+Uma consequência prática importante é poder haver duplicações de timestamps legítimas e que devem ser preservadas no ficheiro hdf5.
 
-## Atributos adicionais a considerar incluir em hdf5
+Assim, o cálculo efetivo da cobertura por nuvens depende desses fatores, e também da máscara espacial aplicada (Portugal Continental + 2 km). Para uma filtragem de nuvens efetiva, o cálciulo da cobertura de nuvens deve ser revisto usando todos esses fatores. Foi decidido para já não fazer essa alteração e usar os ficheiros hdf5 existentes para se perceber melhor o que poderá ser melhorado.
 
-- cobertura de nuvens
-- órbita?
+Se houver no futuro nova produção de ficheiros hdf5, será importante considerar a inclusão de novos atributos (proporção de coberto de nuvens, área efetiva sobre território português
+
 
 # Processamento
 
