@@ -9,6 +9,43 @@ Finally, the outputs of all the tasks should be aggregated. The final goal is to
 
 ## HPC inference pipeline — architecture and pseudo-code
 
+### 0. Pre-processing — extract recent timestamps with chip-oriented chunking
+
+> Run **once** before the inference jobs, on any machine with enough RAM
+> (local PC: ~1 min;  HPC node with 5 GB: ~17 min, 16 passes).
+
+```mermaid
+flowchart LR
+    subgraph Master["Master HDF5  (updated continuously)"]
+        MH["T29TPG.h5\n─────────────────\nall T acquisitions\nchunks (1, 10, 2 810 880)\nLZF compressed\n~427 GB"]
+    end
+
+    subgraph Script["extract_recent_chip_chunked.py\n(derived from rechunk_hdf5_chip_oriented.py)"]
+        direction TB
+        S1["① select last N_TS=48 timestamps"]
+        S2["② assign pixels → chip grid\nbuild padded sort order\n(spatial rearrangement)"]
+        S3["③ write chip-by-chip\nN_chips_batch at a time\n(RAM-budget controlled)"]
+        S1 --> S2 --> S3
+    end
+
+    subgraph Output["Chip-chunked HDF5  (inference input)"]
+        OH["T29TPG_48ts_…h5\n─────────────────\nN_TS=48 timestamps only\nchunks (48, 10, 65 536)\none chunk = one chip\n~7 GB"]
+    end
+
+    MH -->|"last 48 ts\n(out of ~2 200)"| Script
+    Script -->|"xs_new, ys_new\nchip_x_bin, chip_y_bin\nchip_pixel_count\nts, sort_order"| OH
+```
+
+**Key transformation**
+
+| | Master file | Chip-chunked file |
+|---|---|---|
+| Timestamps stored | all T (~2 200) | last N_TS = 48 |
+| Chunk shape | `(1, 10, 2 810 880)` | `(48, 10, 65 536)` |
+| Reading 1 chip × 48 ts | 48 full-tile decompresses (~56 GB) | **1 chunk (~63 MB)** |
+| File size | ~427 GB | **~7 GB** |
+
+
 ### 1. System overview
 
 ```mermaid
