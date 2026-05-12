@@ -1,5 +1,7 @@
 # Criação de ficheiros hdf5
 
+## Tester append_hdf5.py
+
 ## Tiles e órbitas, e máscara Portugal
 
 ## Estimação da proporção de nuvens (CLOUD_REPORT)
