@@ -75,7 +75,10 @@ def load_model(weights_path, device=None):
             'cuda' if torch.cuda.is_available() and getattr(AAA_Configs, 'USE_CUDA', False)
             else 'cpu'
         )
-    model = Encoder(num_classes=AAA_Configs.NUM_CLASSES).to(device)
+    # pretrained_path=None skips the Swin pretrain load — the full state_dict
+    # below overwrites every weight anyway, so the first load is wasted work.
+    model = Encoder(num_classes=AAA_Configs.NUM_CLASSES,
+                    pretrained_path=None).to(device)
     state = torch.load(weights_path, map_location=device, weights_only=False)
     model.load_state_dict(state)
     model.eval()

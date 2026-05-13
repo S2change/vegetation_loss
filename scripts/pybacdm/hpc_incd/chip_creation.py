@@ -31,21 +31,30 @@ GeoPackage layout assumed (matches vchip_before_after_split.py):
   - geometry in EPSG:32629
 
 Usage:
-    python chip_creation.py <hdf5_path> <tiles_gpkg> <start_yyyymmdd> <end_yyyymmdd>
+    python chip_creation.py <hdf5_path> <tiles_gpkg> <start_yyyymmdd> <end_yyyymmdd> \\
+                            <weights_path> <output_dir>
 
 Example:
     python chip_creation.py /users1/dgt/hdf5/T29SMC.h5 \\
         /users1/cpca070342024/shared/auxiliary_data/sentinel2_tiles_PT_32629.gpkg \\
-        20200301 20200501
+        20200301 20200501 \\
+        /users1/cpca070342024/shared/weights/best_model.pth \\
+        /users1/cpca070342024/shared/predictions/T29SMC
 """
 import os
 import sys
+import time
 from datetime import datetime
 
 import h5py
 import numpy as np
 import psutil
 import geopandas as gpd
+import torch
+import rasterio
+from rasterio.transform import from_origin
+
+from predict import load_model, predict_before_after_chips
 
 # ============================================================================
 # CONFIGURATION
@@ -63,12 +72,26 @@ PIXEL_SIZE = 10
 
 HDF5_NODATA = 65535
 
+# Prediction output settings — single-band uint8 GeoTIFFs, one per chip pair.
+OUTPUT_CRS = 'EPSG:32629'
+OUTPUT_NODATA = 255
+OUTPUT_COMPRESS = 'lzw'
+# Whether to re-run inference and overwrite an output GeoTIFF when it already
+# exists. Set False to skip chip pairs whose output is already on disk.
+SKIP_EXISTING_OUTPUTS = False
+
+# Model batch size: how many chip pairs are stacked into one forward pass.
+# A (B, 10, 256, 256) float32 input pair is ~5.2 MB per chip; activations
+# dominate (~200-500 MB on CPU, smaller on GPU). Start at 8 and tune from
+# memory diagnostics.
+MODEL_BATCH_SIZE = 8
+
 
 # BENCHMARKING
 
 # Cap on chip pairs processed per run. Set to None to process every chip pair.
 # Useful for diagnostics / dry-runs without committing to a full tile sweep.
-MAX_CHIPS = 50
+MAX_CHIPS = 8
 
 # Number of pixels along the chunk's flat pixel axis. Used to attribute pixel
 # indices to chunks for the cache-effectiveness diagnostic.
@@ -331,44 +354,78 @@ def load_chip(values_ds, time_idx, row_origin, col_origin, lookup, n_bands,
 
 
 # ============================================================================
-# PLACEHOLDER MODEL — MEMORY DIAGNOSTICS
+# OUTPUT WRITING
 # ============================================================================
 
-def process_chip_pair(chip_t, chip_t_next, ordinal_t, ordinal_t_next,
-                      row_origin, col_origin,
-                      chunks_seen=None, baseline_read_bytes=0):
+def chip_output_path(output_dir, tile_id, ordinal_t, ordinal_t_next,
+                     row_origin, col_origin):
     """
-    Stand-in for the model. Reports how much memory the two loaded chips
-    occupy, how much system memory is still available, and chunk-cache
-    diagnostics:
-      - cum_chunks_requested : unique (time_idx, chunk_idx) pairs the access
-        pattern has touched since startup. A logical lower bound on chunks
-        the cache would have to hold to avoid re-reads.
-      - cum_disk_read_MB     : actual bytes read from disk by this process
-        since startup (as reported by psutil).
-      - avg_disk_per_chunk   : cum_disk_read / cum_chunks_requested. Compare
-        against your known compressed-chunk size:
-          ~= compressed-chunk-size  -> cache is doing nothing, every requested
-                                       chunk results in a fresh disk read
-          << compressed-chunk-size  -> cache hits are reducing disk work
+    Deterministic filename for one chip pair's prediction GeoTIFF.
 
-    Replace with the actual prediction call when ready.
+    Format: {tile_id}_{YYYYMMDD_t}_{YYYYMMDD_t_next}_r{row:05d}_c{col:05d}.tif
+    e.g.    T29SMC_20200315_20200402_r00256_c00512.tif
     """
-    chips_bytes = chip_t.nbytes + chip_t_next.nbytes
+    date_t = datetime.fromordinal(int(ordinal_t)).strftime("%Y%m%d")
+    date_t_next = datetime.fromordinal(int(ordinal_t_next)).strftime("%Y%m%d")
+    fname = (f"{tile_id}_{date_t}_{date_t_next}"
+             f"_r{row_origin:05d}_c{col_origin:05d}.tif")
+    return os.path.join(output_dir, fname)
+
+
+def save_prediction_tif(pred, out_path, row_origin, col_origin,
+                        xmin_tile, ymax_tile):
+    """
+    Write a (H, W) uint8 prediction to a single-band GeoTIFF, georeferenced
+    to its position inside the tile.
+
+    The tile's top-left is (xmin_tile, ymax_tile); the chip's top-left in
+    pixels is (row_origin, col_origin) inside that tile.
+    """
+    chip_xmin = xmin_tile + col_origin * PIXEL_SIZE
+    chip_ymax = ymax_tile - row_origin * PIXEL_SIZE
+    transform = from_origin(chip_xmin, chip_ymax, PIXEL_SIZE, PIXEL_SIZE)
+
+    with rasterio.open(
+        out_path, 'w',
+        driver='GTiff',
+        height=pred.shape[0], width=pred.shape[1],
+        count=1, dtype='uint8',
+        crs=OUTPUT_CRS,
+        transform=transform,
+        compress=OUTPUT_COMPRESS,
+        nodata=OUTPUT_NODATA,
+    ) as dst:
+        dst.write(pred, 1)
+
+
+# ============================================================================
+# MODEL INFERENCE + DIAGNOSTICS
+# ============================================================================
+
+def print_chip_diagnostic(label, ordinal_t, ordinal_t_next,
+                          row_origin, col_origin, chips_bytes,
+                          chunks_seen=None, baseline_read_bytes=0,
+                          extra=""):
+    """
+    One-line memory + cache diagnostic for a chip pair. Same fields the
+    placeholder used, plus an `extra` string for inference-specific info.
+
+      - alloc_avail/alloc_used  : cgroup (SLURM) limit and current use
+      - cum_chunks_requested    : unique (time_idx, chunk_idx) pairs touched
+      - cum_disk_read_MB        : bytes read since startup (psutil)
+      - avg_disk_per_chunk      : disk bytes / unique chunk request.
+                                  Near the compressed-chunk size => cache
+                                  ineffective; well below => cache helping.
+    """
     proc = psutil.Process()
     proc_rss = proc.memory_info().rss
 
-    # Memory limits come from the cgroup (SLURM allocation) when running on
-    # the cluster, not from system-wide psutil values. On the dev machine
-    # this falls back to system-wide.
     cg_limit, cg_used, _ = get_memory_allocation()
     if cg_limit is not None:
         cg_avail = max(cg_limit - cg_used, 0)
         cg_pct_used = 100.0 * cg_used / cg_limit if cg_limit else 0.0
-        mem_str = (
-            f"alloc_avail={cg_avail / 1e9:5.2f} GB  "
-            f"alloc_used={cg_pct_used:.1f}%"
-        )
+        mem_str = (f"alloc_avail={cg_avail / 1e9:5.2f} GB  "
+                   f"alloc_used={cg_pct_used:.1f}%")
     else:
         mem_str = f"alloc_used={cg_used / 1e9:5.2f} GB (no limit)"
 
@@ -384,20 +441,76 @@ def process_chip_pair(chip_t, chip_t_next, ordinal_t, ordinal_t_next,
         cum_disk = current_read - baseline_read_bytes
         cum_chunks = len(chunks_seen)
         avg_per_chunk = (cum_disk / cum_chunks) if cum_chunks else 0.0
-        cache_str = (
-            f"  cum_chunks={cum_chunks:5d}  "
-            f"cum_disk_read={cum_disk / 1e6:7.1f} MB  "
-            f"avg_disk/chunk={avg_per_chunk / 1e6:5.2f} MB"
-        )
+        cache_str = (f"  cum_chunks={cum_chunks:5d}  "
+                     f"cum_disk_read={cum_disk / 1e6:7.1f} MB  "
+                     f"avg_disk/chunk={avg_per_chunk / 1e6:5.2f} MB")
 
     print(
-        f"  chip pair @ ({row_origin:5d},{col_origin:5d})  "
+        f"  {label} @ ({row_origin:5d},{col_origin:5d})  "
         f"{date_t} -> {date_t_next}  "
         f"chips={chips_bytes / 1e6:6.2f} MB  "
         f"proc_rss={proc_rss / 1e6:7.1f} MB  "
         f"{mem_str}"
         f"{cache_str}"
+        f"{extra}"
     )
+
+
+def process_chip_batch(batch, model, output_dir, tile_id,
+                       xmin_tile, ymax_tile,
+                       chunks_seen=None, baseline_read_bytes=0):
+    """
+    Run BACDM inference on a batch of chip pairs, save predictions as
+    GeoTIFFs, and print per-chip diagnostics including model wall time and
+    pre/post-inference RSS delta.
+
+    `batch` is a list of dicts produced by main():
+      {'chip_t', 'chip_t_next'   : (n_bands, H, W) uint16
+       'ord_t',  'ord_t_next'    : int ordinal dates
+       'row_origin', 'col_origin': int chip origin in tile pixels}
+    """
+    if not batch:
+        return
+
+    # Stack into (B, H, W, C) — predict_before_after_chips expects that layout.
+    # load_chip gives us (C, H, W), so transpose each chip on the way in.
+    before = np.stack([p['chip_t'].transpose(1, 2, 0) for p in batch])
+    after  = np.stack([p['chip_t_next'].transpose(1, 2, 0) for p in batch])
+
+    rss_before = rss_mb()
+    t0 = time.perf_counter()
+    preds = predict_before_after_chips(before, after, model)  # (B, H, W) uint8
+    infer_s = time.perf_counter() - t0
+    rss_after = rss_mb()
+
+    per_chip_s = infer_s / len(batch)
+    rss_delta = rss_after - rss_before
+    gpu_str = ""
+    if torch.cuda.is_available():
+        gpu_str = (f"  gpu_alloc={torch.cuda.memory_allocated() / 1e9:5.2f} GB"
+                   f"  gpu_resv={torch.cuda.memory_reserved() / 1e9:5.2f} GB")
+
+    # Save each prediction and print one diagnostic line per chip pair.
+    for i, p in enumerate(batch):
+        out_path = chip_output_path(
+            output_dir, tile_id, p['ord_t'], p['ord_t_next'],
+            p['row_origin'], p['col_origin'],
+        )
+        save_prediction_tif(preds[i], out_path,
+                            p['row_origin'], p['col_origin'],
+                            xmin_tile, ymax_tile)
+
+        chips_bytes = p['chip_t'].nbytes + p['chip_t_next'].nbytes
+        extra = (f"  infer={per_chip_s * 1000:6.1f} ms/chip"
+                 f"  batch_rss_delta={rss_delta:+6.1f} MB"
+                 f"{gpu_str}")
+        print_chip_diagnostic(
+            "chip pair", p['ord_t'], p['ord_t_next'],
+            p['row_origin'], p['col_origin'], chips_bytes,
+            chunks_seen=chunks_seen,
+            baseline_read_bytes=baseline_read_bytes,
+            extra=extra,
+        )
 
 
 # ============================================================================
@@ -405,7 +518,7 @@ def process_chip_pair(chip_t, chip_t_next, ordinal_t, ordinal_t_next,
 # ============================================================================
 
 def main():
-    if len(sys.argv) != 5:
+    if len(sys.argv) != 7:
         print(__doc__, file=sys.stderr)
         sys.exit(1)
 
@@ -413,17 +526,25 @@ def main():
     tiles_gpkg = sys.argv[2]
     start_str = sys.argv[3]
     end_str = sys.argv[4]
+    weights_path = sys.argv[5]
+    output_dir = sys.argv[6]
     start_ord = date_str_to_ordinal(start_str)
     end_ord = date_str_to_ordinal(end_str)
+
+    os.makedirs(output_dir, exist_ok=True)
 
     # Tile ID is the HDF5 filename stem, e.g. 'T29SMC' from 'T29SMC.h5'
     tile_id = os.path.splitext(os.path.basename(hdf5_path))[0]
 
-    print(f"\nHDF5 file: {hdf5_path}")
-    print(f"Tile ID:   {tile_id}")
-    print(f"GeoPackage: {tiles_gpkg}")
-    print(f"Date range: {start_str} -> {end_str}")
-    print(f"Chip size: {CHIP_WIDTH} x {CHIP_HEIGHT}, overlap: {OVERLAP_PERCENT * 100:.0f}%")
+    print(f"\nHDF5 file:    {hdf5_path}")
+    print(f"Tile ID:      {tile_id}")
+    print(f"GeoPackage:   {tiles_gpkg}")
+    print(f"Date range:   {start_str} -> {end_str}")
+    print(f"Chip size:    {CHIP_WIDTH} x {CHIP_HEIGHT}, overlap: {OVERLAP_PERCENT * 100:.0f}%")
+    print(f"Weights:      {weights_path}")
+    print(f"Output dir:   {output_dir}")
+    print(f"Batch size:   {MODEL_BATCH_SIZE}")
+    print(f"Skip existing outputs: {SKIP_EXISTING_OUTPUTS}")
 
     # Report what the SLURM cgroup actually grants this job
     cpu_count, cpu_source = get_cpu_allocation()
@@ -437,6 +558,16 @@ def main():
               f"(source: {mem_source})")
 
     print(f"\n[RSS] After imports + cgroup setup:    {rss_mb():7.1f} MB")
+
+    # Load the model once, before the HDF5 file is opened. Doing it before the
+    # chunk cache is allocated keeps peak memory predictable: model weights +
+    # torch runtime are paid up-front, then HDF5 cache grows on demand.
+    model = load_model(weights_path)
+    print(f"[RSS] After model loaded:              {rss_mb():7.1f} MB")
+    if torch.cuda.is_available():
+        print(f"[GPU] After model loaded: "
+              f"alloc={torch.cuda.memory_allocated() / 1e9:.2f} GB  "
+              f"reserved={torch.cuda.memory_reserved() / 1e9:.2f} GB")
 
     with h5py.File(hdf5_path, 'r',
                    rdcc_nbytes=HDF5_CACHE_BYTES,
@@ -500,6 +631,21 @@ def main():
         print(f"[RSS] Baseline before chip loop:       {rss_mb():7.1f} MB\n")
 
         chips_processed = 0
+        chips_skipped_existing = 0
+        batch = []
+
+        def flush(batch):
+            """Run inference on the buffered chip pairs and clear the buffer."""
+            if not batch:
+                return
+            process_chip_batch(
+                batch, model, output_dir, tile_id,
+                xmin, ymax,
+                chunks_seen=chunks_seen,
+                baseline_read_bytes=baseline_read_bytes,
+            )
+            batch.clear()
+
         for pair_idx in range(len(time_indices) - 1):
             if MAX_CHIPS is not None and chips_processed >= MAX_CHIPS:
                 break
@@ -517,20 +663,40 @@ def main():
                 if MAX_CHIPS is not None and chips_processed >= MAX_CHIPS:
                     break
 
+                out_path = chip_output_path(
+                    output_dir, tile_id, ord_t, ord_t_next,
+                    row_origin, col_origin,
+                )
+                if SKIP_EXISTING_OUTPUTS and os.path.exists(out_path):
+                    chips_skipped_existing += 1
+                    chips_processed += 1
+                    continue
+
                 chip_t = load_chip(values_ds, t_idx, row_origin, col_origin, lookup, n_bands,
                                    chunks_seen=chunks_seen)
                 chip_t_next = load_chip(values_ds, t_next_idx, row_origin, col_origin, lookup, n_bands,
                                         chunks_seen=chunks_seen)
-                process_chip_pair(
-                    chip_t, chip_t_next, ord_t, ord_t_next,
-                    row_origin, col_origin,
-                    chunks_seen=chunks_seen,
-                    baseline_read_bytes=baseline_read_bytes,
-                )
-                del chip_t, chip_t_next
+
+                batch.append({
+                    'chip_t': chip_t,
+                    'chip_t_next': chip_t_next,
+                    'ord_t': ord_t,
+                    'ord_t_next': ord_t_next,
+                    'row_origin': row_origin,
+                    'col_origin': col_origin,
+                })
                 chips_processed += 1
 
+                if len(batch) >= MODEL_BATCH_SIZE:
+                    flush(batch)
+
+        # Final partial batch (if any chip pairs are still buffered)
+        flush(batch)
+
         print(f"\nProcessed {chips_processed} chip pairs.")
+        if SKIP_EXISTING_OUTPUTS:
+            print(f"Skipped (output already existed): {chips_skipped_existing}")
+        print(f"[RSS] After chip loop:                 {rss_mb():7.1f} MB")
 
 
 if __name__ == "__main__":
