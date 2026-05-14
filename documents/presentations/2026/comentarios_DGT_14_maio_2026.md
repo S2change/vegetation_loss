@@ -1,5 +1,7 @@
 Ver Email Ricardo Pinho, 14 de maio de 2026
 
+ver também (documents/presentations/2026/20260514_Notas_LIP-ISA_DGT_tarefa3.pdf)
+
 ---
 
 Após analise interna na DGT dos últimos emails e relatórios, redigimos algumas notas e contributos para as questões levantadas que partilho no documento anexo: 20260514_Notas_LIP-ISA_DGT_tarefa3.pdf
