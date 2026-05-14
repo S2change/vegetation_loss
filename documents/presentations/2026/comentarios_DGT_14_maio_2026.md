@@ -1,6 +1,6 @@
 Ver Email Ricardo Pinho, 14 de maio de 2026
 
-ver também (documents/presentations/2026/20260514_Notas_LIP-ISA_DGT_tarefa3.pdf)
+ver também [20260514_Notas_LIP-ISA_DGT_tarefa3.pdf](documents/presentations/2026/20260514_Notas_LIP-ISA_DGT_tarefa3.pdf)
 
 ---
 
