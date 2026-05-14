@@ -47,6 +47,7 @@ def main():
     print(f"NoData fraction: {NODATA_FRAC}")
     print(f"\n[RSS] After imports:                   {rss_mb():7.1f} MB")
 
+    # This section will get updated with calling actual data
     print("\nGenerating dummy chip batches...")
     before, after = make_before_after(
         batch_size=BATCH_SIZE, nodata_frac=NODATA_FRAC, seed=SEED,
