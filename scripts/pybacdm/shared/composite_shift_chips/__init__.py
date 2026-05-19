@@ -15,11 +15,18 @@ predicted; adjacent blocks overlap by 1 chip so each chip is predicted
 exactly once.
 """
 from .composite import create_before_after_composites, cascading_select_flat
-from .shift_chips import ChipPair, generate_shifted_chips
+from .shift_chips import (
+    ChipPair,
+    ChipBundle,
+    generate_shifted_chips,
+    generate_shifted_chips_bundled,
+)
 
 __all__ = [
     "create_before_after_composites",
     "cascading_select_flat",
     "ChipPair",
+    "ChipBundle",
     "generate_shifted_chips",
+    "generate_shifted_chips_bundled",
 ]

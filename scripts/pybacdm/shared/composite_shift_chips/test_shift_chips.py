@@ -12,7 +12,9 @@ import numpy as np
 
 from shift_chips import (
     ChipPair,
+    ChipBundle,
     generate_shifted_chips,
+    generate_shifted_chips_bundled,
     _extract_chip,
     _h_shift,
     _v_shift,
@@ -20,6 +22,7 @@ from shift_chips import (
     CHIP_H, CHIP_W, CHIP_PIXELS, HALF,
     BLOCK_GRID_ROWS, BLOCK_GRID_COLS,
     LIVE_ROWS, LIVE_COLS,
+    BUNDLE_SIZE,
 )
 
 
@@ -246,6 +249,70 @@ def test_shift_grid_positions_complete():
     print("  every shift kind covers full 4x4 grid of positions — OK")
 
 
+def test_bundled_matches_per_pair_generator():
+    """The bundled generator must produce identical chip data and metadata
+    to the per-pair generator, just in (B, H, W, C) layout instead of
+    (C, H, W) per pair."""
+    composites = _hand_crafted_composites(n_dates=2)
+    target_dates = np.array([100, 200], dtype=np.int64)
+    valid_mask = np.array([True, True], dtype=bool)
+
+    pairs = list(generate_shifted_chips(
+        composites, target_dates, valid_mask, verbose=False))
+    bundles = list(generate_shifted_chips_bundled(
+        composites, target_dates, valid_mask, verbose=False))
+
+    # Same number of yielded items: 2 bundles vs 128 pairs.
+    assert len(bundles) == 2
+    assert len(pairs) == 128
+    assert BUNDLE_SIZE == 64
+
+    # Group per-pair results by date_idx to compare against bundles.
+    pairs_by_date: dict = {0: [], 1: []}
+    for p in pairs:
+        pairs_by_date[p.date_idx].append(p)
+
+    for bundle in bundles:
+        assert isinstance(bundle, ChipBundle)
+        assert bundle.before.shape == (BUNDLE_SIZE, CHIP_H, CHIP_W, 10)
+        assert bundle.after.shape  == (BUNDLE_SIZE, CHIP_H, CHIP_W, 10)
+        assert bundle.before.dtype == np.uint8
+        assert len(bundle.chip_kinds) == BUNDLE_SIZE
+        assert len(bundle.grid_positions) == BUNDLE_SIZE
+
+        pairs_for_date = pairs_by_date[bundle.date_idx]
+        assert len(pairs_for_date) == BUNDLE_SIZE
+
+        for i, (kind, pos) in enumerate(
+                zip(bundle.chip_kinds, bundle.grid_positions)):
+            p = pairs_for_date[i]
+            assert p.chip_kind == kind
+            assert p.grid_position == pos
+            assert p.date_idx == bundle.date_idx
+            assert p.date_ordinal == bundle.date_ordinal
+            # Per-pair chip is (C, H, W); bundle slot is (H, W, C).
+            # Compare after a single transpose.
+            assert np.array_equal(
+                p.before.transpose(1, 2, 0), bundle.before[i]
+            ), f"before mismatch at date={bundle.date_idx} i={i} ({kind} {pos})"
+            assert np.array_equal(
+                p.after.transpose(1, 2, 0), bundle.after[i]
+            ), f"after mismatch at date={bundle.date_idx} i={i} ({kind} {pos})"
+    print("  bundled generator matches per-pair generator content + metadata — OK")
+
+
+def test_bundled_skips_invalid_dates():
+    composites = _hand_crafted_composites(n_dates=3)
+    target_dates = np.array([100, 200, 300], dtype=np.int64)
+    valid_mask = np.array([True, False, True], dtype=bool)
+
+    bundles = list(generate_shifted_chips_bundled(
+        composites, target_dates, valid_mask, verbose=False))
+    assert len(bundles) == 2, f"expected 2 bundles, got {len(bundles)}"
+    assert {b.date_idx for b in bundles} == {0, 2}
+    print("  bundled generator skips invalid dates — OK")
+
+
 def main():
     print("Running shift_chips tests...")
     test_extract_chip_yields_correct_position_tag()
@@ -260,6 +327,8 @@ def main():
     test_generator_metadata_consistency()
     test_originals_match_extract_chip()
     test_shift_grid_positions_complete()
+    test_bundled_matches_per_pair_generator()
+    test_bundled_skips_invalid_dates()
     print("All shift_chips tests passed.")
 
 

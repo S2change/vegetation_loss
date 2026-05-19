@@ -136,8 +136,8 @@ def generate_shifted_chips(composites: np.ndarray,
     Yields
     ------
     ChipPair
-        49 instances per valid target date: 16 originals + 12 H-shifts +
-        12 V-shifts + 9 diagonals.
+        64 instances per valid target date: 16 originals + 16 H-shifts +
+        16 V-shifts + 16 diagonals.
     """
     if composites.ndim != 4 or composites.shape[0] != 2 or composites.shape[2] != 10:
         raise ValueError(
@@ -205,3 +205,137 @@ def generate_shifted_chips(composites: np.ndarray,
                     date_idx=k, date_ordinal=date_ordinal,
                     chip_kind="diagonal", grid_position=(r_gap, c_gap),
                 )
+
+
+# ============================================================================
+# BUNDLED VARIANT (one yield per target date, all 64 chips at once)
+# ============================================================================
+
+ChipBundle = namedtuple("ChipBundle", [
+    "before",          # (64, 256, 256, 10) uint8 — predictor-native layout
+    "after",           # (64, 256, 256, 10) uint8 — predictor-native layout
+    "chip_kinds",      # list[str] length 64 — parallel to batch axis
+    "grid_positions",  # list[tuple[int, int]] length 64 — parallel to batch axis
+    "date_idx",        # int — index into target_dates
+    "date_ordinal",    # int — the ordinal date itself
+])
+
+BUNDLE_SIZE = (
+    LIVE_ROWS * LIVE_COLS              # originals
+    + LIVE_ROWS * LIVE_COLS            # h_shifts
+    + LIVE_ROWS * LIVE_COLS            # v_shifts
+    + LIVE_ROWS * LIVE_COLS            # diagonals
+)  # == 64 with the current geometry
+
+
+def _fill_bundle_side(side: np.ndarray, dst: np.ndarray) -> tuple[list, list]:
+    """Fill a (BUNDLE_SIZE, 256, 256, 10) uint8 array `dst` from one composite
+    side, walking the same originals/h_shifts/v_shifts/diagonals order as the
+    per-pair generator. Returns the parallel (chip_kinds, grid_positions)
+    metadata so the caller can attach it to the bundle.
+
+    `dst` is filled in place. Each chip is computed in (10, 256, 256) layout
+    and written into `dst[i]` with a single (1, 2, 0) transpose to match the
+    predictor's (H, W, C) expectation.
+    """
+    chip_kinds: list[str] = []
+    grid_positions: list[tuple[int, int]] = []
+    i = 0
+
+    for r in range(LIVE_ROWS):
+        for c in range(LIVE_COLS):
+            dst[i] = _extract_chip(side, r, c).transpose(1, 2, 0)
+            chip_kinds.append("original")
+            grid_positions.append((r, c))
+            i += 1
+
+    for r in range(LIVE_ROWS):
+        for c_gap in range(LIVE_COLS):
+            dst[i] = _h_shift(side, r, c_gap).transpose(1, 2, 0)
+            chip_kinds.append("h_shift")
+            grid_positions.append((r, c_gap))
+            i += 1
+
+    for r_gap in range(LIVE_ROWS):
+        for c in range(LIVE_COLS):
+            dst[i] = _v_shift(side, r_gap, c).transpose(1, 2, 0)
+            chip_kinds.append("v_shift")
+            grid_positions.append((r_gap, c))
+            i += 1
+
+    for r_gap in range(LIVE_ROWS):
+        for c_gap in range(LIVE_COLS):
+            dst[i] = _diagonal(side, r_gap, c_gap).transpose(1, 2, 0)
+            chip_kinds.append("diagonal")
+            grid_positions.append((r_gap, c_gap))
+            i += 1
+
+    assert i == BUNDLE_SIZE
+    return chip_kinds, grid_positions
+
+
+def generate_shifted_chips_bundled(composites: np.ndarray,
+                                   target_dates: np.ndarray,
+                                   valid_dates_mask: np.ndarray,
+                                   verbose: bool = True,
+                                   ) -> Iterator[ChipBundle]:
+    """Bundled variant: yield one ChipBundle per valid target date.
+
+    Same geometry as `generate_shifted_chips` (64 chips per date in
+    originals -> h_shift -> v_shift -> diagonal order). Differences:
+
+    - One yield per target date (not 64).
+    - `before`/`after` are pre-allocated `(64, 256, 256, 10)` uint8 arrays
+      in the predictor's native (H, W, C) layout, so the caller can slice
+      directly into batches without an extra `np.stack` + transpose.
+    - Metadata is carried as parallel `chip_kinds` / `grid_positions` lists.
+
+    Memory cost per active bundle: 64 * 2 * 256 * 256 * 10 = ~84 MB. The
+    generator only holds one bundle at a time, so memory does not scale
+    with |D|.
+    """
+    if composites.ndim != 4 or composites.shape[0] != 2 or composites.shape[2] != 10:
+        raise ValueError(
+            "composites must have shape (2, |D|, 10, P); "
+            f"got {composites.shape}"
+        )
+    if target_dates.shape != (composites.shape[1],):
+        raise ValueError(
+            f"target_dates shape {target_dates.shape} must equal (|D|,) = "
+            f"({composites.shape[1]},)"
+        )
+    if valid_dates_mask.shape != (composites.shape[1],):
+        raise ValueError(
+            f"valid_dates_mask shape {valid_dates_mask.shape} must equal (|D|,) = "
+            f"({composites.shape[1]},)"
+        )
+
+    for k, target in enumerate(target_dates):
+        if not valid_dates_mask[k]:
+            if verbose:
+                print(f"[note] Skipping date_idx={k} ordinal={int(target)} "
+                      f"in shift generator (already skipped by step 3).")
+            continue
+
+        before_side = composites[0, k]
+        after_side  = composites[1, k]
+        date_ordinal = int(target)
+
+        before_bundle = np.empty(
+            (BUNDLE_SIZE, CHIP_H, CHIP_W, 10), dtype=np.uint8)
+        after_bundle  = np.empty(
+            (BUNDLE_SIZE, CHIP_H, CHIP_W, 10), dtype=np.uint8)
+
+        kinds_b, positions_b = _fill_bundle_side(before_side, before_bundle)
+        kinds_a, positions_a = _fill_bundle_side(after_side,  after_bundle)
+        # Sanity: before and after walk the same order, so metadata matches.
+        assert kinds_b == kinds_a and positions_b == positions_a
+
+        yield ChipBundle(
+            before=before_bundle,
+            after=after_bundle,
+            chip_kinds=kinds_b,
+            grid_positions=positions_b,
+            date_idx=k,
+            date_ordinal=date_ordinal,
+        )

@@ -35,6 +35,7 @@ from np_creation import make_chip_block
 from composite_shift_chips import (
     create_before_after_composites,
     generate_shifted_chips,
+    generate_shifted_chips_bundled,
 )
 from predict import load_model, predict_before_after_chips
 
@@ -63,10 +64,19 @@ SEED = 42
 # data range so each one produces 64 chip pairs (16 originals + 16 H-shifts
 # + 16 V-shifts + 16 diagonals; the 5th row/col of the block is ghost,
 # supplying neighbour pixels for shifts at the live area's right/bottom edge).
-TARGET_DATES_YYYYMMDD = ("2024-03-01", "2024-05-15")
+TARGET_DATES_YYYYMMDD = ("2024-03-01", "2024-05-15", "2024-09-04", "2025-07-01", "2020-01-01")
 
 # Model batching
 BATCH_SIZE = 8
+
+# Chip generation strategy.
+#   False -> generate_shifted_chips           (yields one ChipPair at a time;
+#                                              caller stacks BATCH_SIZE of
+#                                              them before each forward pass)
+#   True  -> generate_shifted_chips_bundled   (yields one ChipBundle of 64
+#                                              pre-stacked chips per target
+#                                              date; caller slices into batches)
+USE_BUNDLED = False
 
 
 # ============================================================================
@@ -92,6 +102,7 @@ def main():
     print(f"Start date:     {date(*START_DATE)}")
     print(f"Target dates:   {TARGET_DATES_YYYYMMDD}")
     print(f"Model batch:    {BATCH_SIZE}")
+    print(f"Bundled mode:   {USE_BUNDLED}")
     print(f"Seed:           {SEED}")
     print(f"\n[RSS] After imports:                   {rss_mb():7.1f} MB")
 
@@ -130,10 +141,8 @@ def main():
     print(f"[RSS] After model loaded:              {rss_mb():7.1f} MB")
 
     # ── Step 4: generate shifted chips & predict in batches ───────────────
-    print("\nStep 4: generating shifted chips + predicting...")
-    pair_iter = generate_shifted_chips(
-        composites, target_dates, valid_dates_mask, verbose=True,
-    )
+    mode = "bundled" if USE_BUNDLED else "per-pair"
+    print(f"\nStep 4: generating shifted chips + predicting (mode={mode})...")
 
     rss_before_infer = rss_mb()
     t_inference_total = 0.0
@@ -141,32 +150,60 @@ def main():
     class_counts: Counter[int] = Counter()
     kind_counts: Counter[str] = Counter()
 
-    # Pull pairs from the generator, batch them, and predict.
-    batch: list = []
+    if not USE_BUNDLED:
+        # Per-pair path: yield one ChipPair at a time, stack BATCH_SIZE of
+        # them before each forward pass.
+        pair_iter = generate_shifted_chips(
+            composites, target_dates, valid_dates_mask, verbose=True,
+        )
+        batch: list = []
 
-    def flush(batch: list):
-        nonlocal t_inference_total, n_pairs
-        if not batch:
-            return
-        # Predictor expects (B, H, W, C) — our ChipPair holds (C, H, W).
-        before = np.stack([p.before.transpose(1, 2, 0) for p in batch])
-        after  = np.stack([p.after.transpose(1, 2, 0)  for p in batch])
-        t0 = time.perf_counter()
-        labels = predict_before_after_chips(before, after, model)
-        t_inference_total += time.perf_counter() - t0
-        n_pairs += len(batch)
-        for p, label in zip(batch, labels):
-            kind_counts[p.chip_kind] += 1
-            uniq, cnts = np.unique(label, return_counts=True)
-            for u, c in zip(uniq, cnts):
-                class_counts[int(u)] += int(c)
-        batch.clear()
+        def flush(batch: list):
+            nonlocal t_inference_total, n_pairs
+            if not batch:
+                return
+            # Predictor expects (B, H, W, C) — our ChipPair holds (C, H, W).
+            before = np.stack([p.before.transpose(1, 2, 0) for p in batch])
+            after  = np.stack([p.after.transpose(1, 2, 0)  for p in batch])
+            t0 = time.perf_counter()
+            labels = predict_before_after_chips(before, after, model)
+            t_inference_total += time.perf_counter() - t0
+            n_pairs += len(batch)
+            for p, label in zip(batch, labels):
+                kind_counts[p.chip_kind] += 1
+                uniq, cnts = np.unique(label, return_counts=True)
+                for u, c in zip(uniq, cnts):
+                    class_counts[int(u)] += int(c)
+            batch.clear()
 
-    for pair in pair_iter:
-        batch.append(pair)
-        if len(batch) >= BATCH_SIZE:
-            flush(batch)
-    flush(batch)  # trailing partial batch
+        for pair in pair_iter:
+            batch.append(pair)
+            if len(batch) >= BATCH_SIZE:
+                flush(batch)
+        flush(batch)  # trailing partial batch
+    else:
+        # Bundled path: yield one ChipBundle (all 64 chips pre-stacked in
+        # predictor-native layout) per target date. Slice into BATCH_SIZE
+        # sub-batches and feed views (no copy) to the model.
+        bundle_iter = generate_shifted_chips_bundled(
+            composites, target_dates, valid_dates_mask, verbose=True,
+        )
+        for bundle in bundle_iter:
+            n = bundle.before.shape[0]
+            for i in range(0, n, BATCH_SIZE):
+                before_view = bundle.before[i:i + BATCH_SIZE]
+                after_view  = bundle.after[i:i + BATCH_SIZE]
+                t0 = time.perf_counter()
+                labels = predict_before_after_chips(
+                    before_view, after_view, model)
+                t_inference_total += time.perf_counter() - t0
+                batch_kinds = bundle.chip_kinds[i:i + BATCH_SIZE]
+                n_pairs += len(batch_kinds)
+                for kind, label in zip(batch_kinds, labels):
+                    kind_counts[kind] += 1
+                    uniq, cnts = np.unique(label, return_counts=True)
+                    for u, c in zip(uniq, cnts):
+                        class_counts[int(u)] += int(c)
 
     rss_after_infer = rss_mb()
 
