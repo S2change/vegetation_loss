@@ -1,9 +1,14 @@
 """End-to-end smoke test for the chip-chunked prediction pipeline.
 
-Chains together steps 1-4 of the planned pipeline on dummy data:
+Chains together steps 1-4 of the planned pipeline. Input source is selectable
+via USE_REAL_DATA in the configuration section:
 
-  1. make_chip_block        (np_creation)             — dummy chip-block
-  2. (skipped: input already uint8 from step 1)
+  USE_REAL_DATA = True   read_block      (input_setup.hdf5_reader)
+  USE_REAL_DATA = False  make_chip_block (np_creation)               — dummy
+
+Then in both modes:
+
+  2. (skipped: input is already uint8 from step 1 / read_block fuses the stretch)
   3. create_before_after_composites (composite_shift_chips.composite)
   4. generate_shifted_chips (composite_shift_chips.shift_chips)
      → predict_before_after_chips (bacdm.predict)
@@ -11,8 +16,8 @@ Chains together steps 1-4 of the planned pipeline on dummy data:
 Prints stats only — no outputs are saved.
 
 Assumes the bacdm model code lives under ./prediction_model/bacdm/ (see
-sys.path insert below) and that composite_shift_chips/ is reachable via
-the parent directory.
+sys.path insert below) and that composite_shift_chips/ + input_setup/ are
+reachable via the parent directory.
 
 Usage:
     python run_predict.py
@@ -32,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "prediction_model" / "b
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from np_creation import make_chip_block
+from input_setup import read_block
 from composite_shift_chips import (
     create_before_after_composites,
     generate_shifted_chips,
@@ -52,7 +58,17 @@ def rss_mb():
 # edit before running
 WEIGHTS_PATH = "/users1/cpca070342024/shared/model_weights/teste20260429163505_best.pth"
 
-# Chip-block parameters (see np_creation.make_chip_block)
+# Step-1 input source:
+#   True  -> read one 5x5 block from a chip-chunked HDF5 via input_setup.read_block
+#   False -> generate a dummy block via np_creation.make_chip_block
+USE_REAL_DATA = True
+
+# Real-data parameters (used when USE_REAL_DATA = True)
+HDF5_PATH = "/users1/cpca070342024/shared/hdf5/T29TPG_48ts_20251028_20251229.h5"
+BLOCK_ROW = 0   # 0..N_BLOCK_ROWS-1 (see input_setup.get_block_grid_shape)
+BLOCK_COL = 0   # 0..N_BLOCK_COLS-1
+
+# Dummy-data parameters (used when USE_REAL_DATA = False)
 N_TS = 48
 N_CHIPS = 25
 NODATA_FRAC = 0.05
@@ -64,7 +80,11 @@ SEED = 42
 # data range so each one produces 64 chip pairs (16 originals + 16 H-shifts
 # + 16 V-shifts + 16 diagonals; the 5th row/col of the block is ghost,
 # supplying neighbour pixels for shifts at the live area's right/bottom edge).
-TARGET_DATES_YYYYMMDD = ("2024-03-01", "2024-05-15", "2024-09-04", "2025-07-01", "2020-01-01")
+#
+# Defaults below fit the real HDF5's 2025-10-28 -> 2025-12-29 window. For the
+# dummy path (START_DATE=2024-01-01, 48 ts x 5d) you'll want dates inside
+# 2024-01-01..2024-08-23 instead — e.g., "2024-03-01", "2024-05-15".
+TARGET_DATES_YYYYMMDD = ("2025-11-15", "2025-12-01")
 
 # Model batching
 BATCH_SIZE = 8
@@ -97,26 +117,43 @@ def parse_target_dates(strings: tuple[str, ...]) -> np.ndarray:
 
 def main():
     print(f"Weights:        {WEIGHTS_PATH}")
-    print(f"Chip block:     N_TS={N_TS}  N_CHIPS={N_CHIPS}  "
-          f"nodata_frac={NODATA_FRAC}  revisit={REVISIT_DAYS}d")
-    print(f"Start date:     {date(*START_DATE)}")
+    print(f"Data source:    {'real (HDF5)' if USE_REAL_DATA else 'dummy (np_creation)'}")
+    if USE_REAL_DATA:
+        print(f"HDF5 path:      {HDF5_PATH}")
+        print(f"Block:          (block_row={BLOCK_ROW}, block_col={BLOCK_COL})")
+    else:
+        print(f"Chip block:     N_TS={N_TS}  N_CHIPS={N_CHIPS}  "
+              f"nodata_frac={NODATA_FRAC}  revisit={REVISIT_DAYS}d")
+        print(f"Start date:     {date(*START_DATE)}")
+        print(f"Seed:           {SEED}")
     print(f"Target dates:   {TARGET_DATES_YYYYMMDD}")
     print(f"Model batch:    {BATCH_SIZE}")
     print(f"Bundled mode:   {USE_BUNDLED}")
-    print(f"Seed:           {SEED}")
     print(f"\n[RSS] After imports:                   {rss_mb():7.1f} MB")
 
-    # ── Step 1: build a dummy chip-block ──────────────────────────────────
-    print("\nStep 1: generating dummy chip-block...")
-    t0 = time.perf_counter()
-    block, ts = make_chip_block(
-        n_ts=N_TS, n_chips=N_CHIPS, nodata_frac=NODATA_FRAC,
-        revisit_days=REVISIT_DAYS, start_date=START_DATE, seed=SEED,
-    )
-    print(f"  block: shape={block.shape}  dtype={block.dtype}  "
-          f"{block.nbytes / 1e6:.1f} MB")
-    print(f"  ts:    {date.fromordinal(int(ts[0]))} -> "
-          f"{date.fromordinal(int(ts[-1]))}  ({len(ts)} timesteps)")
+    # ── Step 1: build / read chip-block ───────────────────────────────────
+    if USE_REAL_DATA:
+        print(f"\nStep 1: reading chip-block from HDF5 "
+              f"(block_row={BLOCK_ROW}, block_col={BLOCK_COL})...")
+        t0 = time.perf_counter()
+        block, ts, position = read_block(HDF5_PATH, BLOCK_ROW, BLOCK_COL)
+        print(f"  block: shape={block.shape}  dtype={block.dtype}  "
+              f"{block.nbytes / 1e6:.1f} MB")
+        print(f"  ts:    {date.fromordinal(int(ts[0]))} -> "
+              f"{date.fromordinal(int(ts[-1]))}  ({len(ts)} timesteps)")
+        print(f"  position: chip-grid origin (y={position.chip_y_start}, "
+              f"x={position.chip_x_start})")
+    else:
+        print("\nStep 1: generating dummy chip-block...")
+        t0 = time.perf_counter()
+        block, ts = make_chip_block(
+            n_ts=N_TS, n_chips=N_CHIPS, nodata_frac=NODATA_FRAC,
+            revisit_days=REVISIT_DAYS, start_date=START_DATE, seed=SEED,
+        )
+        print(f"  block: shape={block.shape}  dtype={block.dtype}  "
+              f"{block.nbytes / 1e6:.1f} MB")
+        print(f"  ts:    {date.fromordinal(int(ts[0]))} -> "
+              f"{date.fromordinal(int(ts[-1]))}  ({len(ts)} timesteps)")
     print(f"  Step 1 time: {time.perf_counter() - t0:.2f} s")
     print(f"[RSS] After chip-block:                {rss_mb():7.1f} MB")
 
