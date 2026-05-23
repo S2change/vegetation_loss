@@ -33,9 +33,33 @@ sys.path.insert(0, str(_here))
 import numpy as np
 import torch
 from torchvision import transforms
+from scipy.ndimage import binary_closing, label as nd_label
 
 import AAA_Configs
 from swin_ynet import Encoder
+
+MIN_PATCH_SIZE = getattr(AAA_Configs, 'MIN_PATCH_SIZE', 25)
+CLOSING_RADIUS = getattr(AAA_Configs, 'CLOSING_RADIUS',  3)
+
+def postprocess_prediction(pred, min_size=MIN_PATCH_SIZE, closing_radius=CLOSING_RADIUS):
+    """Morphological closing + small-component removal (mirrors test.py)."""
+    out  = pred.copy()
+    r    = closing_radius
+    gy, gx = np.ogrid[-r:r+1, -r:r+1]
+    disk = (gx**2 + gy**2) <= r**2
+    valid = pred < 255
+
+    for cls in [c for c in np.unique(pred[valid]) if c != 0]:
+        closed = binary_closing(pred == cls, structure=disk)
+        out[closed & (out == 0) & valid] = cls
+
+    for cls in [c for c in np.unique(out[valid]) if c != 0]:
+        labeled, n = nd_label(out == cls)
+        for i in range(1, n + 1):
+            if (labeled == i).sum() < min_size:
+                out[labeled == i] = 0
+
+    return out
 from data.dataset_swin_GZ import _to_uint8   # reuse the 16→8-bit converter
 
 # ---------------------------------------------------------------------------
@@ -75,10 +99,7 @@ def load_model(weights_path, device=None):
             'cuda' if torch.cuda.is_available() and getattr(AAA_Configs, 'USE_CUDA', False)
             else 'cpu'
         )
-    # pretrained_path=None skips the Swin pretrain load — the full state_dict
-    # below overwrites every weight anyway, so the first load is wasted work.
-    model = Encoder(num_classes=AAA_Configs.NUM_CLASSES,
-                    pretrained_path=None).to(device)
+    model = Encoder(num_classes=AAA_Configs.NUM_CLASSES).to(device)
     state = torch.load(weights_path, map_location=device, weights_only=False)
     model.load_state_dict(state)
     model.eval()
@@ -136,4 +157,5 @@ def predict_before_after_chips(before_batch, after_batch, model_or_path, device=
             if cuts_id is not None:
                 pred[probs[:, cuts_id] > cuts_threshold] = cuts_id
 
-    return pred.cpu().numpy().astype(np.uint8)
+    labels = pred.cpu().numpy().astype(np.uint8)
+    return np.stack([postprocess_prediction(labels[i]) for i in range(len(labels))])
