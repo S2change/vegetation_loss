@@ -57,4 +57,4 @@ else:
 
 # ── Inference weights ──────────────────────────────────────────────────────────
 # Set this to the path of your trained model checkpoint (.pth).
-Test_weight_path = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\bacdm\bacdm_weights\393c_cutsTversky_ema_W010402_LR01_G00311224_val_pCuts30_compact_16bits20260513155028_best.pth"
+Test_weight_path = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\bacdm\bacdm_weights\teste20260429163505_best.pth"
