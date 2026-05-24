@@ -71,6 +71,12 @@ class BlockPosition(NamedTuple):
     block_col: int        # block index along the chip-grid X axis
     chip_y_start: int     # chip-grid Y of the block's top-left chip (== block_row * LIVE_ROWS)
     chip_x_start: int     # chip-grid X of the block's top-left chip (== block_col * LIVE_COLS)
+    # UTM origin of the block's NW corner — derived from the actual xs_new/ys_new
+    # of the first valid pixel of any present chip in the block (or extrapolated
+    # using pixel_res when the block's first chip happens to be off-tile).
+    world_origin_x: float  # UTM easting  of pixel (0, 0) of chip (0, 0)
+    world_origin_y: float  # UTM northing of pixel (0, 0) of chip (0, 0)
+    pixel_res: float       # metres per pixel (Sentinel-2: 10.0)
 
 
 # ============================================================================
@@ -92,6 +98,76 @@ def _read_chip_grid_metadata(h5f: h5py.File) -> tuple[dict, np.ndarray, int]:
 
     nodata_val = int(h5f.attrs.get("nodata_val", DEFAULT_NODATA_U16))  # type: ignore[arg-type]
     return chip_lookup, np.asarray(ts), nodata_val
+
+
+def _compute_block_world_origin(h5f: h5py.File,
+                                chip_lookup: dict,
+                                chip_y_start: int,
+                                chip_x_start: int,
+                                pixel_res: float,
+                                chip_size: int,
+                                ) -> tuple[float, float]:
+    """Compute the UTM (x, y) of the NW corner of chip (0, 0) within the block.
+
+    Strategy: find any present chip in the block, read one valid pixel from
+    its xs_new/ys_new, and extrapolate back to the block's NW corner using
+    chip-grid offsets + pixel_res. This grounds the origin in actual data
+    coordinates (robust to whichever anchoring the rechunker chose).
+
+    If no chip in the block is present (entirely off-tile), fall back to
+    extrapolating from any chip in the file.
+    """
+    xs_new = h5f["xs_new"]   # type: ignore[index]
+    ys_new = h5f["ys_new"]   # type: ignore[index]
+
+    # Try to find a present chip inside this block first (cheaper read pattern).
+    anchor_chip_idx = None
+    anchor_chip_y = anchor_chip_x = None
+    for r in range(BLOCK_GRID_ROWS):
+        for c in range(BLOCK_GRID_COLS):
+            cy, cx = chip_y_start + r, chip_x_start + c
+            if (cy, cx) in chip_lookup:
+                anchor_chip_idx = chip_lookup[(cy, cx)]
+                anchor_chip_y, anchor_chip_x = cy, cx
+                break
+        if anchor_chip_idx is not None:
+            break
+
+    # Fall back to any chip in the file (block was entirely off-tile / sparse).
+    if anchor_chip_idx is None:
+        if not chip_lookup:
+            raise ValueError("HDF5 has no chips; cannot derive a world origin.")
+        (anchor_chip_y, anchor_chip_x), anchor_chip_idx = next(iter(chip_lookup.items()))
+    assert anchor_chip_y is not None and anchor_chip_x is not None
+
+    # Read just this chip's xs/ys slab; find the first valid pixel.
+    pix_start = anchor_chip_idx * CHIP_PIXELS
+    pix_end = pix_start + CHIP_PIXELS
+    xs_slab: np.ndarray = xs_new[pix_start:pix_end]   # type: ignore[assignment]
+    ys_slab: np.ndarray = ys_new[pix_start:pix_end]   # type: ignore[assignment]
+    valid = (xs_slab != -9999) & (ys_slab != -9999)
+    if not valid.any():
+        raise ValueError(
+            f"Anchor chip ({anchor_chip_y},{anchor_chip_x}) has no valid "
+            f"xs_new/ys_new pixels; cannot derive a world origin."
+        )
+    first_valid = int(np.argmax(valid))
+    # xs/ys are integers in the rechunker; cast to float for the rest.
+    anchor_x = float(xs_slab[first_valid])
+    anchor_y = float(ys_slab[first_valid])
+
+    # Local pixel offsets inside the anchor chip (row-major, like reshape(H, W)).
+    local_row = first_valid // chip_size
+    local_col = first_valid %  chip_size
+
+    # Walk back to the NW corner of chip (anchor_chip_y, anchor_chip_x).
+    anchor_chip_origin_x = anchor_x - local_col * pixel_res
+    anchor_chip_origin_y = anchor_y + local_row * pixel_res   # UTM north -> +y
+
+    # Walk back to the NW corner of chip (chip_y_start, chip_x_start).
+    block_origin_x = anchor_chip_origin_x - (anchor_chip_x - chip_x_start) * chip_size * pixel_res
+    block_origin_y = anchor_chip_origin_y + (anchor_chip_y - chip_y_start) * chip_size * pixel_res
+    return block_origin_x, block_origin_y
 
 
 def _stretch_chip_uint16_to_uint8(chip_u16: np.ndarray, nodata_u16: int) -> np.ndarray:
@@ -214,6 +290,12 @@ def read_block(hdf5_path: str,
         chip_lookup, ts_all, nodata_val = _read_chip_grid_metadata(h5f)
         values = h5f["values"]   # don't slurp the whole thing
 
+        pixel_res = float(h5f.attrs.get("pixel_res", 10.0))   # type: ignore[arg-type]
+        world_origin_x, world_origin_y = _compute_block_world_origin(
+            h5f, chip_lookup, chip_y_start, chip_x_start,
+            pixel_res, CHIP_SIZE,
+        )
+
         ts_indices = _select_timesteps(ts_all, ts_start_ordinal, ts_end_ordinal)
         if len(ts_indices) == 0:
             raise ValueError(
@@ -262,7 +344,15 @@ def read_block(hdf5_path: str,
                 dst_end = dst_start + CHIP_PIXELS
                 block[:, :, dst_start:dst_end] = chip_flat_u8
 
-    position = BlockPosition(block_row, block_col, chip_y_start, chip_x_start)
+    position = BlockPosition(
+        block_row=block_row,
+        block_col=block_col,
+        chip_y_start=chip_y_start,
+        chip_x_start=chip_x_start,
+        world_origin_x=world_origin_x,
+        world_origin_y=world_origin_y,
+        pixel_res=pixel_res,
+    )
     return block, ts_kept, position
 
 

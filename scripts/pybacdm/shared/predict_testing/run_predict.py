@@ -1,6 +1,6 @@
 """End-to-end smoke test for the chip-chunked prediction pipeline.
 
-Chains together steps 1-4 of the planned pipeline. Input source is selectable
+Chains together steps 1-6 of the planned pipeline. Input source is selectable
 via USE_REAL_DATA in the configuration section:
 
   USE_REAL_DATA = True   read_block      (input_setup.hdf5_reader)
@@ -12,16 +12,20 @@ Then in both modes:
   3. create_before_after_composites (composite_shift_chips.composite)
   4. generate_shifted_chips (composite_shift_chips.shift_chips)
      → predict_before_after_chips (bacdm.predict)
+  5. encode_patches              (postprocess.encode)
+  6. write_task_shard            (postprocess.shard)
 
-Prints stats only — no outputs are saved.
+Prints stats throughout. Step 6 writes one Parquet shard per (tile, block);
+controlled by SAVE_OUTPUT in the configuration section.
 
 Assumes the bacdm model code lives under ./prediction_model/bacdm/ (see
-sys.path insert below) and that composite_shift_chips/ + input_setup/ are
-reachable via the parent directory.
+sys.path insert below) and that composite_shift_chips/, input_setup/,
+postprocess/ are reachable via the parent directory.
 
 Usage:
     python run_predict.py
 """
+import os
 import time
 import sys
 from collections import Counter
@@ -29,6 +33,7 @@ from datetime import date
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import psutil
 
 # Make the bacdm model code importable.
@@ -37,12 +42,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "prediction_model" / "b
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from np_creation import make_chip_block
-from input_setup import read_block
+from input_setup import read_block, BlockPosition
 from composite_shift_chips import (
     create_before_after_composites,
     generate_shifted_chips,
     generate_shifted_chips_bundled,
 )
+from postprocess import encode_patches, write_task_shard, read_shards
 from predict import load_model, predict_before_after_chips
 
 
@@ -98,6 +104,26 @@ BATCH_SIZE = 8
 #                                              date; caller slices into batches)
 USE_BUNDLED = False
 
+# Step 5 + 6: encode connected components into PatchRecords and write a
+# per-(tile, block) Parquet shard. Set False to skip patch encoding and
+# shard writing entirely (useful for pure inference timing).
+SAVE_OUTPUT = True
+OUTPUT_DIR  = "/users1/cpca070342024/shared/predict_outputs"
+
+# Tile ID used in the shard filename and PatchRecord.tile_id. For real data
+# this should match the tile the HDF5 covers (e.g. "T29TPG"). For dummy
+# data it's a placeholder.
+TILE_ID = "T29TPG"
+DUMMY_TILE_ID = "DUMMY"
+
+# Connected-component noise filter: drop components smaller than this many
+# pixels. 4 is a sensible default; 1 keeps everything, 16+ is aggressive.
+MIN_COMPONENT_PIXELS = 4
+
+# Class names — only the non-background classes generate PatchRecords.
+# Must align with the model's output class scheme (see AAA_Configs.CLASS_NAMES).
+CLASS_NAMES = {0: "Background", 1: "Cuts", 2: "Fires"}
+
 
 # ============================================================================
 # HELPERS
@@ -129,6 +155,11 @@ def main():
     print(f"Target dates:   {TARGET_DATES_YYYYMMDD}")
     print(f"Model batch:    {BATCH_SIZE}")
     print(f"Bundled mode:   {USE_BUNDLED}")
+    print(f"Save output:    {SAVE_OUTPUT}")
+    if SAVE_OUTPUT:
+        print(f"Output dir:     {OUTPUT_DIR}")
+        print(f"Tile ID:        {TILE_ID if USE_REAL_DATA else DUMMY_TILE_ID}")
+        print(f"Min component:  {MIN_COMPONENT_PIXELS} pixels")
     print(f"\n[RSS] After imports:                   {rss_mb():7.1f} MB")
 
     # ── Step 1: build / read chip-block ───────────────────────────────────
@@ -150,12 +181,23 @@ def main():
             n_ts=N_TS, n_chips=N_CHIPS, nodata_frac=NODATA_FRAC,
             revisit_days=REVISIT_DAYS, start_date=START_DATE, seed=SEED,
         )
+        # Fake a BlockPosition with zero world origin so steps 5/6 still work
+        # for the dummy path. PatchRecord.world_origin will be unmeaningful.
+        position = BlockPosition(
+            block_row=0, block_col=0,
+            chip_y_start=0, chip_x_start=0,
+            world_origin_x=0.0, world_origin_y=0.0,
+            pixel_res=10.0,
+        )
         print(f"  block: shape={block.shape}  dtype={block.dtype}  "
               f"{block.nbytes / 1e6:.1f} MB")
         print(f"  ts:    {date.fromordinal(int(ts[0]))} -> "
               f"{date.fromordinal(int(ts[-1]))}  ({len(ts)} timesteps)")
     print(f"  Step 1 time: {time.perf_counter() - t0:.2f} s")
     print(f"[RSS] After chip-block:                {rss_mb():7.1f} MB")
+
+    # Tile identity used downstream by steps 5/6.
+    tile_id = TILE_ID if USE_REAL_DATA else DUMMY_TILE_ID
 
     # ── Step 3: per-pixel before/after compositing ────────────────────────
     target_dates = parse_target_dates(TARGET_DATES_YYYYMMDD)
@@ -183,9 +225,37 @@ def main():
 
     rss_before_infer = rss_mb()
     t_inference_total = 0.0
+    t_encode_total = 0.0
     n_pairs = 0
     class_counts: Counter[int] = Counter()
     kind_counts: Counter[str] = Counter()
+    patch_records: list = []   # accumulator for step 6 (step 5 emits per label)
+
+    def encode_one(label_map: np.ndarray, chip_kind: str,
+                   grid_position: tuple[int, int], date_ordinal: int):
+        """Run step 5 on one chip's label map; append PatchRecords to the
+        shared buffer; return wall time."""
+        if not SAVE_OUTPUT:
+            return 0.0
+        t0 = time.perf_counter()
+        records = list(encode_patches(
+            label_map,
+            tile_id=tile_id,
+            block_row=position.block_row,
+            block_col=position.block_col,
+            chip_kind=chip_kind,
+            grid_row=grid_position[0],
+            grid_col=grid_position[1],
+            date_ordinal=date_ordinal,
+            date_iso=date.fromordinal(date_ordinal).isoformat(),
+            class_names=CLASS_NAMES,
+            block_world_origin_x=position.world_origin_x,
+            block_world_origin_y=position.world_origin_y,
+            pixel_res=position.pixel_res,
+            min_component_pixels=MIN_COMPONENT_PIXELS,
+        ))
+        patch_records.extend(records)
+        return time.perf_counter() - t0
 
     if not USE_BUNDLED:
         # Per-pair path: yield one ChipPair at a time, stack BATCH_SIZE of
@@ -196,7 +266,7 @@ def main():
         batch: list = []
 
         def flush(batch: list):
-            nonlocal t_inference_total, n_pairs
+            nonlocal t_inference_total, t_encode_total, n_pairs
             if not batch:
                 return
             # Predictor expects (B, H, W, C) — our ChipPair holds (C, H, W).
@@ -211,6 +281,9 @@ def main():
                 uniq, cnts = np.unique(label, return_counts=True)
                 for u, c in zip(uniq, cnts):
                     class_counts[int(u)] += int(c)
+                t_encode_total += encode_one(
+                    label, p.chip_kind, p.grid_position, p.date_ordinal,
+                )
             batch.clear()
 
         for pair in pair_iter:
@@ -235,12 +308,16 @@ def main():
                     before_view, after_view, model)
                 t_inference_total += time.perf_counter() - t0
                 batch_kinds = bundle.chip_kinds[i:i + BATCH_SIZE]
+                batch_positions = bundle.grid_positions[i:i + BATCH_SIZE]
                 n_pairs += len(batch_kinds)
-                for kind, label in zip(batch_kinds, labels):
+                for kind, gpos, label in zip(batch_kinds, batch_positions, labels):
                     kind_counts[kind] += 1
                     uniq, cnts = np.unique(label, return_counts=True)
                     for u, c in zip(uniq, cnts):
                         class_counts[int(u)] += int(c)
+                    t_encode_total += encode_one(
+                        label, kind, gpos, bundle.date_ordinal,
+                    )
 
     rss_after_infer = rss_mb()
 
@@ -259,6 +336,59 @@ def main():
         cnt = class_counts[cls]
         print(f"  class {cls}: {cnt:>12,} pixels  "
               f"({100 * cnt / total_pixels:5.2f}%)")
+
+    # ── Steps 5 + 6: patch encoding summary + shard write ─────────────────
+    if SAVE_OUTPUT:
+        print(f"\nStep 5: patches encoded:               {len(patch_records):,}")
+        print(f"  Total encode time: {t_encode_total:.2f} s "
+              f"({t_encode_total / max(n_pairs, 1) * 1000:.1f} ms/chip)")
+        if patch_records:
+            by_label: Counter[str] = Counter(r.label_name for r in patch_records)
+            print(f"  By class: {dict(sorted(by_label.items()))}")
+            sizes = np.array([r.n_pixels for r in patch_records])
+            print(f"  Component sizes: min={int(sizes.min())}  "
+                  f"median={int(np.median(sizes))}  max={int(sizes.max())}  "
+                  f"mean={float(sizes.mean()):.1f}")
+        else:
+            print("  (no non-background components found)")
+
+        print(f"\nStep 6: writing shard...")
+        t0 = time.perf_counter()
+        shard_path = write_task_shard(
+            patch_records, OUTPUT_DIR, tile_id,
+            position.block_row, position.block_col,
+        )
+        write_s = time.perf_counter() - t0
+        shard_bytes = os.path.getsize(shard_path)
+        print(f"  Wrote {shard_path} in {write_s:.2f} s  "
+              f"({shard_bytes / 1024:.1f} KB)")
+
+        # Read-back sanity check: re-open the shard with read_shards and
+        # verify row count + show a preview of the first few rows.
+        t0 = time.perf_counter()
+        df = read_shards(OUTPUT_DIR, tile_id=tile_id)
+        read_s = time.perf_counter() - t0
+        # Filter to this block in case OUTPUT_DIR holds other blocks' shards.
+        df_block = df[(df["block_row"] == position.block_row) &
+                      (df["block_col"] == position.block_col)]
+        print(f"\nShard read-back: {len(df_block)} rows "
+              f"(read {len(df)} rows for tile {tile_id} in {read_s:.2f} s)")
+        if len(df_block) == len(patch_records):
+            print("  Row count matches in-memory PatchRecord count — OK")
+        else:
+            print(f"  WARNING: row count mismatch (shard={len(df_block)}, "
+                  f"in-memory={len(patch_records)})")
+        if len(df_block) > 0:
+            preview_cols = [
+                "chip_kind", "grid_row", "grid_col", "date_iso",
+                "label_name", "n_pixels",
+                "bbox_chip_y0", "bbox_chip_x0",
+                "world_origin_x", "world_origin_y",
+            ]
+            print("  First 5 rows (selected cols):")
+            with pd.option_context("display.max_columns", None,
+                                   "display.width", 160):
+                print(df_block[preview_cols].head().to_string(index=False))
 
     print(f"\n[RSS] Final:                           {rss_mb():7.1f} MB")
 

@@ -20,7 +20,6 @@ from hdf5_reader import (
     iter_blocks,
     get_block_grid_shape,
     dry_run,
-    BlockPosition,
     CHIP_PIXELS,
     BLOCK_GRID_ROWS,
     BLOCK_GRID_COLS,
@@ -33,6 +32,11 @@ CHIP_SIZE = 256
 N_TS = 4
 N_BANDS = 10
 DEFAULT_NODATA_U16 = 65_535
+PIXEL_RES = 10
+# Synthetic UTM tile origin used by _write_synthetic_hdf5 to populate
+# xs_new / ys_new. Tests use these to verify world_origin derivation.
+SYNTHETIC_TILE_X0 = 500_000.0   # UTM easting of chip (0, 0) NW corner
+SYNTHETIC_TILE_Y0 = 4_500_000.0 # UTM northing of chip (0, 0) NW corner
 
 
 # ============================================================================
@@ -62,6 +66,20 @@ def _write_synthetic_hdf5(
     ts = np.arange(start_ordinal, start_ordinal + n_ts * ts_stride_days,
                    ts_stride_days, dtype=np.int32)
 
+    # Build xs_new / ys_new in the layout the rechunker uses: each chip's
+    # 65_536 slots are row-major within the chip, with UTM derived from
+    # (SYNTHETIC_TILE_X0, SYNTHETIC_TILE_Y0) and PIXEL_RES.
+    xs_new = np.empty(n_pixels, dtype=np.int32)
+    ys_new = np.empty(n_pixels, dtype=np.int32)
+    for chip_idx, (cy, cx) in enumerate(present_positions):
+        chip_x0 = SYNTHETIC_TILE_X0 + cx * CHIP_SIZE * PIXEL_RES
+        chip_y0 = SYNTHETIC_TILE_Y0 - cy * CHIP_SIZE * PIXEL_RES
+        for row in range(CHIP_SIZE):
+            for col in range(CHIP_SIZE):
+                slot = chip_idx * CHIP_PIXELS + row * CHIP_SIZE + col
+                xs_new[slot] = int(chip_x0 + col * PIXEL_RES)
+                ys_new[slot] = int(chip_y0 - row * PIXEL_RES)
+
     with h5py.File(path, "w") as h5f:
         values = h5f.create_dataset(
             "values",
@@ -81,14 +99,11 @@ def _write_synthetic_hdf5(
         h5f.create_dataset("chip_y_bin", data=chip_y)
         h5f.create_dataset("chip_pixel_count", data=chip_pixel_count)
         h5f.create_dataset("ts", data=ts)
-        # sort_order / xs_new / ys_new aren't read by hdf5_reader.py, but the
-        # rechunker writes them — create stubs so the file is well-formed.
+        # sort_order isn't read by hdf5_reader.py, but the rechunker writes it.
         h5f.create_dataset("sort_order",
                            data=np.full(n_pixels, -1, dtype=np.int64))
-        h5f.create_dataset("xs_new",
-                           data=np.full(n_pixels, -9999, dtype=np.int32))
-        h5f.create_dataset("ys_new",
-                           data=np.full(n_pixels, -9999, dtype=np.int32))
+        h5f.create_dataset("xs_new", data=xs_new)
+        h5f.create_dataset("ys_new", data=ys_new)
 
         h5f.attrs["chip_size"] = CHIP_SIZE
         h5f.attrs["pixel_res"] = 10
@@ -136,7 +151,11 @@ def test_read_block_all_chips_present():
                                BLOCK_GRID_ROWS * BLOCK_GRID_COLS * CHIP_PIXELS)
         assert block.dtype == np.uint8
         assert ts.shape == (N_TS,)
-        assert position == BlockPosition(0, 0, 0, 0)
+        # Only check the chip-grid fields here; world_origin is its own test.
+        assert position.block_row == 0
+        assert position.block_col == 0
+        assert position.chip_y_start == 0
+        assert position.chip_x_start == 0
         # Every slot should have a real value (stretch can produce 254 max for
         # genuine values; the 255 sentinel only appears on real nodata).
         assert not (block == NODATA_U8).any(), \
@@ -210,6 +229,44 @@ def test_read_block_off_tile_chips_filled_with_nodata():
             assert (block[:, :, slot:end] == NODATA_U8).all(), \
                 f"ghost col chip ({r},4) wasn't all NODATA"
     print("  read_block (off-tile -> nodata) — OK")
+
+
+def test_block_world_origin():
+    """BlockPosition.world_origin_{x,y} / pixel_res should be derived
+    correctly from xs_new/ys_new — including for blocks whose top-left chip
+    is off-tile (sparse case), where the helper extrapolates from any
+    present chip."""
+    with tempfile.TemporaryDirectory() as tmpd:
+        path = os.path.join(tmpd, "fake.h5")
+        # Chip grid: full 5x5 block worth of data so block (0,0) is dense and
+        # block (0,1) has its first 4 cols missing (testing the extrapolation
+        # fallback inside the helper).
+        positions = [(y, x) for y in range(5) for x in range(5)]
+        _write_synthetic_hdf5(path, positions)
+
+        # Block (0, 0): NW corner is chip (0, 0) — UTM origin is exactly
+        # the synthetic tile origin.
+        _, _, pos00 = read_block(path, 0, 0)
+        assert pos00.pixel_res == PIXEL_RES
+        assert pos00.world_origin_x == SYNTHETIC_TILE_X0, \
+            (pos00.world_origin_x, SYNTHETIC_TILE_X0)
+        assert pos00.world_origin_y == SYNTHETIC_TILE_Y0, \
+            (pos00.world_origin_y, SYNTHETIC_TILE_Y0)
+
+        # A non-origin block where the requested top-left chip IS present:
+        # build a separate file with chips at chip-grid (4..8, 4..8); for
+        # block (1, 1) -> chip_y_start=4, chip_x_start=4.
+        path2 = os.path.join(tmpd, "fake2.h5")
+        offset_positions = [(y, x) for y in range(4, 9) for x in range(4, 9)]
+        _write_synthetic_hdf5(path2, offset_positions)
+        _, _, pos11 = read_block(path2, 1, 1)
+        expected_x = SYNTHETIC_TILE_X0 + 4 * CHIP_SIZE * PIXEL_RES
+        expected_y = SYNTHETIC_TILE_Y0 - 4 * CHIP_SIZE * PIXEL_RES
+        assert pos11.world_origin_x == expected_x, \
+            (pos11.world_origin_x, expected_x)
+        assert pos11.world_origin_y == expected_y, \
+            (pos11.world_origin_y, expected_y)
+    print("  read_block (world_origin derivation) — OK")
 
 
 def test_read_block_ts_range_filter():
@@ -358,6 +415,7 @@ def main():
     test_read_block_all_chips_present()
     test_read_block_missing_chips_filled_with_nodata()
     test_read_block_off_tile_chips_filled_with_nodata()
+    test_block_world_origin()
     test_read_block_ts_range_filter()
     test_iter_blocks_covers_full_grid()
     test_iter_blocks_filter()
