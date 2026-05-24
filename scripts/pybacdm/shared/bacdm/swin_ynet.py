@@ -1018,14 +1018,19 @@ class SwinTransDecoder(nn.Module):
 # mc: AAA_Configs.Train_pretrained_path was initially trained with 2 classes
 # load_from() will check if the pretrained weights match the current model architecture, and only load those that match, so it should be safe to use a pretrained model trained with 2 classes even if we change num_classes, as long as the rest of the architecture is compatible.
 class encoder1(nn.Module):
-    def __init__(self,num_classes):
+    def __init__(self, num_classes, pretrained_path=...):
         super(encoder1, self).__init__()
 
         self.encoder1 = SwinTransEncoder(img_size=256, patch_size=4, in_chans=td, num_classes=num_classes, embed_dim=128,
                                          depths=[2, 2, 18, 2], depths_decoder=[4, 4, 4, 4], num_heads=[4, 8, 16, 32],
                                          window_size=8)
-        self.pretrained_path = AAA_Configs.Train_pretrained_path
-        # self.pretrained_path = None
+        # `pretrained_path=...` (Ellipsis sentinel) means "use the default from
+        # AAA_Configs"; pass an explicit value (including None) to override.
+        # Inference callers pass None so the Swin pretrain load is skipped —
+        # `predict.load_model` overwrites every weight via load_state_dict anyway.
+        if pretrained_path is ...:
+            pretrained_path = AAA_Configs.Train_pretrained_path
+        self.pretrained_path = pretrained_path
 
         self.load_from()
 
@@ -1113,8 +1118,10 @@ class encoder1(nn.Module):
                 print("--- All layers loaded successfully! ---")
 
         else:
-            print("No pretrained path provided. Training from scratch.")
-            sys.exit(0)
+            # Path explicitly set to None — callers that do this (inference)
+            # will load full weights via load_state_dict afterward, so no
+            # pretrain is required. Training callers should not reach here.
+            print("No pretrained path provided. Skipping pretrain load.")
 
     def new_load_from(self):
         pretrained_path = self.pretrained_path
@@ -1152,9 +1159,13 @@ class encoder1(nn.Module):
 
 # mc: added argument num_classes to Encoder, and pass it to encoder1
 class Encoder(nn.Module):
-    def __init__(self, num_classes):
+    def __init__(self, num_classes, pretrained_path=...):
         super(Encoder, self).__init__()
-        self.encoder1 = encoder1(num_classes=num_classes)
+        # `pretrained_path=...` (Ellipsis) means "use AAA_Configs default".
+        # Pass `pretrained_path=None` to skip the Swin pretrain load entirely
+        # (correct for inference, where load_state_dict overwrites all weights).
+        self.encoder1 = encoder1(num_classes=num_classes,
+                                 pretrained_path=pretrained_path)
         self.decoder = SwinTransDecoder(num_classes=num_classes)
 
     def forward(self, img1, img2):

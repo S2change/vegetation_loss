@@ -29,6 +29,8 @@ HDF5_PATH="/users1/dgt/hdf5/T29TNE.h5"
 TILE_GPKG="/users1/cpca070342024/shared/auxiliary_data/sentinel2_tiles_PT_32629.gpkg"
 START_DATE="20230301"
 END_DATE="20230501"
+WEIGHTS_PATH="/users1/cpca070342024/shared/weights/best_model.pth"
+OUTPUT_DIR="/users1/cpca070342024/shared/predictions/T29TNE"
 # -------------------------------------------------------
 
 src='chip_creation.py'
@@ -49,6 +51,13 @@ if [ ! -e "$TILE_GPKG" ]; then
     exit 1
 fi
 
-python "$src" "$HDF5_PATH" "$TILE_GPKG" "$START_DATE" "$END_DATE"
+if [ ! -e "$WEIGHTS_PATH" ]; then
+    echo "Error: Weights file $WEIGHTS_PATH not found"
+    exit 1
+fi
+
+mkdir -p "$OUTPUT_DIR"
+
+python "$src" "$HDF5_PATH" "$TILE_GPKG" "$START_DATE" "$END_DATE" "$WEIGHTS_PATH" "$OUTPUT_DIR"
 
 echo "Finished with job $SLURM_JOBID"
