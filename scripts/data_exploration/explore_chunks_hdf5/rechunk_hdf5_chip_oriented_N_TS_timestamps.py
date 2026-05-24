@@ -3,9 +3,17 @@ extract_recent_chip_chunked.py
 
 Pre-processing step for HPC inference.
 
-Reads the most recent N_TS timestamps from the original compressed HDF5
+Reads a temporal window of timestamps from the original compressed HDF5
 (chunks 1 × B × P_all, all acquisitions) and writes a new, small HDF5
 with chip-oriented chunks (N_TS, B, CHIP_SIZE²).
+
+Two selection modes
+-------------------
+* Date-range mode  (START_DATE and END_DATE are set):
+    Extracts all timestamps whose ordinal date falls in [START_DATE, END_DATE].
+    N_TS is derived from the number of matching timestamps.
+* Recent-N mode    (START_DATE and END_DATE are None):
+    Extracts the most recent N_TS timestamps (original behaviour).
 
 Why this makes sense
 --------------------
@@ -57,7 +65,12 @@ import numpy as np
 # ── Configuration ──────────────────────────────────────────────────────────────
 SRC_PATH      = Path(r"H:\outputs_ROI\hdf5\T29TPG\T29TPG.h5")
 
-N_TS          = 48      # number of most-recent timestamps to extract
+# Date-range mode: set both to 'yyyy-mm-dd' strings to select all timestamps
+# within [START_DATE, END_DATE].  Set both to None to use Recent-N mode.
+START_DATE    = '2025-07-31' # None    # e.g. '2023-01-01'
+END_DATE      = '2025-11-30'    # e.g. '2023-12-31'
+
+N_TS          = 48      # used only when START_DATE / END_DATE are both None
 CHIP_SIZE     = 256     # pixels per chip side  (256 × 256 = 65 536 px/chip)
 PIXEL_RES     = 10      # Sentinel-2 native resolution, metres
 NODATA_VAL    = 65535
@@ -100,7 +113,7 @@ def build_chip_layout(xs, ys):
     return sort_order_padded, xs_new, ys_new, chip_x_bin, chip_y_bin, chip_counts
 
 
-def auto_chips_per_batch(n_bands, n_pix_full, budget_gb):
+def auto_chips_per_batch(n_bands, n_pix_full, budget_gb, n_ts):
     """Largest chip batch that keeps peak RAM within budget."""
     src_ts_gb = n_bands * n_pix_full * 2 / 1024**3
     avail_gb  = budget_gb - src_ts_gb
@@ -110,7 +123,7 @@ def auto_chips_per_batch(n_bands, n_pix_full, budget_gb):
             f"but budget is {budget_gb} GB.  Increase RAM_BUDGET_GB."
         )
     n_slots  = CHIP_SIZE ** 2
-    n_chips  = max(1, int(avail_gb * 1024**3 / (N_TS * n_bands * n_slots * 2)))
+    n_chips  = max(1, int(avail_gb * 1024**3 / (n_ts * n_bands * n_slots * 2)))
     return n_chips, src_ts_gb
 
 
@@ -130,9 +143,22 @@ def extract(dry_run=False):
         n_pix     = f['values'].shape[2]
         src_attrs = dict(f.attrs)
 
-    # Select the most recent N_TS timestamps
-    n_ts_use   = min(N_TS, n_ts_src)
-    src_ts_idx = np.arange(n_ts_src - n_ts_use, n_ts_src)   # last N_TS indices
+    # Select timestamps: date-range mode or recent-N mode
+    if START_DATE is not None and END_DATE is not None:
+        start_ord  = date.fromisoformat(START_DATE).toordinal()
+        end_ord    = date.fromisoformat(END_DATE).toordinal()
+        src_ts_idx = np.where((ts_all >= start_ord) & (ts_all <= end_ord))[0]
+        if len(src_ts_idx) == 0:
+            raise ValueError(
+                f"No timestamps found between {START_DATE} and {END_DATE}."
+            )
+        n_ts_use = len(src_ts_idx)
+        print(f"  Date-range mode: {START_DATE} → {END_DATE}")
+    else:
+        n_ts_use   = min(N_TS, n_ts_src)
+        src_ts_idx = np.arange(n_ts_src - n_ts_use, n_ts_src)
+        print(f"  Recent-N mode: last {n_ts_use} timestamps")
+
     ts_selected = ts_all[src_ts_idx]
     date_first  = date.fromordinal(int(ts_selected[0]))
     date_last   = date.fromordinal(int(ts_selected[-1]))
@@ -155,10 +181,10 @@ def extract(dry_run=False):
           f"(padding {padding:.1f} %)")
 
     # ── Batch sizing ───────────────────────────────────────────────────────────
-    chips_per_batch, src_ts_gb = auto_chips_per_batch(n_bands, n_pix, RAM_BUDGET_GB)
+    chips_per_batch, src_ts_gb = auto_chips_per_batch(n_bands, n_pix, RAM_BUDGET_GB, n_ts_use)
     n_batches    = int(np.ceil(n_chips / chips_per_batch))
     total_reads  = n_batches * n_ts_use
-    accum_gb     = N_TS * n_bands * chips_per_batch * n_slots * 2 / 1024**3
+    accum_gb     = n_ts_use * n_bands * chips_per_batch * n_slots * 2 / 1024**3
 
     dst_path = SRC_PATH.with_name(
         f"{SRC_PATH.stem}_{n_ts_use}ts"
