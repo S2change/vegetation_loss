@@ -4,9 +4,10 @@ Step 6 of the chip-chunked prediction pipeline. SLURM array tasks each write
 exactly one shard — naming is `(tile, block_row, block_col)` driven so a
 glance at a directory tells you which blocks have produced output.
 
-Each shard is a single Parquet file. The schema mirrors `PatchRecord`'s
-fields (RLE flattened to list[uint16]). Shards are write-once; downstream
-aggregation (concatenation / per-tile merge) is a separate offline step.
+Each shard is a single Parquet file. The schema mirrors
+`ChipPredictionRecord.to_dict()`'s output (per-class columns for pixel
+counts + RLE masks). Shards are write-once; downstream aggregation is a
+separate offline step.
 """
 from __future__ import annotations
 
@@ -19,7 +20,21 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from .encode import PatchRecord
+from .chip_records import ChipPredictionRecord
+
+
+# Fixed columns the schema always carries (the 6-tuple identity + date +
+# world position + chip NW offset + pixel_res). Per-class columns
+# (`n_pixels_cls_{id}`, `rle_cls_{id}`) are added dynamically by
+# ChipPredictionRecord.to_dict() based on which classes were observed.
+_BASE_COLUMNS = [
+    "tile_id", "block_row", "block_col",
+    "chip_kind", "grid_row", "grid_col",
+    "date_ordinal", "date_iso",
+    "block_world_origin_x", "block_world_origin_y",
+    "chip_nw_px_y", "chip_nw_px_x",
+    "pixel_res",
+]
 
 
 def shard_path_for_block(output_dir: str,
@@ -31,33 +46,32 @@ def shard_path_for_block(output_dir: str,
     return os.path.join(output_dir, fname)
 
 
-def write_task_shard(records: Iterable[PatchRecord],
+def write_task_shard(records: Iterable[ChipPredictionRecord],
                      output_dir: str,
                      tile_id: str,
                      block_row: int,
                      block_col: int,
                      compression: str = "snappy",
                      ) -> str:
-    """Buffer all PatchRecords for one task in memory, write to one Parquet.
+    """Buffer ChipPredictionRecords for one task in memory, write one Parquet.
 
     Parameters
     ----------
-    records : iterable of PatchRecord
-        Output of step 5 for every (chip, target_date) the task processed.
+    records : iterable of ChipPredictionRecord
+        Output of step 5 for every (chip, target_date) the task produced
+        non-background predictions for. Empty input is fine — produces an
+        empty shard with the base column schema.
     output_dir : str
         Directory the shard is written into. Created if missing.
     tile_id, block_row, block_col : ...
         Identify the shard. Filename is
         `{tile_id}_block_{block_row:03d}_{block_col:03d}.parquet`.
     compression : str
-        Parquet compression. 'snappy' is the cross-tool default; 'zstd' is
-        smaller but slower to write.
+        Parquet compression ('snappy' = default; 'zstd' = smaller, slower).
 
     Returns
     -------
-    The shard's full path on disk. The file is written even if `records` is
-    empty (empty shards are explicit "this block had no non-background
-    predictions" markers).
+    The shard's full path on disk.
     """
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     path = shard_path_for_block(output_dir, tile_id, block_row, block_col)
@@ -66,12 +80,9 @@ def write_task_shard(records: Iterable[PatchRecord],
     if rows:
         df = pd.DataFrame(rows)
     else:
-        # Empty df with the same columns the populated case would have, so
-        # downstream readers don't have to handle a missing-columns case.
-        df = pd.DataFrame(columns=list(PatchRecord.__dataclass_fields__.keys()))
-        # `rle_mask` was an ndarray on the dataclass; coerce to object so the
-        # empty df schema doesn't try to infer the wrong type.
-        df["rle_mask"] = df["rle_mask"].astype(object)
+        # Empty df with just the base column set so downstream readers see
+        # the expected fixed columns (per-class columns vary with content).
+        df = pd.DataFrame(columns=_BASE_COLUMNS)
 
     table = pa.Table.from_pandas(df, preserve_index=False)
     pq.write_table(table, path, compression=compression)
@@ -84,9 +95,8 @@ def read_shards(output_dir: str,
     """Read every shard in `output_dir` (optionally filtered by tile_id)
     and concatenate into one DataFrame.
 
-    For an aggregation workflow over many shards consider duckdb's
-    `read_parquet` over a glob instead — it doesn't materialise the
-    DataFrame in Python memory.
+    For aggregations over many shards consider duckdb's `read_parquet` over
+    a glob instead — it doesn't materialise the DataFrame in Python memory.
     """
     pattern = f"{tile_id}_block_*.parquet" if tile_id else "*_block_*.parquet"
     paths = sorted(Path(output_dir).glob(pattern))

@@ -1,4 +1,4 @@
-"""Tests for postprocess.encode + postprocess.shard.
+"""Tests for postprocess.chip_records + postprocess.shard.
 
 Run:
     python test_postprocess.py
@@ -10,28 +10,26 @@ import tempfile
 import numpy as np
 import pandas as pd
 
-# Make this file runnable both as a script (python test_postprocess.py) and
-# via `python -m postprocess.test_postprocess`.
+# Make this file runnable both as a script and as a module.
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from postprocess.encode import (
-        PatchRecord, encode_patches, _mask_to_rle,
-        _chip_nw_pixel_offset, _bbox_world_origin,
-        CHIP_H, CHIP_W, HALF,
+    from postprocess.chip_records import (
+        ChipPredictionRecord, encode_chip_predictions,
+        chip_nw_pixel_offset,
+        _mask_to_rle,
+        CHIP_H, CHIP_W, HALF, BACKGROUND_CLASS,
     )
     from postprocess.shard import (
         write_task_shard, read_shards, shard_path_for_block,
     )
 else:
-    from .encode import (
-        PatchRecord, encode_patches, _mask_to_rle,
-        _chip_nw_pixel_offset, _bbox_world_origin,
-        CHIP_H, CHIP_W, HALF,
+    from .chip_records import (
+        ChipPredictionRecord, encode_chip_predictions,
+        chip_nw_pixel_offset,
+        _mask_to_rle,
+        CHIP_H, CHIP_W, HALF, BACKGROUND_CLASS,
     )
     from .shard import write_task_shard, read_shards, shard_path_for_block
-
-
-CLASS_NAMES = {0: "Background", 1: "Cuts", 2: "Fires"}
 
 
 # ============================================================================
@@ -43,19 +41,30 @@ def _empty_label_map() -> np.ndarray:
 
 
 def _square_label_map(y0, x0, side, cls=1) -> np.ndarray:
-    """Single cls-pixel square of `side` x `side` at (y0, x0), rest background."""
     lm = _empty_label_map()
     lm[y0:y0 + side, x0:x0 + side] = cls
     return lm
 
 
+def _decode_rle(flat: list[int], chip_size: int = 256) -> np.ndarray:
+    """Decode a flat [start0, length0, start1, length1, ...] list into a
+    (chip_size, chip_size) bool mask."""
+    out = np.zeros(chip_size * chip_size, dtype=bool)
+    if not flat:
+        return out.reshape(chip_size, chip_size)
+    arr = np.asarray(flat, dtype=np.uint16).reshape(-1, 2)
+    for start, length in arr:
+        out[int(start):int(start) + int(length)] = True
+    return out.reshape(chip_size, chip_size)
+
+
 # ============================================================================
-# encode.py: small unit tests
+# chip_records.py: RLE helper
 # ============================================================================
 
 def test_mask_to_rle_empty():
     rle = _mask_to_rle(np.zeros((CHIP_H, CHIP_W), dtype=bool))
-    assert rle.shape == (2, 0), rle.shape
+    assert rle.shape == (2, 0)
     assert rle.dtype == np.uint16
     print("  _mask_to_rle (empty) — OK")
 
@@ -64,7 +73,6 @@ def test_mask_to_rle_single_pixel():
     mask = np.zeros((CHIP_H, CHIP_W), dtype=bool)
     mask[3, 7] = True
     rle = _mask_to_rle(mask)
-    # Row-major flat index = 3 * 256 + 7 = 775; length 1.
     assert rle.shape == (2, 1)
     assert int(rle[0, 0]) == 3 * CHIP_W + 7
     assert int(rle[1, 0]) == 1
@@ -73,7 +81,7 @@ def test_mask_to_rle_single_pixel():
 
 def test_mask_to_rle_horizontal_run():
     mask = np.zeros((CHIP_H, CHIP_W), dtype=bool)
-    mask[10, 50:60] = True   # 10-pixel horizontal run, all on same row
+    mask[10, 50:60] = True
     rle = _mask_to_rle(mask)
     assert rle.shape == (2, 1)
     assert int(rle[0, 0]) == 10 * CHIP_W + 50
@@ -81,235 +89,189 @@ def test_mask_to_rle_horizontal_run():
     print("  _mask_to_rle (horizontal run) — OK")
 
 
-def test_mask_to_rle_two_rows():
-    """A square spanning multiple rows produces multiple runs (one per row,
-    since row-major flat indices are non-contiguous across rows)."""
-    mask = np.zeros((CHIP_H, CHIP_W), dtype=bool)
-    mask[5:7, 2:5] = True   # 2-row x 3-col square
-    rle = _mask_to_rle(mask)
-    assert rle.shape == (2, 2)
-    # Row 5 cols 2..4 -> start = 5*256 + 2 = 1282, length 3
-    assert int(rle[0, 0]) == 5 * CHIP_W + 2
-    assert int(rle[1, 0]) == 3
-    # Row 6 cols 2..4 -> start = 6*256 + 2 = 1538, length 3
-    assert int(rle[0, 1]) == 6 * CHIP_W + 2
-    assert int(rle[1, 1]) == 3
-    print("  _mask_to_rle (2-row square) — OK")
-
+# ============================================================================
+# chip_records.py: chip NW offset
+# ============================================================================
 
 def test_chip_nw_pixel_offset_all_kinds():
-    # original at (1, 2): chip NW = (256, 512)
-    assert _chip_nw_pixel_offset("original", 1, 2) == (256, 512)
-    # h_shift: +HALF in x
-    assert _chip_nw_pixel_offset("h_shift", 1, 2) == (256, 512 + HALF)
-    # v_shift: +HALF in y
-    assert _chip_nw_pixel_offset("v_shift", 1, 2) == (256 + HALF, 512)
-    # diagonal: +HALF in both
-    assert _chip_nw_pixel_offset("diagonal", 1, 2) == (256 + HALF, 512 + HALF)
-    print("  _chip_nw_pixel_offset (all 4 kinds) — OK")
-
-
-def test_bbox_world_origin_math():
-    # block NW at UTM (500000, 4500000), pixel_res = 10.
-    # original chip at (grid_row=0, grid_col=0), bbox at chip-pixel (5, 10).
-    # Absolute pixel = (0 + 5, 0 + 10) = (5, 10).
-    # World x = 500000 + 10*10 = 500100
-    # World y = 4500000 - 5*10 = 4499950
-    wx, wy = _bbox_world_origin(
-        "original", grid_row=0, grid_col=0,
-        bbox_chip_y0=5, bbox_chip_x0=10,
-        block_world_origin_x=500000.0,
-        block_world_origin_y=4500000.0,
-        pixel_res=10.0,
-    )
-    assert wx == 500100.0, wx
-    assert wy == 4499950.0, wy
-
-    # h_shift at (1, 2), bbox at (0, 0):
-    # abs px = (1*256 + 0, 2*256 + 128 + 0) = (256, 640)
-    # World x = 500000 + 640*10 = 506400; y = 4500000 - 256*10 = 4497440
-    wx, wy = _bbox_world_origin(
-        "h_shift", grid_row=1, grid_col=2,
-        bbox_chip_y0=0, bbox_chip_x0=0,
-        block_world_origin_x=500000.0,
-        block_world_origin_y=4500000.0,
-        pixel_res=10.0,
-    )
-    assert wx == 506400.0, wx
-    assert wy == 4497440.0, wy
-    print("  _bbox_world_origin (original + h_shift) — OK")
+    assert chip_nw_pixel_offset("original", 1, 2) == (256, 512)
+    assert chip_nw_pixel_offset("h_shift",  1, 2) == (256, 512 + HALF)
+    assert chip_nw_pixel_offset("v_shift",  1, 2) == (256 + HALF, 512)
+    assert chip_nw_pixel_offset("diagonal", 1, 2) == (256 + HALF, 512 + HALF)
+    print("  chip_nw_pixel_offset (all 4 kinds) — OK")
 
 
 # ============================================================================
-# encode.py: encode_patches integration tests
+# encode_chip_predictions
 # ============================================================================
 
-def test_encode_patches_yields_nothing_for_empty():
+def test_encode_yields_nothing_for_empty():
     lm = _empty_label_map()
-    records = list(encode_patches(
+    records = list(encode_chip_predictions(
         lm,
         tile_id="T29TPG", block_row=0, block_col=0,
         chip_kind="original", grid_row=0, grid_col=0,
         date_ordinal=738887, date_iso="2024-01-01",
-        class_names=CLASS_NAMES,
         block_world_origin_x=500000.0, block_world_origin_y=4500000.0,
         pixel_res=10.0,
     ))
     assert records == []
-    print("  encode_patches (empty label map) — OK")
+    print("  encode (empty label map -> no records) — OK")
 
 
-def test_encode_patches_single_component():
-    """A single 10x10 class-1 square should produce exactly one record with
-    the expected metadata."""
+def test_encode_emits_one_record_for_one_class():
     lm = _square_label_map(y0=20, x0=30, side=10, cls=1)
-    records = list(encode_patches(
+    records = list(encode_chip_predictions(
         lm,
         tile_id="T29TPG", block_row=2, block_col=3,
         chip_kind="original", grid_row=1, grid_col=0,
         date_ordinal=738887, date_iso="2024-01-01",
-        class_names=CLASS_NAMES,
         block_world_origin_x=500000.0, block_world_origin_y=4500000.0,
         pixel_res=10.0,
     ))
     assert len(records) == 1
     r = records[0]
-    assert isinstance(r, PatchRecord)
-    assert r.label == 1
-    assert r.label_name == "Cuts"
-    assert r.n_pixels == 100
-    assert (r.bbox_chip_y0, r.bbox_chip_x0) == (20, 30)
-    assert (r.bbox_chip_y1, r.bbox_chip_x1) == (30, 40)
-    # original at grid (1, 0) -> chip NW px = (256, 0); + bbox (20, 30) -> (276, 30)
-    # World x = 500000 + 30*10 = 500300
-    # World y = 4500000 - 276*10 = 4497240
-    assert r.world_origin_x == 500300.0
-    assert r.world_origin_y == 4497240.0
-    # 10 runs of length 10 (one per row of the 10x10 square).
-    assert r.rle_mask.shape == (2, 10)
-    assert (r.rle_mask[1] == 10).all()
-    print("  encode_patches (single component) — OK")
+    assert isinstance(r, ChipPredictionRecord)
+    # Identity 6-tuple
+    assert r.tile_id == "T29TPG"
+    assert r.block_row == 2
+    assert r.block_col == 3
+    assert r.chip_kind == "original"
+    assert r.grid_row == 1
+    assert r.grid_col == 0
+    # Counts
+    assert r.n_pixels_by_class == {1: 100}
+    assert set(r.masks_by_class.keys()) == {1}
+    # Chip NW offset: original at (1, 0) -> (256, 0)
+    assert r.chip_nw_px_y == 256
+    assert r.chip_nw_px_x == 0
+    print("  encode (single class -> one record) — OK")
 
 
-def test_encode_patches_per_class_separation():
-    """Class-1 square and class-2 square in the same chip -> 2 records,
-    each with its own label. Even if they touch, they don't merge."""
+def test_encode_emits_one_record_with_multiple_classes():
+    """Both Cuts and Fires in the same chip -> one record with two
+    per-class masks."""
     lm = _empty_label_map()
-    lm[10:15, 10:15] = 1   # 5x5 class-1
-    lm[10:15, 15:20] = 2   # 5x5 class-2 touching it on the right
-    records = list(encode_patches(
+    lm[10:15, 10:15] = 1
+    lm[10:15, 15:20] = 2
+    records = list(encode_chip_predictions(
         lm,
         tile_id="T29TPG", block_row=0, block_col=0,
         chip_kind="original", grid_row=0, grid_col=0,
         date_ordinal=738887, date_iso="2024-01-01",
-        class_names=CLASS_NAMES,
-        block_world_origin_x=0.0, block_world_origin_y=0.0, pixel_res=10.0,
-    ))
-    assert len(records) == 2
-    labels = sorted(r.label for r in records)
-    assert labels == [1, 2]
-    for r in records:
-        assert r.n_pixels == 25
-    print("  encode_patches (per-class separation) — OK")
-
-
-def test_encode_patches_8_connectivity():
-    """Two pixels touching at a corner should be ONE component under
-    8-connectivity (4-conn would split them)."""
-    lm = _empty_label_map()
-    lm[10, 10] = 1
-    lm[11, 11] = 1   # corner-adjacent to (10, 10)
-    # Need 2 more pixels to clear MIN_COMPONENT_PIXELS=4 -> add the other corners.
-    lm[10, 11] = 1
-    lm[11, 10] = 1
-    records = list(encode_patches(
-        lm,
-        tile_id="T", block_row=0, block_col=0,
-        chip_kind="original", grid_row=0, grid_col=0,
-        date_ordinal=738887, date_iso="2024-01-01",
-        class_names=CLASS_NAMES,
-        block_world_origin_x=0.0, block_world_origin_y=0.0, pixel_res=10.0,
-    ))
-    # With the 2x2 block they form one component regardless of connectivity,
-    # but the test still verifies 8-conn merges the corner-touching pair.
-    assert len(records) == 1
-    assert records[0].n_pixels == 4
-    print("  encode_patches (8-connectivity) — OK")
-
-
-def test_encode_patches_min_component_pixels():
-    """Components below min_component_pixels are dropped."""
-    lm = _empty_label_map()
-    lm[5, 5] = 1                  # 1-pixel speckle
-    lm[10:13, 10:13] = 1          # 9-pixel meaningful blob
-    records_default = list(encode_patches(
-        lm,
-        tile_id="T", block_row=0, block_col=0,
-        chip_kind="original", grid_row=0, grid_col=0,
-        date_ordinal=738887, date_iso="2024-01-01",
-        class_names=CLASS_NAMES,
-        block_world_origin_x=0.0, block_world_origin_y=0.0, pixel_res=10.0,
-    ))
-    # MIN_COMPONENT_PIXELS=4 by default -> only the 9-pixel blob survives.
-    assert len(records_default) == 1
-    assert records_default[0].n_pixels == 9
-
-    # min=1 keeps both.
-    records_all = list(encode_patches(
-        lm,
-        tile_id="T", block_row=0, block_col=0,
-        chip_kind="original", grid_row=0, grid_col=0,
-        date_ordinal=738887, date_iso="2024-01-01",
-        class_names=CLASS_NAMES,
-        block_world_origin_x=0.0, block_world_origin_y=0.0, pixel_res=10.0,
-        min_component_pixels=1,
-    ))
-    assert len(records_all) == 2
-    print("  encode_patches (min_component_pixels filter) — OK")
-
-
-def test_encode_patches_rle_roundtrip():
-    """An RLE-encoded mask should decode back to the exact input boolean mask."""
-    lm = _empty_label_map()
-    # Cross shape with one component
-    lm[100:120, 110:115] = 1
-    lm[110:115, 100:120] = 1
-    records = list(encode_patches(
-        lm,
-        tile_id="T", block_row=0, block_col=0,
-        chip_kind="original", grid_row=0, grid_col=0,
-        date_ordinal=738887, date_iso="2024-01-01",
-        class_names=CLASS_NAMES,
         block_world_origin_x=0.0, block_world_origin_y=0.0, pixel_res=10.0,
     ))
     assert len(records) == 1
     r = records[0]
-    # Reconstruct the boolean mask from RLE and compare to (lm == 1).
+    assert r.n_pixels_by_class == {1: 25, 2: 25}
+    assert set(r.masks_by_class.keys()) == {1, 2}
+    print("  encode (two classes -> one record, two masks) — OK")
+
+
+def test_encode_no_size_filter():
+    """No minimum-component filter: a 1-pixel speckle still produces a record
+    (predict.py's `postprocess_prediction` is the only filter upstream)."""
+    lm = _empty_label_map()
+    lm[5, 5] = 1   # single-pixel speckle
+    records = list(encode_chip_predictions(
+        lm,
+        tile_id="T", block_row=0, block_col=0,
+        chip_kind="original", grid_row=0, grid_col=0,
+        date_ordinal=738887, date_iso="2024-01-01",
+        block_world_origin_x=0.0, block_world_origin_y=0.0, pixel_res=10.0,
+    ))
+    assert len(records) == 1
+    assert records[0].n_pixels_by_class == {1: 1}
+    print("  encode (no size filter -> emits 1-pixel speckle) — OK")
+
+
+def test_encode_rle_roundtrip():
+    """RLE encoded mask decodes back to the exact input boolean mask."""
+    lm = _empty_label_map()
+    # Cross shape
+    lm[100:120, 110:115] = 1
+    lm[110:115, 100:120] = 1
+    records = list(encode_chip_predictions(
+        lm,
+        tile_id="T", block_row=0, block_col=0,
+        chip_kind="original", grid_row=0, grid_col=0,
+        date_ordinal=738887, date_iso="2024-01-01",
+        block_world_origin_x=0.0, block_world_origin_y=0.0, pixel_res=10.0,
+    ))
+    assert len(records) == 1
+    r = records[0]
+    rle = r.masks_by_class[1]
     reconstructed = np.zeros(CHIP_H * CHIP_W, dtype=bool)
-    for start, length in zip(r.rle_mask[0], r.rle_mask[1]):
+    for start, length in zip(rle[0], rle[1]):
         reconstructed[int(start):int(start) + int(length)] = True
     reconstructed = reconstructed.reshape(CHIP_H, CHIP_W)
     assert np.array_equal(reconstructed, lm == 1)
-    print("  encode_patches (RLE roundtrip) — OK")
+    print("  encode (RLE roundtrip) — OK")
+
+
+def test_encode_to_dict_flattens_per_class():
+    """to_dict() should expand the per-class dicts into separate columns."""
+    lm = _empty_label_map()
+    lm[0:5, 0:5] = 1
+    lm[10:13, 10:13] = 2
+    [record] = list(encode_chip_predictions(
+        lm,
+        tile_id="T", block_row=0, block_col=0,
+        chip_kind="original", grid_row=0, grid_col=0,
+        date_ordinal=738887, date_iso="2024-01-01",
+        block_world_origin_x=0.0, block_world_origin_y=0.0, pixel_res=10.0,
+    ))
+    d = record.to_dict()
+    # The per-class dicts should be gone, replaced by per-class columns.
+    assert "n_pixels_by_class" not in d
+    assert "masks_by_class" not in d
+    assert d["n_pixels_cls_1"] == 25
+    assert d["n_pixels_cls_2"] == 9
+    assert isinstance(d["rle_cls_1"], list)
+    assert isinstance(d["rle_cls_2"], list)
+    # Lengths are 2 * n_runs (flat [start, length] pairs).
+    assert len(d["rle_cls_1"]) % 2 == 0
+    print("  encode.to_dict (per-class flattening) — OK")
+
+
+def test_encode_decode_roundtrip_via_to_dict():
+    """End-to-end: encode_chip_predictions -> to_dict -> _decode_rle should
+    reproduce the original per-class boolean masks."""
+    lm = _empty_label_map()
+    lm[50:60, 100:110] = 1
+    lm[200:210, 50:60] = 2
+    [record] = list(encode_chip_predictions(
+        lm,
+        tile_id="T", block_row=0, block_col=0,
+        chip_kind="original", grid_row=0, grid_col=0,
+        date_ordinal=738887, date_iso="2024-01-01",
+        block_world_origin_x=0.0, block_world_origin_y=0.0, pixel_res=10.0,
+    ))
+    d = record.to_dict()
+    cls1_mask = _decode_rle(d["rle_cls_1"])
+    cls2_mask = _decode_rle(d["rle_cls_2"])
+    assert np.array_equal(cls1_mask, lm == 1)
+    assert np.array_equal(cls2_mask, lm == 2)
+    print("  encode (to_dict -> _decode_rle roundtrip) — OK")
 
 
 # ============================================================================
 # shard.py
 # ============================================================================
 
-def _make_record(**kwargs) -> PatchRecord:
-    """Minimal valid PatchRecord with hand-picked defaults."""
+def _make_record(**kwargs) -> ChipPredictionRecord:
+    """Minimal valid ChipPredictionRecord with hand-picked defaults."""
     defaults = dict(
         tile_id="T29TPG", block_row=0, block_col=0,
         chip_kind="original", grid_row=0, grid_col=0,
         date_ordinal=738887, date_iso="2024-01-01",
-        label=1, label_name="Cuts", n_pixels=10,
-        bbox_chip_y0=0, bbox_chip_x0=0, bbox_chip_y1=5, bbox_chip_x1=5,
-        world_origin_x=500000.0, world_origin_y=4500000.0,
-        rle_mask=np.array([[0, 256], [5, 5]], dtype=np.uint16),
+        block_world_origin_x=500000.0, block_world_origin_y=4500000.0,
+        chip_nw_px_y=0, chip_nw_px_x=0, pixel_res=10.0,
+        n_pixels_by_class={1: 10},
+        masks_by_class={1: np.array([[0, 256], [5, 5]], dtype=np.uint16)},
     )
     defaults.update(kwargs)
-    return PatchRecord(**defaults)
+    return ChipPredictionRecord(**defaults)
 
 
 def test_shard_path_for_block():
@@ -319,44 +281,50 @@ def test_shard_path_for_block():
 
 
 def test_write_task_shard_roundtrip():
-    """Records written by write_task_shard should round-trip through
-    read_shards with the right schema and values."""
     with tempfile.TemporaryDirectory() as tmpd:
         records = [
-            _make_record(label=1, label_name="Cuts", n_pixels=10),
-            _make_record(label=2, label_name="Fires", n_pixels=42,
-                         rle_mask=np.array([[100, 500], [3, 7]], dtype=np.uint16)),
+            _make_record(),
+            _make_record(
+                chip_kind="h_shift", grid_row=1, grid_col=2,
+                n_pixels_by_class={2: 42},
+                masks_by_class={2: np.array([[100, 500], [3, 7]], dtype=np.uint16)},
+            ),
         ]
         path = write_task_shard(records, tmpd, "T29TPG", 0, 0)
         assert os.path.exists(path)
 
         df = read_shards(tmpd)
         assert len(df) == 2
-        assert set(df["label"].tolist()) == {1, 2}
-        # rle_mask round-tripped as a flat list[uint16]
-        for _, row in df.iterrows():
-            rle_list = row["rle_mask"]
-            # We flattened as [start0, length0, start1, length1, ...]
-            assert len(rle_list) % 2 == 0
+        # Both records share the base columns; per-class columns are present
+        # for the classes that appeared.
+        for col in (
+            "tile_id", "block_row", "block_col",
+            "chip_kind", "grid_row", "grid_col",
+            "date_ordinal", "date_iso",
+            "block_world_origin_x", "block_world_origin_y",
+            "chip_nw_px_y", "chip_nw_px_x", "pixel_res",
+        ):
+            assert col in df.columns, col
+        # One row had cls_1, the other had cls_2 — both columns should exist
+        # with NaN where the row didn't have that class.
+        assert "n_pixels_cls_1" in df.columns
+        assert "n_pixels_cls_2" in df.columns
     print("  write_task_shard + read_shards roundtrip — OK")
 
 
 def test_write_empty_task_shard():
-    """Empty record iterable should still produce a valid Parquet file."""
     with tempfile.TemporaryDirectory() as tmpd:
         path = write_task_shard([], tmpd, "T29TPG", 0, 0)
         assert os.path.exists(path)
         df = pd.read_parquet(path)
         assert len(df) == 0
-        # Column set should still include the dataclass fields.
-        expected_cols = set(PatchRecord.__dataclass_fields__.keys())
-        assert expected_cols.issubset(set(df.columns)), \
-            f"missing cols: {expected_cols - set(df.columns)}"
+        # The fixed base column set should still be there.
+        for col in ("tile_id", "block_row", "block_col"):
+            assert col in df.columns
     print("  write_task_shard (empty records) — OK")
 
 
 def test_read_shards_tile_filter():
-    """read_shards with tile_id filter should only read matching files."""
     with tempfile.TemporaryDirectory() as tmpd:
         write_task_shard([_make_record(tile_id="T29TPG")], tmpd, "T29TPG", 0, 0)
         write_task_shard([_make_record(tile_id="T29SMC")], tmpd, "T29SMC", 0, 0)
@@ -378,15 +346,14 @@ def main():
     test_mask_to_rle_empty()
     test_mask_to_rle_single_pixel()
     test_mask_to_rle_horizontal_run()
-    test_mask_to_rle_two_rows()
     test_chip_nw_pixel_offset_all_kinds()
-    test_bbox_world_origin_math()
-    test_encode_patches_yields_nothing_for_empty()
-    test_encode_patches_single_component()
-    test_encode_patches_per_class_separation()
-    test_encode_patches_8_connectivity()
-    test_encode_patches_min_component_pixels()
-    test_encode_patches_rle_roundtrip()
+    test_encode_yields_nothing_for_empty()
+    test_encode_emits_one_record_for_one_class()
+    test_encode_emits_one_record_with_multiple_classes()
+    test_encode_no_size_filter()
+    test_encode_rle_roundtrip()
+    test_encode_to_dict_flattens_per_class()
+    test_encode_decode_roundtrip_via_to_dict()
     test_shard_path_for_block()
     test_write_task_shard_roundtrip()
     test_write_empty_task_shard()
