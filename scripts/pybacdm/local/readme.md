@@ -1,1 +1,0 @@
-* Execution on local PC
