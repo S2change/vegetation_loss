@@ -12,11 +12,14 @@ Then in both modes:
   3. create_before_after_composites (composite_shift_chips.composite)
   4. generate_shifted_chips (composite_shift_chips.shift_chips)
      → predict_before_after_chips (bacdm.predict)
-  5. encode_chip_predictions    (postprocess.chip_records)
-  6. write_task_shard            (postprocess.shard)
+  5a. (optional) encode_chip_predictions  (postprocess.chip_records) — debug
+  5b. VoteAccumulator.add per chip         (postprocess.vote)
+  6.  VoteAccumulator.finalize + write_voted_block (postprocess.voted_output)
+      and/or write_task_shard               (postprocess.shard)
 
-Prints stats throughout. Step 6 writes one Parquet shard per (tile, block);
-controlled by SAVE_OUTPUT in the configuration section.
+Prints stats throughout. Step 6 writes one .npz of voted label maps per
+(tile, block) by default; the per-chip Parquet path is gated behind
+SAVE_CHIP_RECORDS for debugging.
 
 Assumes the bacdm model code lives under ./prediction_model/bacdm/ (see
 sys.path insert below) and that composite_shift_chips/, input_setup/,
@@ -48,7 +51,15 @@ from composite_shift_chips import (
     generate_shifted_chips,
     generate_shifted_chips_bundled,
 )
-from postprocess import encode_chip_predictions, write_task_shard, read_shards
+from postprocess import (
+    encode_chip_predictions,
+    chip_nw_pixel_offset,
+    write_task_shard,
+    read_shards,
+    VoteAccumulator,
+    write_voted_block,
+    read_voted_block,
+)
 from predict import load_model, predict_before_after_chips
 
 
@@ -103,11 +114,25 @@ BATCH_SIZE = 8
 #                                              date; caller slices into batches)
 USE_BUNDLED = False
 
-# Step 5 + 6: emit one ChipPredictionRecord per non-empty chip and write a
-# per-(tile, block) Parquet shard. Set False to skip patch encoding and
-# shard writing entirely (useful for pure inference timing).
+# Step 5b + 6 (default): accumulate votes per chip and write one .npz of
+# voted label maps per (tile, block). Set False to skip voting + .npz
+# writing entirely (useful for pure inference timing).
 SAVE_OUTPUT = True
 OUTPUT_DIR  = "/users1/cpca070342024/shared/predict_outputs"
+
+# Non-background classes tracked by the voter. For the current 3-class
+# BACDM model (0=Background, 1=Cuts, 2=Fires) this is (1, 2).
+VOTE_CLASSES = (1, 2)
+
+# Vote threshold: at each LIVE pixel, keep the winning non-bg class only
+# if it received at least this many votes (out of 4 per pixel under the
+# current 4-sided-ghost geometry).
+VOTE_THRESHOLD = 2
+
+# Step 5 (debug): emit one ChipPredictionRecord per non-empty chip and
+# write a per-(tile, block) Parquet shard. Held behind a flag — useful
+# for debugging the per-chip predictions but not the production output.
+SAVE_CHIP_RECORDS = False
 
 # Tile ID used in the shard filename and ChipPredictionRecord.tile_id. For
 # real data this should match the tile the HDF5 covers (e.g. "T29TPG"). For
@@ -155,6 +180,9 @@ def main():
     if SAVE_OUTPUT:
         print(f"Output dir:     {OUTPUT_DIR}")
         print(f"Tile ID:        {TILE_ID if USE_REAL_DATA else DUMMY_TILE_ID}")
+        print(f"Vote classes:   {VOTE_CLASSES}")
+        print(f"Vote threshold: {VOTE_THRESHOLD}")
+    print(f"Save chip recs: {SAVE_CHIP_RECORDS}")
     print(f"\n[RSS] After imports:                   {rss_mb():7.1f} MB")
 
     # ── Step 1: build / read chip-block ───────────────────────────────────
@@ -222,35 +250,52 @@ def main():
     rss_before_infer = rss_mb()
     t_inference_total = 0.0
     t_encode_total = 0.0
+    t_vote_total = 0.0
     n_pairs = 0
     class_counts: Counter[int] = Counter()
     kind_counts: Counter[str] = Counter()
-    chip_records: list = []   # accumulator for step 6 (one record per chip
-                              # whose label map has any non-background pixel)
+    chip_records: list = []   # accumulator for step 5a (per-chip Parquet,
+                              # gated behind SAVE_CHIP_RECORDS)
 
-    def encode_one(label_map: np.ndarray, chip_kind: str,
-                   grid_position: tuple[int, int], date_ordinal: int):
-        """Run step 5 on one chip's label map; append ChipPredictionRecords
-        to the shared buffer; return wall time."""
-        if not SAVE_OUTPUT:
-            return 0.0
-        t0 = time.perf_counter()
-        records = list(encode_chip_predictions(
-            label_map,
-            tile_id=tile_id,
-            block_row=position.block_row,
-            block_col=position.block_col,
-            chip_kind=chip_kind,
-            grid_row=grid_position[0],
-            grid_col=grid_position[1],
-            date_ordinal=date_ordinal,
-            date_iso=date.fromordinal(date_ordinal).isoformat(),
-            block_world_origin_x=position.world_origin_x,
-            block_world_origin_y=position.world_origin_y,
-            pixel_res=position.pixel_res,
-        ))
-        chip_records.extend(records)
-        return time.perf_counter() - t0
+    # One VoteAccumulator per valid target date, keyed by ordinal date.
+    # Only allocated if SAVE_OUTPUT — voting drives the .npz output.
+    voters: dict[int, VoteAccumulator] = {}
+    if SAVE_OUTPUT:
+        for d in target_dates[valid_dates_mask]:
+            voters[int(d)] = VoteAccumulator(classes=VOTE_CLASSES)
+
+    def process_one(label_map: np.ndarray, chip_kind: str,
+                    grid_position: tuple[int, int], date_ordinal: int):
+        """Drop one chip's prediction into the voter (always, if SAVE_OUTPUT)
+        and optionally encode it as a ChipPredictionRecord (if
+        SAVE_CHIP_RECORDS). Updates the timing accumulators in place."""
+        nonlocal t_vote_total, t_encode_total
+        gr, gc = grid_position
+
+        if SAVE_OUTPUT:
+            nw_y, nw_x = chip_nw_pixel_offset(chip_kind, gr, gc)
+            t0 = time.perf_counter()
+            voters[date_ordinal].add(label_map, nw_y, nw_x)
+            t_vote_total += time.perf_counter() - t0
+
+        if SAVE_CHIP_RECORDS:
+            t0 = time.perf_counter()
+            records = list(encode_chip_predictions(
+                label_map,
+                tile_id=tile_id,
+                block_row=position.block_row,
+                block_col=position.block_col,
+                chip_kind=chip_kind,
+                grid_row=gr,
+                grid_col=gc,
+                date_ordinal=date_ordinal,
+                date_iso=date.fromordinal(date_ordinal).isoformat(),
+                block_world_origin_x=position.world_origin_x,
+                block_world_origin_y=position.world_origin_y,
+                pixel_res=position.pixel_res,
+            ))
+            chip_records.extend(records)
+            t_encode_total += time.perf_counter() - t0
 
     if not USE_BUNDLED:
         # Per-pair path: yield one ChipPair at a time, stack BATCH_SIZE of
@@ -261,7 +306,7 @@ def main():
         batch: list = []
 
         def flush(batch: list):
-            nonlocal t_inference_total, t_encode_total, n_pairs
+            nonlocal t_inference_total, n_pairs
             if not batch:
                 return
             # Predictor expects (B, H, W, C) — our ChipPair holds (C, H, W).
@@ -276,7 +321,7 @@ def main():
                 uniq, cnts = np.unique(label, return_counts=True)
                 for u, c in zip(uniq, cnts):
                     class_counts[int(u)] += int(c)
-                t_encode_total += encode_one(
+                process_one(
                     label, p.chip_kind, p.grid_position, p.date_ordinal,
                 )
             batch.clear()
@@ -310,7 +355,7 @@ def main():
                     uniq, cnts = np.unique(label, return_counts=True)
                     for u, c in zip(uniq, cnts):
                         class_counts[int(u)] += int(c)
-                    t_encode_total += encode_one(
+                    process_one(
                         label, kind, gpos, bundle.date_ordinal,
                     )
 
@@ -332,15 +377,44 @@ def main():
         print(f"  class {cls}: {cnt:>12,} pixels  "
               f"({100 * cnt / total_pixels:5.2f}%)")
 
-    # ── Steps 5 + 6: chip-prediction encoding summary + shard write ───────
+    # ── Step 5b: voting summary ───────────────────────────────────────────
     if SAVE_OUTPUT:
-        print(f"\nStep 5: chip records emitted:          {len(chip_records):,} "
+        print(f"\nStep 5b: voting "
+              f"(threshold={VOTE_THRESHOLD}, classes={VOTE_CLASSES})")
+        print(f"  Total vote time:   {t_vote_total:.2f} s "
+              f"({t_vote_total / max(n_pairs, 1) * 1000:.2f} ms/chip)")
+
+        # Per-date pre-threshold vote totals + post-threshold detection
+        # counts. Useful for spotting dates where every pixel was bg.
+        ordered_dates = sorted(voters)
+        voted_labels = np.zeros(
+            (len(ordered_dates), voters[ordered_dates[0]].live_h,
+             voters[ordered_dates[0]].live_w),
+            dtype=np.uint8,
+        )
+        t_finalize = 0.0
+        for i, d in enumerate(ordered_dates):
+            acc = voters[d]
+            n_votes = acc.n_votes_by_class()
+            t0 = time.perf_counter()
+            voted = acc.finalize(threshold=VOTE_THRESHOLD)
+            t_finalize += time.perf_counter() - t0
+            voted_labels[i] = voted
+            uniq, cnts = np.unique(voted, return_counts=True)
+            post = {int(u): int(c) for u, c in zip(uniq, cnts) if u != 0}
+            iso = date.fromordinal(d).isoformat()
+            print(f"  {iso}: pre-threshold votes={n_votes}  "
+                  f"post-threshold detections={post}")
+        print(f"  Total finalize time: {t_finalize:.2f} s")
+
+    # ── Step 5a (debug): chip-prediction encoding summary ─────────────────
+    if SAVE_CHIP_RECORDS:
+        print(f"\nStep 5a: chip records emitted:         {len(chip_records):,} "
               f"(of {n_pairs} chip predictions; skipped chips were "
               f"entirely background)")
         print(f"  Total encode time: {t_encode_total:.2f} s "
               f"({t_encode_total / max(n_pairs, 1) * 1000:.1f} ms/chip)")
         if chip_records:
-            # Aggregate per-class pixel totals across all records.
             per_class_totals: Counter[int] = Counter()
             for r in chip_records:
                 for cls, n in r.n_pixels_by_class.items():
@@ -350,7 +424,47 @@ def main():
         else:
             print("  (no chip had any non-background pixels)")
 
-        print(f"\nStep 6: writing shard...")
+    # ── Step 6: write voted .npz and (optionally) per-chip Parquet ────────
+    if SAVE_OUTPUT:
+        print(f"\nStep 6: writing voted .npz...")
+        t0 = time.perf_counter()
+        npz_path = write_voted_block(
+            OUTPUT_DIR, tile_id,
+            position.block_row, position.block_col,
+            labels=voted_labels,
+            target_dates=np.asarray(ordered_dates, dtype=np.int64),
+            classes=tuple(int(c) for c in VOTE_CLASSES),
+            world_origin_x=position.world_origin_x,
+            world_origin_y=position.world_origin_y,
+            pixel_res=position.pixel_res,
+            threshold=VOTE_THRESHOLD,
+        )
+        write_s = time.perf_counter() - t0
+        npz_bytes = os.path.getsize(npz_path)
+        print(f"  Wrote {npz_path} in {write_s:.2f} s  "
+              f"({npz_bytes / 1024:.1f} KB)")
+
+        # Read-back sanity check on the .npz.
+        t0 = time.perf_counter()
+        d = read_voted_block(npz_path)
+        read_s = time.perf_counter() - t0
+        print(f"\n.npz read-back ({read_s:.2f} s):")
+        print(f"  labels:       shape={d['labels'].shape}  "
+              f"dtype={d['labels'].dtype}")
+        print(f"  target_dates: {d['target_dates'].tolist()}")
+        print(f"  classes:      {d['classes'].tolist()}")
+        print(f"  block:        ({int(d['block_row'])}, {int(d['block_col'])})  "
+              f"origin=({float(d['world_origin_x'])}, "
+              f"{float(d['world_origin_y'])})  "
+              f"pixel_res={float(d['pixel_res'])}")
+        print(f"  threshold:    {int(d['threshold'])}")
+        if np.array_equal(d["labels"], voted_labels):
+            print("  Labels match in-memory voted_labels — OK")
+        else:
+            print("  WARNING: labels mismatch on read-back")
+
+    if SAVE_CHIP_RECORDS:
+        print(f"\nStep 6 (debug): writing per-chip Parquet shard...")
         t0 = time.perf_counter()
         shard_path = write_task_shard(
             chip_records, OUTPUT_DIR, tile_id,
@@ -361,15 +475,12 @@ def main():
         print(f"  Wrote {shard_path} in {write_s:.2f} s  "
               f"({shard_bytes / 1024:.1f} KB)")
 
-        # Read-back sanity check: re-open the shard with read_shards and
-        # verify row count + show a preview of the first few rows.
         t0 = time.perf_counter()
         df = read_shards(OUTPUT_DIR, tile_id=tile_id)
         read_s = time.perf_counter() - t0
-        # Filter to this block in case OUTPUT_DIR holds other blocks' shards.
         df_block = df[(df["block_row"] == position.block_row) &
                       (df["block_col"] == position.block_col)]
-        print(f"\nShard read-back: {len(df_block)} rows "
+        print(f"  Shard read-back: {len(df_block)} rows "
               f"(read {len(df)} rows for tile {tile_id} in {read_s:.2f} s)")
         if len(df_block) == len(chip_records):
             print("  Row count matches in-memory ChipPredictionRecord count — OK")
@@ -377,7 +488,6 @@ def main():
             print(f"  WARNING: row count mismatch (shard={len(df_block)}, "
                   f"in-memory={len(chip_records)})")
         if len(df_block) > 0:
-            # Per-class columns are dynamic — pick whichever ones exist.
             base_cols = [
                 "chip_kind", "grid_row", "grid_col", "date_iso",
                 "chip_nw_px_y", "chip_nw_px_x",
