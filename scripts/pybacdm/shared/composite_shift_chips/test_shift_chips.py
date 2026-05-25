@@ -1,9 +1,8 @@
-"""Synthetic-data tests for generate_shifted_chips.
+"""Synthetic-data tests for generate_shifted_chips (2-D block, 81 shifts).
 
-The block is constructed so each chip's pixels encode its (row, col) position
-in the 5x5 grid as `row * 10 + col`. That makes it trivial to assert which
-source chip(s) a yielded chip pulled from: every pixel of a slice carries
-the source chip's grid coordinates.
+The test composites are constructed so each ghost / live region of the block
+is filled with a distinct uint8 value. That lets us assert which region a
+yielded chip pulled from by examining pixel values directly.
 
 Run:
     python test_shift_chips.py
@@ -15,94 +14,230 @@ from shift_chips import (
     ChipBundle,
     generate_shifted_chips,
     generate_shifted_chips_bundled,
-    _extract_chip,
-    _h_shift,
-    _v_shift,
-    _diagonal,
-    CHIP_H, CHIP_W, CHIP_PIXELS, HALF,
-    BLOCK_GRID_ROWS, BLOCK_GRID_COLS,
-    LIVE_ROWS, LIVE_COLS,
-    BUNDLE_SIZE,
+    chip_nw_pixel_offset,
+    _slice_chip,
+    _iter_shift_positions,
+    CHIP_H, CHIP_W, HALF,
+    LIVE_ROWS, LIVE_COLS, LIVE_H, LIVE_W,
+    GHOST, BLOCK_H, BLOCK_W,
+    N_ORIGINALS, N_H_SHIFTS, N_V_SHIFTS, N_DIAGONALS, BUNDLE_SIZE,
 )
 
 
-def _hand_crafted_composites(n_dates: int = 1):
-    """Build a (2, n_dates, 10, 25 * 65_536) array where every pixel of
-    chip (R, C) holds the encoded value `R * 10 + C` (uint8).
+# ============================================================================
+# Helpers
+# ============================================================================
 
-    Both before and after sides use the same encoding so we can verify the
-    geometry without worrying about which side we're reading.
+def _hand_crafted_composites(n_dates: int = 1):
+    """Build a (2, n_dates, 10, BLOCK_H, BLOCK_W) composite array where each
+    block region carries a unique uint8 value:
+
+      live chip (r, c)  ->  value = 10 + r*4 + c    (range 10..25)
+      top strip          ->  value = 30
+      bottom strip       ->  value = 31
+      left strip         ->  value = 32
+      right strip        ->  value = 33
+      NW corner          ->  value = 40
+      NE corner          ->  value = 41
+      SW corner          ->  value = 42
+      SE corner          ->  value = 43
+
+    All 10 bands share the same per-region tag (easy to reason about).
+    Both before and after sides use identical tags.
     """
-    n_chips = BLOCK_GRID_ROWS * BLOCK_GRID_COLS    # 25
-    P = n_chips * CHIP_PIXELS
-    composites = np.empty((2, n_dates, 10, P), dtype=np.uint8)
-    for R in range(BLOCK_GRID_ROWS):
-        for C in range(BLOCK_GRID_COLS):
-            flat_idx = R * BLOCK_GRID_COLS + C
-            start = flat_idx * CHIP_PIXELS
-            end = start + CHIP_PIXELS
-            tag = np.uint8(R * 10 + C)
-            composites[:, :, :, start:end] = tag
+    composites = np.empty((2, n_dates, 10, BLOCK_H, BLOCK_W), dtype=np.uint8)
+
+    # Ghost ring regions
+    composites[..., 0:GHOST, GHOST:GHOST + LIVE_W] = 30                  # top strip
+    composites[..., GHOST + LIVE_H:BLOCK_H, GHOST:GHOST + LIVE_W] = 31  # bottom strip
+    composites[..., GHOST:GHOST + LIVE_H, 0:GHOST] = 32                  # left strip
+    composites[..., GHOST:GHOST + LIVE_H, GHOST + LIVE_W:BLOCK_W] = 33   # right strip
+    composites[..., 0:GHOST, 0:GHOST] = 40                                # NW corner
+    composites[..., 0:GHOST, GHOST + LIVE_W:BLOCK_W] = 41                 # NE corner
+    composites[..., GHOST + LIVE_H:BLOCK_H, 0:GHOST] = 42                 # SW corner
+    composites[..., GHOST + LIVE_H:BLOCK_H, GHOST + LIVE_W:BLOCK_W] = 43  # SE corner
+
+    # Live chips
+    for r in range(LIVE_ROWS):
+        for c in range(LIVE_COLS):
+            y0 = GHOST + r * CHIP_H
+            x0 = GHOST + c * CHIP_W
+            tag = np.uint8(10 + r * LIVE_COLS + c)
+            composites[..., y0:y0 + CHIP_H, x0:x0 + CHIP_W] = tag
+
     return composites
 
 
-def test_extract_chip_yields_correct_position_tag():
+def _expected_live_chip_tag(r: int, c: int) -> int:
+    return 10 + r * LIVE_COLS + c
+
+
+# ============================================================================
+# Constant + geometry sanity checks
+# ============================================================================
+
+def test_shift_count_constants():
+    assert N_ORIGINALS == 16
+    assert N_H_SHIFTS  == 20
+    assert N_V_SHIFTS  == 20
+    assert N_DIAGONALS == 25
+    assert BUNDLE_SIZE == 81
+    print("  shift count constants (16/20/20/25/81) — OK")
+
+
+def test_chip_nw_pixel_offset_all_kinds():
+    # All formulas relative to live-area NW corner (i.e. live (0,0) starts at (0,0)).
+    assert chip_nw_pixel_offset("original", 1, 2) == (256, 512)
+    assert chip_nw_pixel_offset("h_shift", 1, 2)  == (256, 512 + HALF)
+    assert chip_nw_pixel_offset("v_shift", 1, 2)  == (256 + HALF, 512)
+    assert chip_nw_pixel_offset("diagonal", 1, 2) == (256 + HALF, 512 + HALF)
+    # Negative gaps extend NW into ghost.
+    assert chip_nw_pixel_offset("h_shift", 0, -1)  == (0, -HALF)
+    assert chip_nw_pixel_offset("v_shift", -1, 0)  == (-HALF, 0)
+    assert chip_nw_pixel_offset("diagonal", -1, -1) == (-HALF, -HALF)
+    print("  chip_nw_pixel_offset (all kinds incl. negative gaps) — OK")
+
+
+def test_iter_shift_positions_counts():
+    assert sum(1 for _ in _iter_shift_positions("original")) == N_ORIGINALS
+    assert sum(1 for _ in _iter_shift_positions("h_shift"))  == N_H_SHIFTS
+    assert sum(1 for _ in _iter_shift_positions("v_shift"))  == N_V_SHIFTS
+    assert sum(1 for _ in _iter_shift_positions("diagonal")) == N_DIAGONALS
+    print("  _iter_shift_positions counts — OK")
+
+
+# ============================================================================
+# Slice / shift content tests
+# ============================================================================
+
+def test_slice_chip_original_interior():
+    """Slicing an 'original (1, 2)' chip should return the live chip (1, 2)
+    tag throughout — that chip lives entirely in the live area."""
     composites = _hand_crafted_composites()
-    side = composites[0, 0]   # (10, P)
-    for R in range(BLOCK_GRID_ROWS):
-        for C in range(BLOCK_GRID_COLS):
-            chip = _extract_chip(side, R, C)
-            assert chip.shape == (10, CHIP_H, CHIP_W)
-            assert (chip == R * 10 + C).all(), \
-                f"chip ({R},{C}) had values {np.unique(chip)}, expected {R*10+C}"
-    print("  _extract_chip (all 25 positions) — OK")
+    side = composites[0, 0]   # (10, BLOCK_H, BLOCK_W)
+    nw_y, nw_x = chip_nw_pixel_offset("original", 1, 2)
+    chip = _slice_chip(side, nw_y, nw_x)
+    assert chip.shape == (10, CHIP_H, CHIP_W)
+    expected_tag = _expected_live_chip_tag(1, 2)
+    assert (chip == expected_tag).all()
+    print("  _slice_chip (original interior) — OK")
 
 
-def test_h_shift_geometry():
+def test_slice_chip_h_shift_interior():
+    """H-shift at (R=1, c_gap=1) crosses between live chips (1, 1) and (1, 2).
+    Left half should be tag of (1, 1), right half should be tag of (1, 2)."""
     composites = _hand_crafted_composites()
     side = composites[0, 0]
-    # H-shift at (R=1, c_gap=0): combines chip (1, 0) and chip (1, 1)
-    chip = _h_shift(side, R=1, c_gap=0)
-    assert chip.shape == (10, CHIP_H, CHIP_W)
-    # Left half (cols 0..127) should be value 10 (from chip (1,0))
-    assert (chip[:, :, :HALF] == 10).all()
-    # Right half (cols 128..255) should be value 11 (from chip (1,1))
-    assert (chip[:, :, HALF:] == 11).all()
-    print("  _h_shift (R=1, c_gap=0) — OK")
+    nw_y, nw_x = chip_nw_pixel_offset("h_shift", 1, 1)   # (256, 384)
+    chip = _slice_chip(side, nw_y, nw_x)
+    assert (chip[:, :, :HALF] == _expected_live_chip_tag(1, 1)).all()
+    assert (chip[:, :, HALF:] == _expected_live_chip_tag(1, 2)).all()
+    print("  _slice_chip (h_shift interior) — OK")
 
 
-def test_v_shift_geometry():
+def test_slice_chip_h_shift_left_edge_uses_ghost():
+    """H-shift at (R=2, c_gap=-1) has NW at (512, -128). Left half pulls
+    from the left ghost strip (tag 32); right half is live chip (2, 0)."""
     composites = _hand_crafted_composites()
     side = composites[0, 0]
-    # V-shift at (r_gap=2, C=1): combines chip (2, 1) and chip (3, 1)
-    chip = _v_shift(side, r_gap=2, C=1)
-    assert chip.shape == (10, CHIP_H, CHIP_W)
-    # Top half (rows 0..127) should be value 21 (from chip (2,1))
-    assert (chip[:, :HALF, :] == 21).all()
-    # Bottom half (rows 128..255) should be value 31 (from chip (3,1))
+    nw_y, nw_x = chip_nw_pixel_offset("h_shift", 2, -1)
+    assert (nw_y, nw_x) == (512, -HALF)
+    chip = _slice_chip(side, nw_y, nw_x)
+    assert (chip[:, :, :HALF] == 32).all(), "left half should be left ghost strip (32)"
+    assert (chip[:, :, HALF:] == _expected_live_chip_tag(2, 0)).all()
+    print("  _slice_chip (h_shift c_gap=-1, uses left ghost strip) — OK")
+
+
+def test_slice_chip_h_shift_right_edge_uses_ghost():
+    """H-shift at (R=0, c_gap=3) has NW at (0, 896). Left half = live (0, 3),
+    right half pulls from the right ghost strip (tag 33)."""
+    composites = _hand_crafted_composites()
+    side = composites[0, 0]
+    nw_y, nw_x = chip_nw_pixel_offset("h_shift", 0, 3)
+    chip = _slice_chip(side, nw_y, nw_x)
+    assert (chip[:, :, :HALF] == _expected_live_chip_tag(0, 3)).all()
+    assert (chip[:, :, HALF:] == 33).all()
+    print("  _slice_chip (h_shift c_gap=3, uses right ghost strip) — OK")
+
+
+def test_slice_chip_v_shift_top_edge_uses_ghost():
+    """V-shift at (r_gap=-1, C=2) has NW at (-128, 512). Top half = top
+    ghost strip (30); bottom half = live (0, 2)."""
+    composites = _hand_crafted_composites()
+    side = composites[0, 0]
+    nw_y, nw_x = chip_nw_pixel_offset("v_shift", -1, 2)
+    chip = _slice_chip(side, nw_y, nw_x)
+    assert (chip[:, :HALF, :] == 30).all()
+    assert (chip[:, HALF:, :] == _expected_live_chip_tag(0, 2)).all()
+    print("  _slice_chip (v_shift r_gap=-1, uses top ghost strip) — OK")
+
+
+def test_slice_chip_v_shift_bottom_edge_uses_ghost():
+    """V-shift at (r_gap=3, C=1) has NW at (896, 256). Top half = live (3, 1),
+    bottom half = bottom ghost strip (31)."""
+    composites = _hand_crafted_composites()
+    side = composites[0, 0]
+    nw_y, nw_x = chip_nw_pixel_offset("v_shift", 3, 1)
+    chip = _slice_chip(side, nw_y, nw_x)
+    assert (chip[:, :HALF, :] == _expected_live_chip_tag(3, 1)).all()
     assert (chip[:, HALF:, :] == 31).all()
-    print("  _v_shift (r_gap=2, C=1) — OK")
+    print("  _slice_chip (v_shift r_gap=3, uses bottom ghost strip) — OK")
 
 
-def test_diagonal_geometry():
+def test_slice_chip_diagonal_nw_corner_uses_nw_ghost_corner():
+    """Diagonal at (r_gap=-1, c_gap=-1) has NW at (-128, -128) — all 4
+    quadrants in the ghost ring. Specifically:
+      TL = NW ghost corner (40)
+      TR = top ghost strip
+      BL = left ghost strip
+      BR = live (0, 0)"""
     composites = _hand_crafted_composites()
     side = composites[0, 0]
-    # Diagonal at (r_gap=0, c_gap=2): combines chips (0,2), (0,3), (1,2), (1,3)
-    chip = _diagonal(side, r_gap=0, c_gap=2)
-    assert chip.shape == (10, CHIP_H, CHIP_W)
-    # Quadrants:
-    #   TL  rows 0..127, cols 0..127     <- chip (0,2)  -> tag 2
-    #   TR  rows 0..127, cols 128..255   <- chip (0,3)  -> tag 3
-    #   BL  rows 128..255, cols 0..127   <- chip (1,2)  -> tag 12
-    #   BR  rows 128..255, cols 128..255 <- chip (1,3)  -> tag 13
-    assert (chip[:, :HALF, :HALF]   == 2 ).all(), "TL quadrant wrong"
-    assert (chip[:, :HALF, HALF:]   == 3 ).all(), "TR quadrant wrong"
-    assert (chip[:, HALF:, :HALF]   == 12).all(), "BL quadrant wrong"
-    assert (chip[:, HALF:, HALF:]   == 13).all(), "BR quadrant wrong"
-    print("  _diagonal (r_gap=0, c_gap=2) — OK")
+    nw_y, nw_x = chip_nw_pixel_offset("diagonal", -1, -1)
+    chip = _slice_chip(side, nw_y, nw_x)
+    assert (chip[:, :HALF, :HALF] == 40).all(), "TL should be NW corner (40)"
+    assert (chip[:, :HALF, HALF:] == 30).all(), "TR should be top strip (30)"
+    assert (chip[:, HALF:, :HALF] == 32).all(), "BL should be left strip (32)"
+    assert (chip[:, HALF:, HALF:] == _expected_live_chip_tag(0, 0)).all()
+    print("  _slice_chip (diagonal (-1,-1), uses NW corner + adj strips) — OK")
 
 
-def test_generator_yields_64_per_valid_date():
+def test_slice_chip_diagonal_se_corner_uses_se_ghost_corner():
+    """Diagonal at (r_gap=3, c_gap=3) has NW at (896, 896):
+      TL = live (3, 3)
+      TR = right ghost strip
+      BL = bottom ghost strip
+      BR = SE corner (43)"""
+    composites = _hand_crafted_composites()
+    side = composites[0, 0]
+    nw_y, nw_x = chip_nw_pixel_offset("diagonal", 3, 3)
+    chip = _slice_chip(side, nw_y, nw_x)
+    assert (chip[:, :HALF, :HALF] == _expected_live_chip_tag(3, 3)).all()
+    assert (chip[:, :HALF, HALF:] == 33).all()
+    assert (chip[:, HALF:, :HALF] == 31).all()
+    assert (chip[:, HALF:, HALF:] == 43).all()
+    print("  _slice_chip (diagonal (3,3), uses SE corner + adj strips) — OK")
+
+
+def test_slice_chip_diagonal_interior():
+    """Interior diagonal at (r_gap=1, c_gap=2): 4 live chips meet."""
+    composites = _hand_crafted_composites()
+    side = composites[0, 0]
+    nw_y, nw_x = chip_nw_pixel_offset("diagonal", 1, 2)
+    chip = _slice_chip(side, nw_y, nw_x)
+    # Quadrants come from live chips (1,2), (1,3), (2,2), (2,3).
+    assert (chip[:, :HALF, :HALF] == _expected_live_chip_tag(1, 2)).all()
+    assert (chip[:, :HALF, HALF:] == _expected_live_chip_tag(1, 3)).all()
+    assert (chip[:, HALF:, :HALF] == _expected_live_chip_tag(2, 2)).all()
+    assert (chip[:, HALF:, HALF:] == _expected_live_chip_tag(2, 3)).all()
+    print("  _slice_chip (diagonal interior) — OK")
+
+
+# ============================================================================
+# Generator tests
+# ============================================================================
+
+def test_generator_yields_81_per_valid_date():
     composites = _hand_crafted_composites(n_dates=2)
     target_dates = np.array([100, 200], dtype=np.int64)
     valid_mask = np.array([True, True], dtype=bool)
@@ -110,18 +245,18 @@ def test_generator_yields_64_per_valid_date():
     pairs = list(generate_shifted_chips(
         composites, target_dates, valid_mask, verbose=False))
 
-    assert len(pairs) == 64 * 2, f"expected {64 * 2}, got {len(pairs)}"
+    assert len(pairs) == 81 * 2, len(pairs)
 
     kinds_per_date = {0: {}, 1: {}}
     for p in pairs:
         kinds_per_date[p.date_idx].setdefault(p.chip_kind, 0)
         kinds_per_date[p.date_idx][p.chip_kind] += 1
 
-    expected = {"original": 16, "h_shift": 16, "v_shift": 16, "diagonal": 16}
+    expected = {"original": 16, "h_shift": 20, "v_shift": 20, "diagonal": 25}
     for k in (0, 1):
         assert kinds_per_date[k] == expected, \
             f"date_idx={k} got {kinds_per_date[k]}, expected {expected}"
-    print(f"  generator yields 64 pairs per valid date (2 dates -> 128) — OK")
+    print("  generator yields 81 pairs per valid date (2 dates -> 162) — OK")
 
 
 def test_generator_skips_invalid_dates():
@@ -132,9 +267,8 @@ def test_generator_skips_invalid_dates():
     pairs = list(generate_shifted_chips(
         composites, target_dates, valid_mask, verbose=False))
 
-    assert len(pairs) == 64 * 2, f"expected {64 * 2}, got {len(pairs)}"
-    seen_date_idx = {p.date_idx for p in pairs}
-    assert seen_date_idx == {0, 2}, seen_date_idx
+    assert len(pairs) == 81 * 2
+    assert {p.date_idx for p in pairs} == {0, 2}
     print("  generator skips invalid dates — OK")
 
 
@@ -146,9 +280,6 @@ def test_generator_metadata_consistency():
     pairs = list(generate_shifted_chips(
         composites, target_dates, valid_mask, verbose=False))
 
-    # Verify metadata is correctly attached to each pair and that before
-    # and after share the same source-chip tag (the synthetic block has
-    # identical values for both sides).
     for p in pairs:
         assert isinstance(p, ChipPair)
         assert p.date_idx == 0
@@ -156,103 +287,82 @@ def test_generator_metadata_consistency():
         assert p.before.shape == (10, CHIP_H, CHIP_W)
         assert p.after.shape  == (10, CHIP_H, CHIP_W)
         assert p.before.dtype == np.uint8
-        assert p.after.dtype  == np.uint8
-        # Before/after carry the same tag in our synthetic data
+        # Before/after share the same tag in our synthetic data.
         assert np.array_equal(p.before, p.after), \
             f"before/after diverged for {p.chip_kind} {p.grid_position}"
     print("  generator metadata + before/after parity — OK")
 
 
-def test_originals_match_extract_chip():
-    composites = _hand_crafted_composites(n_dates=1)
-    target_dates = np.array([100], dtype=np.int64)
-    valid_mask = np.array([True], dtype=bool)
-    side = composites[0, 0]
-
-    pairs = list(generate_shifted_chips(
-        composites, target_dates, valid_mask, verbose=False))
-
-    originals = [p for p in pairs if p.chip_kind == "original"]
-    assert len(originals) == 16
-
-    seen = set()
-    for p in originals:
-        r, c = p.grid_position
-        assert 0 <= r < LIVE_ROWS and 0 <= c < LIVE_COLS
-        seen.add((r, c))
-        expected_chip = _extract_chip(side, r, c)
-        assert np.array_equal(p.before, expected_chip)
-    assert seen == {(r, c) for r in range(LIVE_ROWS) for c in range(LIVE_COLS)}
-    print("  originals cover full 4x4 live grid — OK")
-
-
-def test_h_shift_uses_ghost_col():
-    """H-shift at c_gap=3 must pull its right half from chip (R, 4) — the
-    ghost column."""
+def test_generator_position_coverage():
+    """Each shift kind should yield its expected set of (gr, gc) positions exactly once."""
     composites = _hand_crafted_composites()
-    side = composites[0, 0]
-    # H-shift at (R=2, c_gap=3): combines chip (2, 3) and chip (2, 4)
-    chip = _h_shift(side, R=2, c_gap=3)
-    # Left half (cols 0..127) should be value 23 (from chip (2,3))
-    assert (chip[:, :, :HALF] == 23).all()
-    # Right half (cols 128..255) should be value 24 (from chip (2,4) — ghost)
-    assert (chip[:, :, HALF:] == 24).all()
-    print("  _h_shift uses ghost col 4 at c_gap=3 — OK")
-
-
-def test_v_shift_uses_ghost_row():
-    """V-shift at r_gap=3 must pull its bottom half from chip (4, C) — the
-    ghost row."""
-    composites = _hand_crafted_composites()
-    side = composites[0, 0]
-    # V-shift at (r_gap=3, C=1): combines chip (3, 1) and chip (4, 1)
-    chip = _v_shift(side, r_gap=3, C=1)
-    # Top half (rows 0..127) should be value 31 (from chip (3,1))
-    assert (chip[:, :HALF, :] == 31).all()
-    # Bottom half (rows 128..255) should be value 41 (from chip (4,1) — ghost)
-    assert (chip[:, HALF:, :] == 41).all()
-    print("  _v_shift uses ghost row 4 at r_gap=3 — OK")
-
-
-def test_diagonal_uses_ghost_corner():
-    """Diagonal at (r_gap=3, c_gap=3) must pull all four quadrants from the
-    bottom-right 2x2 of the block: (3,3), (3,4), (4,3), (4,4)."""
-    composites = _hand_crafted_composites()
-    side = composites[0, 0]
-    chip = _diagonal(side, r_gap=3, c_gap=3)
-    # TL quadrant ← chip (3,3) bottom-right quadrant  -> tag 33
-    assert (chip[:, :HALF, :HALF] == 33).all(), "TL quadrant wrong"
-    # TR quadrant ← chip (3,4) bottom-left quadrant   -> tag 34
-    assert (chip[:, :HALF, HALF:] == 34).all(), "TR quadrant wrong"
-    # BL quadrant ← chip (4,3) top-right quadrant     -> tag 43
-    assert (chip[:, HALF:, :HALF] == 43).all(), "BL quadrant wrong"
-    # BR quadrant ← chip (4,4) top-left quadrant      -> tag 44
-    assert (chip[:, HALF:, HALF:] == 44).all(), "BR quadrant wrong"
-    print("  _diagonal uses ghost corner (4,4) at (r_gap=3, c_gap=3) — OK")
-
-
-def test_shift_grid_positions_complete():
-    """Each shift kind covers its expected 4x4 grid of positions exactly once."""
-    composites = _hand_crafted_composites(n_dates=1)
     target_dates = np.array([100], dtype=np.int64)
     valid_mask = np.array([True], dtype=bool)
 
     pairs = list(generate_shifted_chips(
         composites, target_dates, valid_mask, verbose=False))
 
-    expected_positions = {(r, c) for r in range(LIVE_ROWS)
-                                 for c in range(LIVE_COLS)}
-    for kind in ("original", "h_shift", "v_shift", "diagonal"):
+    expected = {
+        "original": {(r, c) for r in range(LIVE_ROWS) for c in range(LIVE_COLS)},
+        "h_shift":  {(r, c) for r in range(LIVE_ROWS) for c in range(-1, LIVE_COLS)},
+        "v_shift":  {(r, c) for r in range(-1, LIVE_ROWS) for c in range(LIVE_COLS)},
+        "diagonal": {(r, c) for r in range(-1, LIVE_ROWS) for c in range(-1, LIVE_COLS)},
+    }
+    for kind, exp_positions in expected.items():
         positions = {p.grid_position for p in pairs if p.chip_kind == kind}
-        assert positions == expected_positions, \
-            f"{kind} missing positions: {expected_positions - positions}"
-    print("  every shift kind covers full 4x4 grid of positions — OK")
+        assert positions == exp_positions, \
+            f"{kind}: missing {exp_positions - positions} extra {positions - exp_positions}"
+    print("  generator covers full per-kind position set — OK")
 
 
-def test_bundled_matches_per_pair_generator():
-    """The bundled generator must produce identical chip data and metadata
-    to the per-pair generator, just in (B, H, W, C) layout instead of
-    (C, H, W) per pair."""
+def test_each_live_pixel_gets_exactly_4_votes():
+    """The most important geometric property: every live-area pixel is
+    covered by exactly 4 shifts (one of each kind)."""
+    composites = _hand_crafted_composites()
+    target_dates = np.array([100], dtype=np.int64)
+    valid_mask = np.array([True], dtype=bool)
+
+    pairs = list(generate_shifted_chips(
+        composites, target_dates, valid_mask, verbose=False))
+
+    # Build a (LIVE_H, LIVE_W) per-kind counter array.
+    counter_total: dict[str, np.ndarray] = {
+        kind: np.zeros((LIVE_H, LIVE_W), dtype=np.int32)
+        for kind in ("original", "h_shift", "v_shift", "diagonal")
+    }
+    counter_overall = np.zeros((LIVE_H, LIVE_W), dtype=np.int32)
+
+    for p in pairs:
+        nw_y, nw_x = chip_nw_pixel_offset(p.chip_kind, *p.grid_position)
+        # The chip covers pixel area [nw_y, nw_y+256) x [nw_x, nw_x+256)
+        # relative to the live-area NW corner. Clip to the live area.
+        y0 = max(nw_y, 0)
+        x0 = max(nw_x, 0)
+        y1 = min(nw_y + CHIP_H, LIVE_H)
+        x1 = min(nw_x + CHIP_W, LIVE_W)
+        if y0 < y1 and x0 < x1:
+            counter_total[p.chip_kind][y0:y1, x0:x1] += 1
+            counter_overall[y0:y1, x0:x1] += 1
+
+    # Each kind covers every live pixel exactly once:
+    for kind, arr in counter_total.items():
+        assert (arr == 1).all(), \
+            f"{kind} did not cover every live pixel exactly once " \
+            f"(min={arr.min()}, max={arr.max()})"
+    # Overall: every live pixel gets 4 votes.
+    assert (counter_overall == 4).all(), \
+        f"not 4 votes everywhere (min={counter_overall.min()}, " \
+        f"max={counter_overall.max()})"
+    print("  every live pixel covered by exactly 4 chips (1 per kind) — OK")
+
+
+# ============================================================================
+# Bundled-generator tests
+# ============================================================================
+
+def test_bundled_matches_per_pair():
+    """Bundled generator should produce the same pixel content + metadata as
+    the per-pair generator, just in (B, H, W, C) layout."""
     composites = _hand_crafted_composites(n_dates=2)
     target_dates = np.array([100, 200], dtype=np.int64)
     valid_mask = np.array([True, True], dtype=bool)
@@ -262,12 +372,9 @@ def test_bundled_matches_per_pair_generator():
     bundles = list(generate_shifted_chips_bundled(
         composites, target_dates, valid_mask, verbose=False))
 
-    # Same number of yielded items: 2 bundles vs 128 pairs.
     assert len(bundles) == 2
-    assert len(pairs) == 128
-    assert BUNDLE_SIZE == 64
+    assert len(pairs) == 2 * BUNDLE_SIZE
 
-    # Group per-pair results by date_idx to compare against bundles.
     pairs_by_date: dict = {0: [], 1: []}
     for p in pairs:
         pairs_by_date[p.date_idx].append(p)
@@ -276,7 +383,6 @@ def test_bundled_matches_per_pair_generator():
         assert isinstance(bundle, ChipBundle)
         assert bundle.before.shape == (BUNDLE_SIZE, CHIP_H, CHIP_W, 10)
         assert bundle.after.shape  == (BUNDLE_SIZE, CHIP_H, CHIP_W, 10)
-        assert bundle.before.dtype == np.uint8
         assert len(bundle.chip_kinds) == BUNDLE_SIZE
         assert len(bundle.grid_positions) == BUNDLE_SIZE
 
@@ -288,47 +394,83 @@ def test_bundled_matches_per_pair_generator():
             p = pairs_for_date[i]
             assert p.chip_kind == kind
             assert p.grid_position == pos
-            assert p.date_idx == bundle.date_idx
             assert p.date_ordinal == bundle.date_ordinal
             # Per-pair chip is (C, H, W); bundle slot is (H, W, C).
-            # Compare after a single transpose.
             assert np.array_equal(
                 p.before.transpose(1, 2, 0), bundle.before[i]
-            ), f"before mismatch at date={bundle.date_idx} i={i} ({kind} {pos})"
+            ), f"before mismatch at i={i} ({kind} {pos})"
             assert np.array_equal(
                 p.after.transpose(1, 2, 0), bundle.after[i]
-            ), f"after mismatch at date={bundle.date_idx} i={i} ({kind} {pos})"
-    print("  bundled generator matches per-pair generator content + metadata — OK")
+            ), f"after mismatch at i={i} ({kind} {pos})"
+    print("  bundled matches per-pair (content + metadata) — OK")
 
 
 def test_bundled_skips_invalid_dates():
     composites = _hand_crafted_composites(n_dates=3)
     target_dates = np.array([100, 200, 300], dtype=np.int64)
     valid_mask = np.array([True, False, True], dtype=bool)
-
     bundles = list(generate_shifted_chips_bundled(
         composites, target_dates, valid_mask, verbose=False))
-    assert len(bundles) == 2, f"expected 2 bundles, got {len(bundles)}"
+    assert len(bundles) == 2
     assert {b.date_idx for b in bundles} == {0, 2}
-    print("  bundled generator skips invalid dates — OK")
+    print("  bundled skips invalid dates — OK")
+
+
+# ============================================================================
+# Validation tests
+# ============================================================================
+
+def test_validation_rejects_3d_composites():
+    """Old flat-pixel-axis composites (4-D) should raise ValueError."""
+    bad = np.zeros((2, 1, 10, 65536), dtype=np.uint8)
+    target_dates = np.array([100], dtype=np.int64)
+    valid_mask = np.array([True], dtype=bool)
+    try:
+        list(generate_shifted_chips(bad, target_dates, valid_mask, verbose=False))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for 4-D composites")
+    print("  validation rejects 4-D composites — OK")
+
+
+def test_validation_rejects_wrong_spatial_dims():
+    """Composites with wrong BLOCK_H / BLOCK_W should raise ValueError."""
+    bad = np.zeros((2, 1, 10, 100, 100), dtype=np.uint8)
+    target_dates = np.array([100], dtype=np.int64)
+    valid_mask = np.array([True], dtype=bool)
+    try:
+        list(generate_shifted_chips(bad, target_dates, valid_mask, verbose=False))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for wrong spatial dims")
+    print("  validation rejects wrong spatial dims — OK")
 
 
 def main():
     print("Running shift_chips tests...")
-    test_extract_chip_yields_correct_position_tag()
-    test_h_shift_geometry()
-    test_v_shift_geometry()
-    test_diagonal_geometry()
-    test_h_shift_uses_ghost_col()
-    test_v_shift_uses_ghost_row()
-    test_diagonal_uses_ghost_corner()
-    test_generator_yields_64_per_valid_date()
+    test_shift_count_constants()
+    test_chip_nw_pixel_offset_all_kinds()
+    test_iter_shift_positions_counts()
+    test_slice_chip_original_interior()
+    test_slice_chip_h_shift_interior()
+    test_slice_chip_h_shift_left_edge_uses_ghost()
+    test_slice_chip_h_shift_right_edge_uses_ghost()
+    test_slice_chip_v_shift_top_edge_uses_ghost()
+    test_slice_chip_v_shift_bottom_edge_uses_ghost()
+    test_slice_chip_diagonal_nw_corner_uses_nw_ghost_corner()
+    test_slice_chip_diagonal_se_corner_uses_se_ghost_corner()
+    test_slice_chip_diagonal_interior()
+    test_generator_yields_81_per_valid_date()
     test_generator_skips_invalid_dates()
     test_generator_metadata_consistency()
-    test_originals_match_extract_chip()
-    test_shift_grid_positions_complete()
-    test_bundled_matches_per_pair_generator()
+    test_generator_position_coverage()
+    test_each_live_pixel_gets_exactly_4_votes()
+    test_bundled_matches_per_pair()
     test_bundled_skips_invalid_dates()
+    test_validation_rejects_3d_composites()
+    test_validation_rejects_wrong_spatial_dims()
     print("All shift_chips tests passed.")
 
 

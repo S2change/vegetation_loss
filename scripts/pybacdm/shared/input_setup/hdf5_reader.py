@@ -10,10 +10,15 @@ The HDF5 layout is what `rechunk_hdf5_chip_oriented.py` produces:
   attrs.nodata_val  : the uint16 nodata sentinel (usually 65_535)
 
 This reader builds a sparse `(chip_y_bin, chip_x_bin) -> flat_chip_index`
-lookup once per file open. When a 5x5 block is requested, each of the 25
-expected chip-grid positions is resolved via the lookup; missing positions
-(chips absent from this HDF5 — boundary, water mask, etc.) are returned as
-all-nodata.
+lookup once per file open. When a block is requested, the live 4x4 inner
+area is loaded as full chips and a 128-px-thick ghost ring (4 edge strips
++ 4 corner squares) is loaded from the chips bordering it. Missing chip
+positions (sparse HDF5, off-tile, water mask) are filled with NODATA_U8.
+
+Output layout: `(N_TS, 10, BLOCK_H, BLOCK_W)` uint8 where BLOCK_H = BLOCK_W
+= 1280. The live area sits at `block[..., GHOST:GHOST+LIVE_H, GHOST:GHOST+LIVE_W]`
+and the ghost ring surrounds it. This 2-D layout makes shift extraction in
+`composite_shift_chips` a matter of simple slicing.
 
 Stretch is fused into the read path: each chip-timestep is converted from
 uint16 to uint8 via the same per-band q02/q98 logic the training data used
@@ -37,14 +42,17 @@ import numpy as np
 CHIP_SIZE = 256
 CHIP_PIXELS = CHIP_SIZE * CHIP_SIZE      # 65_536
 
-# 5x5 block layout. Live = chips this block predicts on; the 5th row/col is
-# ghost data for the south/east neighbour block's shifts. Adjacent blocks
-# overlap by LIVE_OVERLAP chips, so blocks stride by LIVE_ROWS / LIVE_COLS
-# along the chip grid.
-BLOCK_GRID_ROWS = 5
-BLOCK_GRID_COLS = 5
+# Block layout:
+#   - LIVE_ROWS x LIVE_COLS chips of full 256x256 -> 1024 x 1024 live area
+#   - GHOST pixels of border around the live area, from the chips bordering it
+#   - block dimensions = LIVE + 2*GHOST = 1024 + 256 = 1280
 LIVE_ROWS = 4
 LIVE_COLS = 4
+LIVE_H = LIVE_ROWS * CHIP_SIZE           # 1024
+LIVE_W = LIVE_COLS * CHIP_SIZE           # 1024
+GHOST = CHIP_SIZE // 2                   # 128
+BLOCK_H = LIVE_H + 2 * GHOST             # 1280
+BLOCK_W = LIVE_W + 2 * GHOST             # 1280
 
 # Uint16 nodata sentinel in the source HDF5. Overridden by the attribute on
 # the HDF5 file if present (`attrs['nodata_val']`).
@@ -69,14 +77,17 @@ DEFAULT_TS_END_ORDINAL:   Optional[int] = None
 class BlockPosition(NamedTuple):
     block_row: int        # block index along the chip-grid Y axis
     block_col: int        # block index along the chip-grid X axis
-    chip_y_start: int     # chip-grid Y of the block's top-left chip (== block_row * LIVE_ROWS)
-    chip_x_start: int     # chip-grid X of the block's top-left chip (== block_col * LIVE_COLS)
-    # UTM origin of the block's NW corner — derived from the actual xs_new/ys_new
-    # of the first valid pixel of any present chip in the block (or extrapolated
-    # using pixel_res when the block's first chip happens to be off-tile).
-    world_origin_x: float  # UTM easting  of pixel (0, 0) of chip (0, 0)
-    world_origin_y: float  # UTM northing of pixel (0, 0) of chip (0, 0)
-    pixel_res: float       # metres per pixel (Sentinel-2: 10.0)
+    chip_y_start: int     # chip-grid Y of the live area's NW chip (== block_row * LIVE_ROWS)
+    chip_x_start: int     # chip-grid X of the live area's NW chip (== block_col * LIVE_COLS)
+    # UTM origin of the live area's NW corner — derived from the actual
+    # xs_new/ys_new of the first valid pixel of any present chip in the live
+    # area (or extrapolated using pixel_res when the live area is entirely
+    # off-tile). Note: this is the NW corner of the LIVE area, not of the
+    # block-including-ghost. The ghost ring extends GHOST pixels NW of this
+    # point in pixel-space (GHOST*pixel_res metres in UTM).
+    world_origin_x: float
+    world_origin_y: float
+    pixel_res: float      # metres per pixel (Sentinel-2: 10.0)
 
 
 # ============================================================================
@@ -107,24 +118,22 @@ def _compute_block_world_origin(h5f: h5py.File,
                                 pixel_res: float,
                                 chip_size: int,
                                 ) -> tuple[float, float]:
-    """Compute the UTM (x, y) of the NW corner of chip (0, 0) within the block.
+    """Compute UTM (x, y) of the LIVE area's NW corner (chip (chip_y_start,
+    chip_x_start) pixel (0, 0)).
 
-    Strategy: find any present chip in the block, read one valid pixel from
-    its xs_new/ys_new, and extrapolate back to the block's NW corner using
-    chip-grid offsets + pixel_res. This grounds the origin in actual data
-    coordinates (robust to whichever anchoring the rechunker chose).
-
-    If no chip in the block is present (entirely off-tile), fall back to
-    extrapolating from any chip in the file.
+    Strategy: find any present chip near the live area, read one valid pixel
+    from its xs_new/ys_new, and extrapolate back to the live area's NW
+    corner using chip-grid offsets + pixel_res. Robust to whichever
+    anchoring the rechunker chose.
     """
     xs_new = h5f["xs_new"]   # type: ignore[index]
     ys_new = h5f["ys_new"]   # type: ignore[index]
 
-    # Try to find a present chip inside this block first (cheaper read pattern).
+    # Try to find a present chip inside the live 4x4 first.
     anchor_chip_idx = None
     anchor_chip_y = anchor_chip_x = None
-    for r in range(BLOCK_GRID_ROWS):
-        for c in range(BLOCK_GRID_COLS):
+    for r in range(LIVE_ROWS):
+        for c in range(LIVE_COLS):
             cy, cx = chip_y_start + r, chip_x_start + c
             if (cy, cx) in chip_lookup:
                 anchor_chip_idx = chip_lookup[(cy, cx)]
@@ -133,7 +142,7 @@ def _compute_block_world_origin(h5f: h5py.File,
         if anchor_chip_idx is not None:
             break
 
-    # Fall back to any chip in the file (block was entirely off-tile / sparse).
+    # Fall back to any chip in the file (live area was entirely off-tile).
     if anchor_chip_idx is None:
         if not chip_lookup:
             raise ValueError("HDF5 has no chips; cannot derive a world origin.")
@@ -152,7 +161,6 @@ def _compute_block_world_origin(h5f: h5py.File,
             f"xs_new/ys_new pixels; cannot derive a world origin."
         )
     first_valid = int(np.argmax(valid))
-    # xs/ys are integers in the rechunker; cast to float for the rest.
     anchor_x = float(xs_slab[first_valid])
     anchor_y = float(ys_slab[first_valid])
 
@@ -160,11 +168,12 @@ def _compute_block_world_origin(h5f: h5py.File,
     local_row = first_valid // chip_size
     local_col = first_valid %  chip_size
 
-    # Walk back to the NW corner of chip (anchor_chip_y, anchor_chip_x).
+    # Walk back to the NW corner of the anchor chip.
     anchor_chip_origin_x = anchor_x - local_col * pixel_res
     anchor_chip_origin_y = anchor_y + local_row * pixel_res   # UTM north -> +y
 
-    # Walk back to the NW corner of chip (chip_y_start, chip_x_start).
+    # Walk from the anchor chip's NW corner to the live area's NW corner
+    # (chip at chip_y_start, chip_x_start).
     block_origin_x = anchor_chip_origin_x - (anchor_chip_x - chip_x_start) * chip_size * pixel_res
     block_origin_y = anchor_chip_origin_y + (anchor_chip_y - chip_y_start) * chip_size * pixel_res
     return block_origin_x, block_origin_y
@@ -184,13 +193,6 @@ def _stretch_chip_uint16_to_uint8(chip_u16: np.ndarray, nodata_u16: int) -> np.n
     -------
     chip_u8 : (N, 10, CHIP_SIZE, CHIP_SIZE) uint8
         Stretched output. Nodata pixels become NODATA_U8 (255).
-
-    Notes
-    -----
-    Mirrors the per-band 2-98 percentile stretch in
-    `pybacdm/shared/bacdm/data/dataset_swin_GZ._to_uint8`. The training
-    pipeline computes percentiles per (chip, image) pair — for a single
-    256x256 image. Here we compute per (chip, timestep, band) to match.
     """
     n_ts = chip_u16.shape[0]
     out = np.empty(chip_u16.shape, dtype=np.uint8)
@@ -202,7 +204,6 @@ def _stretch_chip_uint16_to_uint8(chip_u16: np.ndarray, nodata_u16: int) -> np.n
 
         for b in range(arr_f.shape[0]):
             band = arr_f[b]
-            # All-nodata band -> output is entirely NODATA_U8.
             if np.all(np.isnan(band)):
                 out[t, b] = NODATA_U8
                 continue
@@ -229,6 +230,19 @@ def _select_timesteps(ts: np.ndarray,
     return np.where(mask)[0]
 
 
+def _read_and_stretch_chip(values, ts_indices: np.ndarray, flat_chip_idx: int,
+                            n_ts: int, nodata_val: int) -> np.ndarray:
+    """Read one chip's full (n_ts, 10, CHIP_SIZE, CHIP_SIZE) uint8 stretched slab.
+
+    Returns a 2-D-per-band uint8 chip ready to splice into the block array.
+    """
+    pix_start = flat_chip_idx * CHIP_PIXELS
+    pix_end = pix_start + CHIP_PIXELS
+    chip_flat_u16: np.ndarray = values[ts_indices, :, pix_start:pix_end]   # type: ignore[index,assignment]
+    chip_u16 = chip_flat_u16.reshape(n_ts, 10, CHIP_SIZE, CHIP_SIZE)
+    return _stretch_chip_uint16_to_uint8(chip_u16, nodata_val)
+
+
 def get_block_grid_shape(hdf5_path: str) -> tuple[int, int]:
     """Return (n_block_rows, n_block_cols) for the tile in `hdf5_path`.
 
@@ -241,9 +255,6 @@ def get_block_grid_shape(hdf5_path: str) -> tuple[int, int]:
         chip_y = h5f["chip_y_bin"][:]   # type: ignore[index]
 
     max_y, max_x = int(chip_y.max()), int(chip_x.max())
-    # We need blocks covering chip rows [0..max_y] and cols [0..max_x].
-    # Block (BR, BC) covers chip rows [BR*LIVE_ROWS .. BR*LIVE_ROWS + LIVE_ROWS - 1]
-    # in its LIVE area. So the highest BR we need is ceil((max_y + 1) / LIVE_ROWS).
     n_block_rows = (max_y + LIVE_ROWS) // LIVE_ROWS
     n_block_cols = (max_x + LIVE_COLS) // LIVE_COLS
     return n_block_rows, n_block_cols
@@ -259,7 +270,7 @@ def read_block(hdf5_path: str,
                ts_start_ordinal: Optional[int] = DEFAULT_TS_START_ORDINAL,
                ts_end_ordinal:   Optional[int] = DEFAULT_TS_END_ORDINAL,
                ) -> tuple[np.ndarray, np.ndarray, BlockPosition]:
-    """Read one 5x5 chip-block, stretch to uint8, return (block, ts, position).
+    """Read one block (live 4x4 + 128-px ghost ring), stretch to uint8.
 
     Parameters
     ----------
@@ -273,22 +284,23 @@ def read_block(hdf5_path: str,
 
     Returns
     -------
-    block : (N_TS_kept, 10, 25 * 65_536) uint8
-        Chip-block in the same flat-pixel layout step 3 expects. The 25
-        chips are packed in row-major order over the 5x5 block grid: index
-        (R * 5 + C) for (R, C) in 0..4. Chips not present in the HDF5 are
-        filled with NODATA_U8.
+    block : (N_TS_kept, 10, BLOCK_H, BLOCK_W) uint8
+        2-D pixel-grid layout. The live 4x4 area sits at
+        `block[..., GHOST:GHOST+LIVE_H, GHOST:GHOST+LIVE_W]` (1024 x 1024).
+        The ghost ring (top/bottom/left/right strips + 4 corner squares)
+        surrounds it with 128 px on each side. Missing chip-grid positions
+        (sparse HDF5, off-tile) are filled with NODATA_U8.
     ts : (N_TS_kept,) int64
         Ordinal dates aligned to `block`'s axis 0.
     position : BlockPosition
-        The block's identity, useful for downstream output naming.
+        Block identity + live-area NW corner UTM coords.
     """
     chip_y_start = block_row * LIVE_ROWS
     chip_x_start = block_col * LIVE_COLS
 
     with h5py.File(hdf5_path, "r") as h5f:
         chip_lookup, ts_all, nodata_val = _read_chip_grid_metadata(h5f)
-        values = h5f["values"]   # don't slurp the whole thing
+        values = h5f["values"]
 
         pixel_res = float(h5f.attrs.get("pixel_res", 10.0))   # type: ignore[arg-type]
         world_origin_x, world_origin_y = _compute_block_world_origin(
@@ -305,44 +317,93 @@ def read_block(hdf5_path: str,
         ts_kept = ts_all[ts_indices].astype(np.int64)
         n_ts = len(ts_indices)
 
-        # Output is the stretched uint8 block. Pre-fill with NODATA so
-        # missing chips need no extra write.
-        block = np.full(
-            (n_ts, 10, BLOCK_GRID_ROWS * BLOCK_GRID_COLS * CHIP_PIXELS),
-            NODATA_U8, dtype=np.uint8,
-        )
+        # Pre-allocate the 2-D block array, filled with NODATA so missing
+        # chips need no extra write.
+        block = np.full((n_ts, 10, BLOCK_H, BLOCK_W), NODATA_U8, dtype=np.uint8)
 
-        for r in range(BLOCK_GRID_ROWS):
-            for c in range(BLOCK_GRID_COLS):
-                chip_y = chip_y_start + r
-                chip_x = chip_x_start + c
-                key = (chip_y, chip_x)
-                flat_chip_idx = chip_lookup.get(key)
+        # ── 16 inner chips (full 256x256) ────────────────────────────────
+        # Placed at block[..., GHOST + 256r : GHOST + 256(r+1),
+        #                       GHOST + 256c : GHOST + 256(c+1)].
+        for r in range(LIVE_ROWS):
+            for c in range(LIVE_COLS):
+                flat_chip_idx = chip_lookup.get((chip_y_start + r, chip_x_start + c))
                 if flat_chip_idx is None:
-                    # No data at this chip-grid position; output slot stays NODATA.
                     continue
+                chip = _read_and_stretch_chip(values, ts_indices, flat_chip_idx,
+                                              n_ts, nodata_val)
+                y0 = GHOST + r * CHIP_SIZE
+                x0 = GHOST + c * CHIP_SIZE
+                block[:, :, y0:y0 + CHIP_SIZE, x0:x0 + CHIP_SIZE] = chip
 
-                # Read this chip's uint16 data for the selected timesteps.
-                # values has shape (full_n_ts, 10, n_chips * CHIP_PIXELS), with
-                # each chip occupying CHIP_PIXELS contiguous columns. We slice
-                # along the time axis (h5py advanced-indexing) AND along the
-                # pixel axis (contiguous slice) — the latter is what makes
-                # this read cheap for a chip-chunked file.
-                pix_start = flat_chip_idx * CHIP_PIXELS
-                pix_end = pix_start + CHIP_PIXELS
-                # h5py: indexing with an int array + slices works; result is
-                # (n_ts, 10, CHIP_PIXELS) uint16.
-                chip_flat_u16: np.ndarray = values[ts_indices, :, pix_start:pix_end]  # type: ignore[index,assignment]
-                # Reshape to (n_ts, 10, CHIP_SIZE, CHIP_SIZE) for the stretch,
-                # then back to (n_ts, 10, CHIP_PIXELS) for the block layout.
-                chip_u16 = chip_flat_u16.reshape(n_ts, 10, CHIP_SIZE, CHIP_SIZE)
-                chip_u8 = _stretch_chip_uint16_to_uint8(chip_u16, nodata_val)
-                chip_flat_u8 = chip_u8.reshape(n_ts, 10, CHIP_PIXELS)
+        # ── Top edge strip: 4 chips from chip-grid row (chip_y_start - 1),
+        # cols (chip_x_start + 0..3). Their BOTTOM 128 px go into the top
+        # strip at block[..., 0:GHOST, GHOST + 256c : GHOST + 256(c+1)].
+        for c in range(LIVE_COLS):
+            flat_chip_idx = chip_lookup.get((chip_y_start - 1, chip_x_start + c))
+            if flat_chip_idx is None:
+                continue
+            chip = _read_and_stretch_chip(values, ts_indices, flat_chip_idx,
+                                          n_ts, nodata_val)
+            x0 = GHOST + c * CHIP_SIZE
+            block[:, :, 0:GHOST, x0:x0 + CHIP_SIZE] = chip[:, :, CHIP_SIZE - GHOST:, :]
 
-                block_chip_idx = r * BLOCK_GRID_COLS + c
-                dst_start = block_chip_idx * CHIP_PIXELS
-                dst_end = dst_start + CHIP_PIXELS
-                block[:, :, dst_start:dst_end] = chip_flat_u8
+        # ── Bottom edge strip: chip-grid row (chip_y_start + 4). Their TOP
+        # 128 px go into the bottom strip.
+        for c in range(LIVE_COLS):
+            flat_chip_idx = chip_lookup.get((chip_y_start + LIVE_ROWS, chip_x_start + c))
+            if flat_chip_idx is None:
+                continue
+            chip = _read_and_stretch_chip(values, ts_indices, flat_chip_idx,
+                                          n_ts, nodata_val)
+            x0 = GHOST + c * CHIP_SIZE
+            block[:, :, GHOST + LIVE_H:, x0:x0 + CHIP_SIZE] = chip[:, :, :GHOST, :]
+
+        # ── Left edge strip: chip-grid col (chip_x_start - 1). Their RIGHT
+        # 128 px go into the left strip.
+        for r in range(LIVE_ROWS):
+            flat_chip_idx = chip_lookup.get((chip_y_start + r, chip_x_start - 1))
+            if flat_chip_idx is None:
+                continue
+            chip = _read_and_stretch_chip(values, ts_indices, flat_chip_idx,
+                                          n_ts, nodata_val)
+            y0 = GHOST + r * CHIP_SIZE
+            block[:, :, y0:y0 + CHIP_SIZE, 0:GHOST] = chip[:, :, :, CHIP_SIZE - GHOST:]
+
+        # ── Right edge strip: chip-grid col (chip_x_start + 4). Their LEFT
+        # 128 px go into the right strip.
+        for r in range(LIVE_ROWS):
+            flat_chip_idx = chip_lookup.get((chip_y_start + r, chip_x_start + LIVE_COLS))
+            if flat_chip_idx is None:
+                continue
+            chip = _read_and_stretch_chip(values, ts_indices, flat_chip_idx,
+                                          n_ts, nodata_val)
+            y0 = GHOST + r * CHIP_SIZE
+            block[:, :, y0:y0 + CHIP_SIZE, GHOST + LIVE_W:] = chip[:, :, :, :GHOST]
+
+        # ── 4 corner chips: each contributes the 128x128 quadrant adjacent
+        # to the live area.
+        corners = [
+            # (chip_grid_y, chip_grid_x, src_y_slice, src_x_slice, dst_y_slice, dst_x_slice)
+            (chip_y_start - 1, chip_x_start - 1,
+             slice(CHIP_SIZE - GHOST, CHIP_SIZE), slice(CHIP_SIZE - GHOST, CHIP_SIZE),
+             slice(0, GHOST), slice(0, GHOST)),                              # NW
+            (chip_y_start - 1, chip_x_start + LIVE_COLS,
+             slice(CHIP_SIZE - GHOST, CHIP_SIZE), slice(0, GHOST),
+             slice(0, GHOST), slice(GHOST + LIVE_W, BLOCK_W)),                # NE
+            (chip_y_start + LIVE_ROWS, chip_x_start - 1,
+             slice(0, GHOST), slice(CHIP_SIZE - GHOST, CHIP_SIZE),
+             slice(GHOST + LIVE_H, BLOCK_H), slice(0, GHOST)),                # SW
+            (chip_y_start + LIVE_ROWS, chip_x_start + LIVE_COLS,
+             slice(0, GHOST), slice(0, GHOST),
+             slice(GHOST + LIVE_H, BLOCK_H), slice(GHOST + LIVE_W, BLOCK_W)),  # SE
+        ]
+        for cy, cx, sys_, sxs, dys, dxs in corners:
+            flat_chip_idx = chip_lookup.get((cy, cx))
+            if flat_chip_idx is None:
+                continue
+            chip = _read_and_stretch_chip(values, ts_indices, flat_chip_idx,
+                                          n_ts, nodata_val)
+            block[:, :, dys, dxs] = chip[:, :, sys_, sxs]
 
     position = BlockPosition(
         block_row=block_row,
@@ -365,7 +426,7 @@ def iter_blocks(hdf5_path: str,
                 ts_end_ordinal:   Optional[int] = DEFAULT_TS_END_ORDINAL,
                 block_filter=None,
                 ) -> Iterator[tuple[np.ndarray, np.ndarray, BlockPosition]]:
-    """Iterate over every 5x5 block in the tile.
+    """Iterate over every block in the tile.
 
     Parameters
     ----------
@@ -374,8 +435,7 @@ def iter_blocks(hdf5_path: str,
         Temporal filter passed through to `read_block`.
     block_filter : callable or None
         Optional `(block_row, block_col) -> bool` predicate. Returning False
-        skips the block without reading it. Useful for resuming partial runs
-        or for distributing manually.
+        skips the block without reading it.
 
     Yields
     ------
@@ -400,7 +460,7 @@ def dry_run(hdf5_path: str,
             ts_end_ordinal:   Optional[int] = DEFAULT_TS_END_ORDINAL,
             n_target_dates: int = 4,
             ms_per_chip: float = 1510.0,
-            chips_per_date_per_block: int = 64,
+            chips_per_date_per_block: int = 81,
             ) -> dict:
     """Inspect an HDF5 and print a work-plan summary without reading any blocks.
 

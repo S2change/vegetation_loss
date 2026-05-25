@@ -76,16 +76,15 @@ BLOCK_COL = 0   # 0..N_BLOCK_COLS-1
 
 # Dummy-data parameters (used when USE_REAL_DATA = False)
 N_TS = 48
-N_CHIPS = 25
 NODATA_FRAC = 0.05
 REVISIT_DAYS = 5
 START_DATE = (2024, 1, 1)
 SEED = 42
 
-# Target dates for before/after compositing. Pick a few that fall inside the
-# data range so each one produces 64 chip pairs (16 originals + 16 H-shifts
-# + 16 V-shifts + 16 diagonals; the 5th row/col of the block is ghost,
-# supplying neighbour pixels for shifts at the live area's right/bottom edge).
+# Target dates for before/after compositing. Each valid target date produces
+# 81 chip pairs (16 originals + 20 H-shifts + 20 V-shifts + 25 diagonals)
+# in the new 4-sided-ghost layout. Every live-area pixel gets exactly 4
+# overlapping predictions (one per shift kind) for downstream voting.
 #
 # Defaults below fit the real HDF5's 2025-10-28 -> 2025-12-29 window. For the
 # dummy path (START_DATE=2024-01-01, 48 ts x 5d) you'll want dates inside
@@ -145,7 +144,7 @@ def main():
         print(f"HDF5 path:      {HDF5_PATH}")
         print(f"Block:          (block_row={BLOCK_ROW}, block_col={BLOCK_COL})")
     else:
-        print(f"Chip block:     N_TS={N_TS}  N_CHIPS={N_CHIPS}  "
+        print(f"Chip block:     N_TS={N_TS}  "
               f"nodata_frac={NODATA_FRAC}  revisit={REVISIT_DAYS}d")
         print(f"Start date:     {date(*START_DATE)}")
         print(f"Seed:           {SEED}")
@@ -174,7 +173,7 @@ def main():
         print("\nStep 1: generating dummy chip-block...")
         t0 = time.perf_counter()
         block, ts = make_chip_block(
-            n_ts=N_TS, n_chips=N_CHIPS, nodata_frac=NODATA_FRAC,
+            n_ts=N_TS, nodata_frac=NODATA_FRAC,
             revisit_days=REVISIT_DAYS, start_date=START_DATE, seed=SEED,
         )
         # Fake a BlockPosition with zero world origin so steps 5/6 still work

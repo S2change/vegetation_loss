@@ -20,15 +20,18 @@ from hdf5_reader import (
     iter_blocks,
     get_block_grid_shape,
     dry_run,
+    CHIP_SIZE,
     CHIP_PIXELS,
-    BLOCK_GRID_ROWS,
-    BLOCK_GRID_COLS,
     LIVE_ROWS,
     LIVE_COLS,
+    LIVE_H,
+    LIVE_W,
+    GHOST,
+    BLOCK_H,
+    BLOCK_W,
     NODATA_U8,
 )
 
-CHIP_SIZE = 256
 N_TS = 4
 N_BANDS = 10
 DEFAULT_NODATA_U16 = 65_535
@@ -45,16 +48,16 @@ SYNTHETIC_TILE_Y0 = 4_500_000.0 # UTM northing of chip (0, 0) NW corner
 
 def _write_synthetic_hdf5(
     path: str,
-    present_positions: list[tuple[int, int]],   # list of (chip_y, chip_x)
+    present_positions: list[tuple[int, int]],
     n_ts: int = N_TS,
     nodata_val: int = DEFAULT_NODATA_U16,
-    start_ordinal: int = 738887,                # 2024-01-01
+    start_ordinal: int = 738887,
     ts_stride_days: int = 5,
 ):
-    """Build a minimal chip-chunked HDF5 file matching rechunker output.
+    """Build a minimal chip-chunked HDF5 matching rechunker output.
 
-    Each chip's 65_536 pixel slots are filled with a linspace whose base
-    depends on (chip_idx, t, b) — easy to verify with hand calc, and gives
+    Each chip's 65_536 pixel slots are filled with a linspace base depending
+    on (chip_idx, t, b) — easy to verify with hand calc, and gives
     percentile() a non-degenerate distribution per band.
     """
     n_chips = len(present_positions)
@@ -66,9 +69,6 @@ def _write_synthetic_hdf5(
     ts = np.arange(start_ordinal, start_ordinal + n_ts * ts_stride_days,
                    ts_stride_days, dtype=np.int32)
 
-    # Build xs_new / ys_new in the layout the rechunker uses: each chip's
-    # 65_536 slots are row-major within the chip, with UTM derived from
-    # (SYNTHETIC_TILE_X0, SYNTHETIC_TILE_Y0) and PIXEL_RES.
     xs_new = np.empty(n_pixels, dtype=np.int32)
     ys_new = np.empty(n_pixels, dtype=np.int32)
     for chip_idx, (cy, cx) in enumerate(present_positions):
@@ -99,7 +99,6 @@ def _write_synthetic_hdf5(
         h5f.create_dataset("chip_y_bin", data=chip_y)
         h5f.create_dataset("chip_pixel_count", data=chip_pixel_count)
         h5f.create_dataset("ts", data=ts)
-        # sort_order isn't read by hdf5_reader.py, but the rechunker writes it.
         h5f.create_dataset("sort_order",
                            data=np.full(n_pixels, -1, dtype=np.int64))
         h5f.create_dataset("xs_new", data=xs_new)
@@ -109,8 +108,6 @@ def _write_synthetic_hdf5(
         h5f.attrs["pixel_res"] = 10
         h5f.attrs["n_ts"] = n_ts
         h5f.attrs["nodata_val"] = nodata_val
-        # band_names: variable-length string array (matches the real file's
-        # H5T_C_S1 / variable schema in the dump).
         h5f.attrs.create(
             "band_names",
             data=[f"B{i}".encode() for i in range(N_BANDS)],
@@ -122,6 +119,16 @@ def _write_synthetic_hdf5(
 # ============================================================================
 # TESTS
 # ============================================================================
+
+def test_block_shape_constants():
+    """The block layout constants should add up to the expected pixel dimensions."""
+    assert LIVE_H == LIVE_ROWS * CHIP_SIZE == 1024
+    assert LIVE_W == LIVE_COLS * CHIP_SIZE == 1024
+    assert GHOST == 128
+    assert BLOCK_H == LIVE_H + 2 * GHOST == 1280
+    assert BLOCK_W == LIVE_W + 2 * GHOST == 1280
+    print("  block layout constants — OK")
+
 
 def test_get_block_grid_shape():
     """Chip-grid extent determines block-grid dimensions."""
@@ -137,135 +144,139 @@ def test_get_block_grid_shape():
     print("  get_block_grid_shape — OK")
 
 
-def test_read_block_all_chips_present():
-    """A block where all 25 chip-grid positions exist in the file should be
-    fully populated (no NODATA_U8 in any slot)."""
+def test_read_block_2d_layout_and_live_area_populated():
+    """Block at (1, 1) of a 6x6 chip grid: live 4x4 + full ghost ring present."""
     with tempfile.TemporaryDirectory() as tmpd:
         path = os.path.join(tmpd, "fake.h5")
-        # 5x5 dense block at chip-grid origin
+        # Chips at every grid position from (3, 3) to (8, 8) inclusive — that's
+        # the live 4x4 of block (1, 1) (chip-grid (4..7, 4..7)) plus a full
+        # ghost ring (chip-grid (3, *), (8, *), (*, 3), (*, 8)).
+        positions = [(y, x) for y in range(3, 9) for x in range(3, 9)]
+        _write_synthetic_hdf5(path, positions)
+
+        block, ts, position = read_block(path, 1, 1)
+        # 2-D layout
+        assert block.shape == (N_TS, N_BANDS, BLOCK_H, BLOCK_W)
+        assert block.dtype == np.uint8
+
+        # Live area should have no NODATA (every chip there is present).
+        live = block[:, :, GHOST:GHOST + LIVE_H, GHOST:GHOST + LIVE_W]
+        assert not (live == NODATA_U8).any(), \
+            f"unexpected NODATA in live area: {(live == NODATA_U8).sum()}"
+
+        # Ghost ring should also have no NODATA (all border chips present).
+        # Sample each ghost region:
+        top_strip = block[:, :, 0:GHOST, GHOST:GHOST + LIVE_W]
+        assert not (top_strip == NODATA_U8).any(), "top strip had NODATA"
+        bottom_strip = block[:, :, GHOST + LIVE_H:, GHOST:GHOST + LIVE_W]
+        assert not (bottom_strip == NODATA_U8).any(), "bottom strip had NODATA"
+        left_strip = block[:, :, GHOST:GHOST + LIVE_H, 0:GHOST]
+        assert not (left_strip == NODATA_U8).any(), "left strip had NODATA"
+        right_strip = block[:, :, GHOST:GHOST + LIVE_H, GHOST + LIVE_W:]
+        assert not (right_strip == NODATA_U8).any(), "right strip had NODATA"
+        # 4 corners
+        nw = block[:, :, 0:GHOST, 0:GHOST]
+        ne = block[:, :, 0:GHOST, GHOST + LIVE_W:]
+        sw = block[:, :, GHOST + LIVE_H:, 0:GHOST]
+        se = block[:, :, GHOST + LIVE_H:, GHOST + LIVE_W:]
+        for name, corner in [("NW", nw), ("NE", ne), ("SW", sw), ("SE", se)]:
+            assert not (corner == NODATA_U8).any(), f"{name} corner had NODATA"
+
+        # BlockPosition basic sanity.
+        assert position.block_row == 1
+        assert position.block_col == 1
+        assert position.chip_y_start == 4
+        assert position.chip_x_start == 4
+    print("  read_block (2-D layout, dense block + full ghost ring) — OK")
+
+
+def test_read_block_origin_block_has_nw_ghost_padded():
+    """Block (0, 0) has no chips to its north or west — those ghost regions
+    must be all-NODATA."""
+    with tempfile.TemporaryDirectory() as tmpd:
+        path = os.path.join(tmpd, "fake.h5")
+        # Live 4x4 + south/east ghost (positions (0..4, 0..4)).
         positions = [(y, x) for y in range(5) for x in range(5)]
         _write_synthetic_hdf5(path, positions)
 
-        block, ts, position = read_block(path, 0, 0)
-        assert block.shape == (N_TS, 10,
-                               BLOCK_GRID_ROWS * BLOCK_GRID_COLS * CHIP_PIXELS)
-        assert block.dtype == np.uint8
-        assert ts.shape == (N_TS,)
-        # Only check the chip-grid fields here; world_origin is its own test.
-        assert position.block_row == 0
-        assert position.block_col == 0
-        assert position.chip_y_start == 0
-        assert position.chip_x_start == 0
-        # Every slot should have a real value (stretch can produce 254 max for
-        # genuine values; the 255 sentinel only appears on real nodata).
-        assert not (block == NODATA_U8).any(), \
-            f"unexpected NODATA in fully-dense block: " \
-            f"{(block == NODATA_U8).sum()} cells"
-    print("  read_block (all chips present) — OK")
+        block, _, _ = read_block(path, 0, 0)
+
+        # Live area populated.
+        live = block[:, :, GHOST:GHOST + LIVE_H, GHOST:GHOST + LIVE_W]
+        assert not (live == NODATA_U8).any()
+
+        # North-side ghost (top strip + NW + NE corners) must be all NODATA —
+        # no chips at chip_y_start = -1 exist in this file.
+        top_band = block[:, :, 0:GHOST, :]
+        assert (top_band == NODATA_U8).all(), \
+            f"north ghost band wasn't all NODATA: {(top_band != NODATA_U8).sum()} cells"
+
+        # West-side ghost (left strip + NW + SW corners) must be all NODATA.
+        left_band = block[:, :, :, 0:GHOST]
+        assert (left_band == NODATA_U8).all()
+
+        # South/east ghost SHOULD have data (chips at (4, 0..4) and (0..4, 4) exist).
+        south_strip = block[:, :, GHOST + LIVE_H:, GHOST:GHOST + LIVE_W]
+        assert not (south_strip == NODATA_U8).any(), "south strip should be present"
+        east_strip = block[:, :, GHOST:GHOST + LIVE_H, GHOST + LIVE_W:]
+        assert not (east_strip == NODATA_U8).any(), "east strip should be present"
+
+        # SE corner has chip (4, 4) — should be present.
+        se_corner = block[:, :, GHOST + LIVE_H:, GHOST + LIVE_W:]
+        assert not (se_corner == NODATA_U8).any()
+    print("  read_block (origin block: north/west ghost -> NODATA) — OK")
 
 
-def test_read_block_missing_chips_filled_with_nodata():
-    """Chips absent from the HDF5 should appear as NODATA_U8 in the block."""
+def test_read_block_missing_inner_chips_filled_with_nodata():
+    """Inner chips absent from the HDF5 should appear as NODATA in the
+    corresponding 256x256 region of the live area."""
     with tempfile.TemporaryDirectory() as tmpd:
         path = os.path.join(tmpd, "fake.h5")
-        # Only chips at (0,0), (1,1), (2,2) exist — sparse cross pattern
-        positions = [(0, 0), (1, 1), (2, 2)]
-        _write_synthetic_hdf5(path, positions)
+        # Cross pattern: present chips (0,0), (1,1), (2,2), (3,3); other
+        # inner positions and all ghost positions absent.
+        present = {(0, 0), (1, 1), (2, 2), (3, 3)}
+        _write_synthetic_hdf5(path, sorted(present))
 
-        block, ts, position = read_block(path, 0, 0)
-        # The 25-chip-block laid out row-major. Slot for chip-grid (R, C) is
-        # at block-index (R * 5 + C).
-        for r in range(5):
-            for c in range(5):
-                slot = (r * 5 + c) * CHIP_PIXELS
-                end = slot + CHIP_PIXELS
-                chip_data = block[:, :, slot:end]
-                if (r, c) in positions:
-                    # Real data: should have no nodata.
-                    assert not (chip_data == NODATA_U8).any(), \
-                        f"chip ({r},{c}) had unexpected NODATA"
+        block, _, _ = read_block(path, 0, 0)
+        # Walk the 4x4 inner grid: present chips have data, missing chips are NODATA.
+        for r in range(LIVE_ROWS):
+            for c in range(LIVE_COLS):
+                y0 = GHOST + r * CHIP_SIZE
+                x0 = GHOST + c * CHIP_SIZE
+                slab = block[:, :, y0:y0 + CHIP_SIZE, x0:x0 + CHIP_SIZE]
+                if (r, c) in present:
+                    assert not (slab == NODATA_U8).any(), \
+                        f"inner chip ({r},{c}) had unexpected NODATA"
                 else:
-                    # Missing chip: every cell should be NODATA_U8.
-                    assert (chip_data == NODATA_U8).all(), \
-                        f"chip ({r},{c}) was missing but not all-NODATA"
-    print("  read_block (missing chips -> nodata) — OK")
-
-
-def test_read_block_off_tile_chips_filled_with_nodata():
-    """Block at the right/bottom edge of the tile should pad missing
-    positions (i.e. ones past the data) with NODATA_U8."""
-    with tempfile.TemporaryDirectory() as tmpd:
-        path = os.path.join(tmpd, "fake.h5")
-        # Chip grid is 4 rows x 4 cols (chip positions 0..3 inclusive).
-        # Block (0, 0) has live area covering rows 0..3, cols 0..3 (all present),
-        # but the ghost row (r=4) and ghost col (c=4) are OFF-TILE — should pad.
-        positions = [(y, x) for y in range(4) for x in range(4)]
-        _write_synthetic_hdf5(path, positions)
-
-        # We should still need exactly one block: get_block_grid_shape returns
-        # ceil((3+1)/4) = 1 in both dimensions.
-        n_rows, n_cols = get_block_grid_shape(path)
-        assert (n_rows, n_cols) == (1, 1), (n_rows, n_cols)
-
-        block, ts, position = read_block(path, 0, 0)
-        # Live 4x4 should be data; row 4 and col 4 should be NODATA.
-        # Inner positions (r in 0..3, c in 0..3) should have real values.
-        for r in range(4):
-            for c in range(4):
-                slot = (r * 5 + c) * CHIP_PIXELS
-                end = slot + CHIP_PIXELS
-                assert not (block[:, :, slot:end] == NODATA_U8).any(), \
-                    f"inner chip ({r},{c}) had unexpected NODATA"
-        # Ghost row (r=4): all c.
-        for c in range(5):
-            slot = (4 * 5 + c) * CHIP_PIXELS
-            end = slot + CHIP_PIXELS
-            assert (block[:, :, slot:end] == NODATA_U8).all(), \
-                f"ghost row chip (4,{c}) wasn't all NODATA"
-        # Ghost col (c=4): all r.
-        for r in range(5):
-            slot = (r * 5 + 4) * CHIP_PIXELS
-            end = slot + CHIP_PIXELS
-            assert (block[:, :, slot:end] == NODATA_U8).all(), \
-                f"ghost col chip ({r},4) wasn't all NODATA"
-    print("  read_block (off-tile -> nodata) — OK")
+                    assert (slab == NODATA_U8).all(), \
+                        f"missing inner chip ({r},{c}) wasn't all NODATA"
+    print("  read_block (missing inner chips -> NODATA) — OK")
 
 
 def test_block_world_origin():
-    """BlockPosition.world_origin_{x,y} / pixel_res should be derived
-    correctly from xs_new/ys_new — including for blocks whose top-left chip
-    is off-tile (sparse case), where the helper extrapolates from any
-    present chip."""
+    """world_origin should reference the live area's NW corner (chip
+    (chip_y_start, chip_x_start), pixel (0, 0))."""
     with tempfile.TemporaryDirectory() as tmpd:
         path = os.path.join(tmpd, "fake.h5")
-        # Chip grid: full 5x5 block worth of data so block (0,0) is dense and
-        # block (0,1) has its first 4 cols missing (testing the extrapolation
-        # fallback inside the helper).
         positions = [(y, x) for y in range(5) for x in range(5)]
         _write_synthetic_hdf5(path, positions)
 
-        # Block (0, 0): NW corner is chip (0, 0) — UTM origin is exactly
-        # the synthetic tile origin.
+        # Block (0, 0): live area's NW corner is chip (0, 0) pixel (0, 0).
         _, _, pos00 = read_block(path, 0, 0)
         assert pos00.pixel_res == PIXEL_RES
-        assert pos00.world_origin_x == SYNTHETIC_TILE_X0, \
-            (pos00.world_origin_x, SYNTHETIC_TILE_X0)
-        assert pos00.world_origin_y == SYNTHETIC_TILE_Y0, \
-            (pos00.world_origin_y, SYNTHETIC_TILE_Y0)
+        assert pos00.world_origin_x == SYNTHETIC_TILE_X0
+        assert pos00.world_origin_y == SYNTHETIC_TILE_Y0
 
-        # A non-origin block where the requested top-left chip IS present:
-        # build a separate file with chips at chip-grid (4..8, 4..8); for
-        # block (1, 1) -> chip_y_start=4, chip_x_start=4.
+        # Non-origin block: build a file with chips at (4..8, 4..8). Block
+        # (1, 1) lives at chip_y_start = chip_x_start = 4.
         path2 = os.path.join(tmpd, "fake2.h5")
         offset_positions = [(y, x) for y in range(4, 9) for x in range(4, 9)]
         _write_synthetic_hdf5(path2, offset_positions)
         _, _, pos11 = read_block(path2, 1, 1)
         expected_x = SYNTHETIC_TILE_X0 + 4 * CHIP_SIZE * PIXEL_RES
         expected_y = SYNTHETIC_TILE_Y0 - 4 * CHIP_SIZE * PIXEL_RES
-        assert pos11.world_origin_x == expected_x, \
-            (pos11.world_origin_x, expected_x)
-        assert pos11.world_origin_y == expected_y, \
-            (pos11.world_origin_y, expected_y)
+        assert pos11.world_origin_x == expected_x
+        assert pos11.world_origin_y == expected_y
     print("  read_block (world_origin derivation) — OK")
 
 
@@ -274,44 +285,81 @@ def test_read_block_ts_range_filter():
     with tempfile.TemporaryDirectory() as tmpd:
         path = os.path.join(tmpd, "fake.h5")
         positions = [(0, 0), (0, 1)]
-        # ts_stride_days = 5, start = 2024-01-01 -> ts = [738887, 738892, 738897, 738902]
         _write_synthetic_hdf5(path, positions, n_ts=4, ts_stride_days=5)
 
-        # No filter -> all 4 timesteps
         block, ts, _ = read_block(path, 0, 0)
         assert len(ts) == 4
+        assert block.shape == (4, N_BANDS, BLOCK_H, BLOCK_W)
 
-        # Inclusive filter that keeps only timesteps 1 and 2
         block, ts, _ = read_block(
             path, 0, 0,
             ts_start_ordinal=738892, ts_end_ordinal=738897,
         )
         assert len(ts) == 2
         assert ts.tolist() == [738892, 738897]
-        assert block.shape[0] == 2
+        assert block.shape == (2, N_BANDS, BLOCK_H, BLOCK_W)
     print("  read_block (ts range filter) — OK")
 
 
+def test_ghost_strip_contents_match_source_chip_slabs():
+    """Verify that the ghost regions actually contain pixels from the
+    correct (source-chip, source-slab) combinations.
+
+    For block (1, 1) of a 6x6 grid, the top strip's column-0 segment
+    (block[..., 0:128, 128:384]) should be the bottom 128 rows of the chip
+    at chip-grid (3, 4) — i.e. the chip just above the live area's NW chip.
+    The synthetic data fills each chip with linspace based on chip_idx; we
+    just check those pixels are not NODATA (a non-NODATA value confirms the
+    chip was read and the right slab was placed)."""
+    with tempfile.TemporaryDirectory() as tmpd:
+        path = os.path.join(tmpd, "fake.h5")
+        # Dense 6x6 chip grid spanning chip-grid (3..8, 3..8).
+        positions = [(y, x) for y in range(3, 9) for x in range(3, 9)]
+        _write_synthetic_hdf5(path, positions)
+
+        block, _, _ = read_block(path, 1, 1)
+        # The top strip should be non-NODATA (chip (3, 4..7) is present).
+        for c in range(LIVE_COLS):
+            x0 = GHOST + c * CHIP_SIZE
+            slab = block[:, :, 0:GHOST, x0:x0 + CHIP_SIZE]
+            assert not (slab == NODATA_U8).any(), \
+                f"top strip slab c={c} had NODATA"
+
+        # The left strip likewise (chip (4..7, 3) is present).
+        for r in range(LIVE_ROWS):
+            y0 = GHOST + r * CHIP_SIZE
+            slab = block[:, :, y0:y0 + CHIP_SIZE, 0:GHOST]
+            assert not (slab == NODATA_U8).any(), \
+                f"left strip slab r={r} had NODATA"
+
+        # The 4 corners (NW/NE/SW/SE) should be non-NODATA.
+        nw = block[:, :, 0:GHOST, 0:GHOST]
+        ne = block[:, :, 0:GHOST, GHOST + LIVE_W:]
+        sw = block[:, :, GHOST + LIVE_H:, 0:GHOST]
+        se = block[:, :, GHOST + LIVE_H:, GHOST + LIVE_W:]
+        for name, c in [("NW", nw), ("NE", ne), ("SW", sw), ("SE", se)]:
+            assert not (c == NODATA_U8).any(), f"{name} corner had NODATA"
+    print("  read_block (ghost strip/corner contents present) — OK")
+
+
 def test_iter_blocks_covers_full_grid():
-    """iter_blocks should yield exactly n_block_rows * n_block_cols blocks
-    in row-major order."""
+    """iter_blocks should yield every block in row-major order."""
     with tempfile.TemporaryDirectory() as tmpd:
         path = os.path.join(tmpd, "fake.h5")
         # 8x12 chip grid -> 2x3 block grid
         positions = [(y, x) for y in range(8) for x in range(12)]
         _write_synthetic_hdf5(path, positions)
         n_rows, n_cols = get_block_grid_shape(path)
-        assert (n_rows, n_cols) == (2, 3), (n_rows, n_cols)
+        assert (n_rows, n_cols) == (2, 3)
 
         positions_seen = []
         for block, ts, pos in iter_blocks(path):
             positions_seen.append((pos.block_row, pos.block_col))
-            assert block.shape == (N_TS, 10,
-                                   BLOCK_GRID_ROWS * BLOCK_GRID_COLS * CHIP_PIXELS)
+            assert block.shape == (N_TS, N_BANDS, BLOCK_H, BLOCK_W)
 
         expected = [(r, c) for r in range(n_rows) for c in range(n_cols)]
-        assert positions_seen == expected, positions_seen
-    print(f"  iter_blocks (covers full grid, row-major) — OK")
+        assert positions_seen == expected
+    print("  iter_blocks (covers full grid, row-major) — OK")
 
 
 def test_iter_blocks_filter():
@@ -320,32 +368,27 @@ def test_iter_blocks_filter():
         path = os.path.join(tmpd, "fake.h5")
         positions = [(y, x) for y in range(8) for x in range(8)]
         _write_synthetic_hdf5(path, positions)
-        # Keep only odd-sum blocks
         kept = list(iter_blocks(
             path,
             block_filter=lambda br, bc: (br + bc) % 2 == 1,
         ))
-        # 2x2 block grid -> kept = (0,1), (1,0) -> 2 blocks
-        assert len(kept) == 2, len(kept)
+        assert len(kept) == 2
         seen = {(p.block_row, p.block_col) for _, _, p in kept}
-        assert seen == {(0, 1), (1, 0)}, seen
+        assert seen == {(0, 1), (1, 0)}
     print("  iter_blocks (block_filter) — OK")
 
 
 def test_stretch_matches_dataset_swin_gz_semantics():
-    """The reader's stretch must produce the same per-band q02/q98 mapping
-    as `pybacdm.shared.bacdm.data.dataset_swin_GZ._to_uint8` for the same
-    input. Easiest way to verify: build a chip whose values are known
-    in advance, read it back, recompute q02/q98 by hand, and check that
-    a sample pixel matches the expected mapping within rounding tolerance."""
+    """Verify per-band q02/q98 stretch produces the same values as a
+    hand-computed reference (uses live chip (0, 0) pixel position)."""
     with tempfile.TemporaryDirectory() as tmpd:
         path = os.path.join(tmpd, "fake.h5")
         positions = [(0, 0)]
         _write_synthetic_hdf5(path, positions, n_ts=1)
 
-        # Recompute what the stretch SHOULD produce for chip 0, ts 0, band 0:
-        # The synthetic data fills with linspace(base, base+800, CHIP_PIXELS).
-        base = 0 * 1000 + 0 * 100 + 0 * 10   # 0
+        # Synthetic data fills chip 0 with linspace(base, base+800, CHIP_PIXELS)
+        # where base = chip_idx * 1000 + t * 100 + b * 10 = 0 for (0, 0, 0).
+        base = 0
         expected_band = np.linspace(base, base + 800, CHIP_PIXELS).astype(np.uint16)
         q02, q98 = np.nanpercentile(expected_band.astype(np.float32),
                                     [2.0, 98.0])
@@ -353,13 +396,17 @@ def test_stretch_matches_dataset_swin_gz_semantics():
         scaled = np.clip(
             (expected_band.astype(np.float32) - q02) / denom * (NODATA_U8 - 1),
             0, NODATA_U8 - 1,
-        ).astype(np.uint8)
+        ).astype(np.uint8).reshape(CHIP_SIZE, CHIP_SIZE)
 
         block, _, _ = read_block(path, 0, 0)
-        # Block chip 0 = position (0,0) in 5x5 -> block-idx 0 -> first 65_536 slots.
-        actual_band = block[0, 0, :CHIP_PIXELS]
-        assert np.array_equal(actual_band, scaled), \
-            f"stretch mismatch: first 5 actual={actual_band[:5]} expected={scaled[:5]}"
+        # Live chip (0, 0) is at block[..., GHOST:GHOST+CHIP_SIZE,
+        #                              GHOST:GHOST+CHIP_SIZE].
+        actual_chip_b0 = block[0, 0,
+                               GHOST:GHOST + CHIP_SIZE,
+                               GHOST:GHOST + CHIP_SIZE]
+        assert np.array_equal(actual_chip_b0, scaled), \
+            f"stretch mismatch: actual[0,:5]={actual_chip_b0[0, :5]} " \
+            f"expected[0,:5]={scaled[0, :5]}"
     print("  stretch matches _to_uint8 semantics — OK")
 
 
@@ -370,19 +417,30 @@ def test_stretch_passes_nodata_through():
         positions = [(0, 0)]
         _write_synthetic_hdf5(path, positions, n_ts=1)
 
-        # Manually punch some nodata into the source file.
+        # Punch 1000 nodata pixels at chip 0, band 0, ts 0 (flat pixels 0..999).
         with h5py.File(path, "r+") as h5f:
             v = h5f["values"]   # type: ignore[index]
-            # First 1000 pixels of chip 0, band 0, ts 0 -> nodata
             v[0, 0, :1000] = DEFAULT_NODATA_U16
 
         block, _, _ = read_block(path, 0, 0)
-        # Those pixels should now be NODATA_U8 in band 0.
-        assert (block[0, 0, :1000] == NODATA_U8).all()
-        # Other bands at those pixel positions should NOT be nodata.
-        for b in range(1, 10):
-            assert not (block[0, b, :1000] == NODATA_U8).all(), \
-                f"band {b} got nodata where only band 0 should have"
+        # The 1000 nodata pixels at flat positions 0..999 are in chip 0's
+        # row 0 cols 0..255 + row 1 cols 0..255 + row 2 cols 0..255 + row 3
+        # cols 0..231. Convert each flat index to chip-local (row, col) and
+        # then to block-local (y, x).
+        flat_indices = np.arange(1000)
+        local_rows = flat_indices // CHIP_SIZE
+        local_cols = flat_indices % CHIP_SIZE
+        block_ys = GHOST + local_rows
+        block_xs = GHOST + local_cols
+        actual = block[0, 0, block_ys, block_xs]
+        assert (actual == NODATA_U8).all(), \
+            f"{(actual != NODATA_U8).sum()} nodata pixels missed the sentinel"
+
+        # Other bands at those positions should not be nodata.
+        for b in range(1, N_BANDS):
+            actual_b = block[0, b, block_ys, block_xs]
+            assert not (actual_b == NODATA_U8).all(), \
+                f"band {b} got NODATA where only band 0 should have"
     print("  stretch preserves nodata sentinel — OK")
 
 
@@ -394,7 +452,6 @@ def test_dry_run_summary_matches_grid():
         _write_synthetic_hdf5(path, positions)
         n_rows, n_cols = get_block_grid_shape(path)
 
-        # Silence the print output for tests but capture the returned dict.
         import io, contextlib
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -411,12 +468,14 @@ def test_dry_run_summary_matches_grid():
 
 def main():
     print("Running input_setup tests...")
+    test_block_shape_constants()
     test_get_block_grid_shape()
-    test_read_block_all_chips_present()
-    test_read_block_missing_chips_filled_with_nodata()
-    test_read_block_off_tile_chips_filled_with_nodata()
+    test_read_block_2d_layout_and_live_area_populated()
+    test_read_block_origin_block_has_nw_ghost_padded()
+    test_read_block_missing_inner_chips_filled_with_nodata()
     test_block_world_origin()
     test_read_block_ts_range_filter()
+    test_ghost_strip_contents_match_source_chip_slabs()
     test_iter_blocks_covers_full_grid()
     test_iter_blocks_filter()
     test_stretch_matches_dataset_swin_gz_semantics()

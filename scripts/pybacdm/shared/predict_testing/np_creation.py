@@ -4,10 +4,10 @@ Provides:
   - `make_chip_batch` / `make_before_after`: dummy (B, H, W, C) batches that
     match `predict_before_after_chips`'s input contract. Used to exercise
     step 4 of the pipeline (model inference) in isolation.
-  - `make_chip_block`: dummy (N_TS, 10, n_chips * 65_536) uint8 block matching
-    the output of step 2 (`to_uint8`), plus a paired `ts` ordinal-date array.
-    Used to exercise steps 3 (`create_before_after_composites`) and 4
-    (`generate_shifted_chips`).
+  - `make_chip_block`: dummy (N_TS, 10, BLOCK_H, BLOCK_W) uint8 block matching
+    the 2-D layout produced by step 1 (`input_setup.read_block`), plus a
+    paired `ts` ordinal-date array. Used to exercise steps 3
+    (`create_before_after_composites`) and 4 (`generate_shifted_chips`).
 """
 from datetime import date
 
@@ -18,9 +18,14 @@ H, W, C = 256, 256, 10
 NODATA = 65535          # uint16 NoData sentinel that _to_uint8 maps to 255
 S2_REFLECTANCE_MAX = 10_000   # plausible S2 L2A surface-reflectance ceiling
 
-# Chip-block contract — see composite_shift_chips/composite.py
-CHIP_PIXELS = 65_536          # 256 * 256 per chip
+# Chip-block contract — see input_setup/hdf5_reader.py
+CHIP_SIZE = 256
 NODATA_U8 = 255               # uint8 NoData sentinel after _to_uint8 stretch
+LIVE_H = 4 * CHIP_SIZE        # 1024
+LIVE_W = 4 * CHIP_SIZE        # 1024
+GHOST = CHIP_SIZE // 2        # 128
+BLOCK_H = LIVE_H + 2 * GHOST  # 1280
+BLOCK_W = LIVE_W + 2 * GHOST  # 1280
 
 
 def make_chip_batch(batch_size: int = 2, *, nodata_frac: float = 0.02,
@@ -54,20 +59,17 @@ def make_before_after(batch_size: int = 2, *, nodata_frac: float = 0.02,
     return before, after
 
 
-def make_chip_block(n_ts: int = 48, n_chips: int = 25, *,
+def make_chip_block(n_ts: int = 48, *,
                     nodata_frac: float = 0.05,
                     revisit_days: int = 5,
                     start_date: tuple[int, int, int] = (2024, 1, 1),
                     seed: int | None = 0) -> tuple[np.ndarray, np.ndarray]:
-    """Return a (block, ts) pair simulating step-2 output for steps 3-4.
+    """Return a (block, ts) pair in the 2-D pixel layout used by step 1.
 
     Parameters
     ----------
     n_ts : int
         Number of timesteps along the first axis.
-    n_chips : int
-        Number of chips packed end-to-end along the flat pixel axis.
-        25 corresponds to the 5x5 block from the pipeline flow chart.
     nodata_frac : float
         Fraction of (timestep, pixel) cells set to NODATA_U8 (whole-pixel
         mask broadcast across all 10 bands) so the cascading-selection
@@ -83,20 +85,20 @@ def make_chip_block(n_ts: int = 48, n_chips: int = 25, *,
     Returns
     -------
     block : np.ndarray
-        Shape (n_ts, 10, n_chips * 65_536), dtype uint8. Values in
-        [1, 254] for valid pixels; NODATA_U8 (255) where a (t, pixel) cell
-        was nodata-masked. Band 0 alone is sufficient to detect nodata.
+        Shape (n_ts, 10, BLOCK_H, BLOCK_W), dtype uint8. Values in [1, 254]
+        for valid pixels; NODATA_U8 (255) where a (t, y, x) cell was
+        nodata-masked. Band 0 alone is sufficient to detect nodata.
     ts : np.ndarray
         Shape (n_ts,), dtype int64. Ordinal dates, ascending.
     """
     rng = np.random.default_rng(seed)
-    n_pixels = n_chips * CHIP_PIXELS
-    block = rng.integers(low=1, high=NODATA_U8, size=(n_ts, 10, n_pixels),
+    block = rng.integers(low=1, high=NODATA_U8, size=(n_ts, 10, BLOCK_H, BLOCK_W),
                          dtype=np.uint8)
 
     if nodata_frac > 0:
-        mask = rng.random(size=(n_ts, n_pixels)) < nodata_frac
-        block[:, :, :][mask[:, None, :].repeat(10, axis=1)] = NODATA_U8
+        # Whole-pixel nodata mask broadcast across all 10 bands.
+        mask = rng.random(size=(n_ts, BLOCK_H, BLOCK_W)) < nodata_frac
+        block[:, :, :, :] = np.where(mask[:, None, :, :], NODATA_U8, block)
 
     start_ord = date(*start_date).toordinal()
     ts = np.arange(start_ord, start_ord + n_ts * revisit_days, revisit_days,
@@ -113,11 +115,12 @@ if __name__ == "__main__":
               f"min={arr.min()}  max={arr.max()}  nodata_pixels={n_nodata}")
 
     print("\n== make_chip_block ==")
-    block, ts = make_chip_block(n_ts=10, n_chips=4, nodata_frac=0.05)
-    n_nodata = int((block[:, 0, :] == NODATA_U8).sum())
+    block, ts = make_chip_block(n_ts=10, nodata_frac=0.05)
+    n_nodata = int((block[:, 0, :, :] == NODATA_U8).sum())
+    total_cells = block.shape[0] * block.shape[2] * block.shape[3]
     print(f"  block: shape={block.shape}  dtype={block.dtype}  "
           f"min={block.min()}  max={block.max()}  "
-          f"nodata_cells (t,pixel)={n_nodata} of {block.shape[0] * block.shape[2]:,}")
+          f"nodata_cells={n_nodata} of {total_cells:,}")
     print(f"  ts:    shape={ts.shape}  dtype={ts.dtype}  "
           f"first={date.fromordinal(int(ts[0]))}  "
           f"last={date.fromordinal(int(ts[-1]))}")

@@ -43,8 +43,14 @@ class ChipPredictionRecord:
     block_row:      int
     block_col:      int
     chip_kind:      str          # 'original' | 'h_shift' | 'v_shift' | 'diagonal'
-    grid_row:       int          # 0..3
-    grid_col:       int          # 0..3
+    grid_row:       int          # original: 0..3
+                                  # h_shift:  0..3   (r)
+                                  # v_shift:  -1..3  (r_gap)
+                                  # diagonal: -1..3  (r_gap)
+    grid_col:       int          # original: 0..3
+                                  # h_shift:  -1..3  (c_gap)
+                                  # v_shift:  0..3   (c)
+                                  # diagonal: -1..3  (c_gap)
 
     # Date
     date_ordinal:   int
@@ -52,10 +58,11 @@ class ChipPredictionRecord:
 
     # World position metadata: tells consumers where to place this chip's
     # (256, 256) prediction in tile-pixel coordinates without re-deriving the
-    # shift offsets.
+    # shift offsets. Reference frame is the LIVE area's NW corner — ghost-
+    # using shifts (negative grid_row / grid_col) have negative chip_nw_px_*.
     block_world_origin_x: float
     block_world_origin_y: float
-    chip_nw_px_y:         int    # pixel offset from block NW to this chip's NW
+    chip_nw_px_y:         int    # pixel offset from LIVE NW to this chip's NW
     chip_nw_px_x:         int
     pixel_res:            float
 
@@ -116,10 +123,12 @@ def chip_nw_pixel_offset(chip_kind: str,
                          grid_row: int,
                          grid_col: int,
                          ) -> tuple[int, int]:
-    """Return (px_y, px_x) of the chip's NW corner relative to the block's NW corner.
+    """Return (px_y, px_x) of the chip's NW corner relative to the LIVE
+    area's NW corner.
 
-    Each shift moves the chip's NW corner by HALF px in the relevant axis,
-    relative to the unshifted chip at the same grid position.
+    Values can be negative for shifts that extend into the ghost ring
+    (h_shift c_gap=-1 -> px_x = -128; v_shift r_gap=-1 -> px_y = -128;
+    diagonal with either gap = -1 -> negative on the respective axis).
     """
     base_y = grid_row * CHIP_H
     base_x = grid_col * CHIP_W
