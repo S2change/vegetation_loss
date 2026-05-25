@@ -275,7 +275,30 @@ def main():
         if SAVE_OUTPUT:
             nw_y, nw_x = chip_nw_pixel_offset(chip_kind, gr, gc)
             t0 = time.perf_counter()
-            voters[date_ordinal].add(label_map, nw_y, nw_x)
+            # DEBUG: log every non-bg chip's vote-delta breakdown. The
+            # earlier first-only print showed delta=0 on a v_shift with
+            # nw=(896,0), suggesting the non-bg pixels were in the chip's
+            # south half — outside LIVE. Confirm by logging where the
+            # non-bg pixels actually live within each chip.
+            n_nonbg_total = int(label_map.astype(bool).sum())
+            voter = voters[date_ordinal]
+            votes_before = int(voter.votes.sum())
+            voter.add(label_map, nw_y, nw_x)
+            votes_after = int(voter.votes.sum())
+            if n_nonbg_total > 0:
+                # Split non-bg counts by chip half (north / south, east / west)
+                # so we can see whether they're concentrated in the half
+                # that falls outside LIVE for this chip's NW offset.
+                nbg = label_map.astype(bool)
+                n_top    = int(nbg[:128, :].sum())
+                n_bottom = int(nbg[128:, :].sum())
+                n_left   = int(nbg[:, :128].sum())
+                n_right  = int(nbg[:, 128:].sum())
+                print(f"  [debug] non-bg chip: kind={chip_kind} "
+                      f"gr={gr} gc={gc} nw=({nw_y},{nw_x}) "
+                      f"nonbg={n_nonbg_total} "
+                      f"(top={n_top} bot={n_bottom} L={n_left} R={n_right}) "
+                      f"votes_delta={votes_after - votes_before}")
             t_vote_total += time.perf_counter() - t0
 
         if SAVE_CHIP_RECORDS:
