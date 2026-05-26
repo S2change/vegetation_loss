@@ -18,7 +18,7 @@ module purge
 module load gcc13/openmpi/4.1.6
 source "${VENV:-/users1/cpca070342024/shared/vchips/venv}/bin/activate"
 
-DISTRIBUTE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+: "${DISTRIBUTE_DIR:?DISTRIBUTE_DIR must be exported by submit_tile.sh}"
 python "$DISTRIBUTE_DIR/aggregate_tile.py"
 
 echo "Aggregator finished for tile $TILE_ID."

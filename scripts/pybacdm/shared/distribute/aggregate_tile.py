@@ -1,4 +1,4 @@
-"""Stitch per-block voted .npz shards into one tile-level Parquet + .npz.
+"""Stitch per-block voted .npz shards into tile-level Parquet + .npz + GeoTIFFs.
 
 Runs once after all array tasks for a tile complete (gated by the SLURM
 `afterok` dependency in submit_tile.sh). Reads every
@@ -12,10 +12,15 @@ position in a tile-sized canvas, and writes:
     coords, bbox + centroid in UTM, and the component's RLE.
   - `{TILE_ID}_tile.npz` (AUXILIARY) — the dense `(n_dates, TILE_H, TILE_W)`
     uint8 label map and the metadata needed to re-project it.
+  - `{TILE_ID}_tile_{YYYY-MM-DD}.tif` (GIS) — one georeferenced GeoTIFF
+    per target date, LZW-compressed, with class 0 tagged as NoData so
+    GIS tools render background transparent. CRS comes from the source
+    HDF5 if `TILE_HDF5_PATH` is set in the env; otherwise the GeoTIFFs
+    are still spatially located via the transform but without a CRS tag.
 
 The Parquet is the unit of analysis ("here's a patch detected on date X");
-the .npz preserves the dense map for visualisation, debugging, and any
-operation that needs random pixel access.
+the .npz preserves the dense map for visualisation/debugging via numpy;
+the GeoTIFFs are for direct ingestion into QGIS / ArcGIS / gdal.
 """
 import os
 import sys
@@ -27,6 +32,17 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+import rasterio
+from rasterio.transform import from_origin
+from rasterio.crs import CRS
+
+# h5py used only to grab the CRS attribute from the source HDF5. Optional
+# so the aggregator can still run when TILE_HDF5_PATH isn't provided.
+try:
+    import h5py
+    _HAVE_H5PY = True
+except ImportError:
+    _HAVE_H5PY = False
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent))   # shared/
@@ -134,6 +150,91 @@ def _components_to_dataframe(labels: np.ndarray,
         return pd.DataFrame(columns=_PARQUET_COLUMNS)
     df = pd.DataFrame(rows)
     return df[_PARQUET_COLUMNS]
+
+
+def _read_hdf5_crs(hdf5_path: str | None) -> CRS | None:
+    """Return a rasterio CRS for the tile's HDF5, or None if unavailable.
+
+    Looks up the `crs` attribute on the HDF5 root group (set by the
+    upstream tile-builder). Accepts EPSG codes as ints/strings or full
+    WKT / PROJ strings — whatever rasterio's `CRS.from_user_input`
+    understands. Returns None silently if the HDF5 doesn't carry the
+    attr, h5py isn't installed, or the path is missing — the GeoTIFF
+    will then be written with no CRS tag (still spatially located).
+    """
+    if not hdf5_path:
+        return None
+    if not _HAVE_H5PY:
+        print("  [note] h5py not installed; GeoTIFFs written without CRS.")
+        return None
+    if not os.path.exists(hdf5_path):
+        print(f"  [note] TILE_HDF5_PATH not found ({hdf5_path}); "
+              f"GeoTIFFs written without CRS.")
+        return None
+    with h5py.File(hdf5_path, "r") as h5f:
+        raw = h5f.attrs.get("crs")
+        if raw is None:
+            print("  [note] HDF5 has no `crs` attribute; "
+                  "GeoTIFFs written without CRS.")
+            return None
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+    try:
+        return CRS.from_user_input(raw)
+    except Exception as e:
+        print(f"  [warn] failed to parse CRS {raw!r}: {e}; "
+              f"GeoTIFFs written without CRS.")
+        return None
+
+
+def _write_geotiffs_per_date(output_dir: str,
+                             tile_id: str,
+                             labels: np.ndarray,
+                             target_dates: np.ndarray,
+                             world_origin_x: float,
+                             world_origin_y: float,
+                             pixel_res: float,
+                             crs: CRS | None) -> list[str]:
+    """Write one LZW-compressed GeoTIFF per target date.
+
+    Class 0 (background / no detection) is tagged as the GeoTIFF's nodata
+    value so QGIS / ArcGIS render it transparent by default.
+
+    Returns the list of paths written.
+    """
+    n_dates, tile_h, tile_w = labels.shape
+    # rasterio's `from_origin(x, y, xres, yres)` builds an affine where
+    # the upper-left pixel's NW corner is (x, y), x grows east at xres,
+    # y shrinks south at yres. World origin in our metadata is the LIVE
+    # NW corner of the tile, which matches that convention.
+    transform = from_origin(world_origin_x, world_origin_y, pixel_res, pixel_res)
+
+    paths: list[str] = []
+    for i in range(n_dates):
+        ordinal = int(target_dates[i])
+        iso = _date.fromordinal(ordinal).isoformat()
+        out_path = os.path.join(output_dir, f"{tile_id}_tile_{iso}.tif")
+        profile = {
+            "driver": "GTiff",
+            "dtype": "uint8",
+            "count": 1,
+            "height": tile_h,
+            "width": tile_w,
+            "transform": transform,
+            "nodata": 0,
+            "compress": "LZW",
+            "tiled": True,
+            "blockxsize": 256,
+            "blockysize": 256,
+        }
+        if crs is not None:
+            profile["crs"] = crs
+        with rasterio.open(out_path, "w", **profile) as dst:
+            dst.write(labels[i], 1)
+            # Tag the band with the date so gdalinfo + QGIS show it.
+            dst.set_band_description(1, f"voted_labels_{iso}")
+        paths.append(out_path)
+    return paths
 
 
 def _write_dense_npz(out_path: str, *,
@@ -323,6 +424,23 @@ def main() -> None:
     npz_bytes = os.path.getsize(npz_path)
     print(f"Wrote {npz_path}")
     print(f"  ({npz_bytes / 1024:.1f} KB in {write_npz_s:.2f} s)")
+
+    # ── Step C: per-date GeoTIFFs (GIS-ready output) ──────────────────────
+    print(f"\nWriting per-date GeoTIFFs...")
+    crs = _read_hdf5_crs(os.environ.get("TILE_HDF5_PATH"))
+    if crs is not None:
+        print(f"  CRS:  {crs}")
+    t0 = time.perf_counter()
+    tif_paths = _write_geotiffs_per_date(
+        output_dir, tile_id, labels, ref_dates,
+        tile_origin_x, tile_origin_y, ref_pres, crs,
+    )
+    write_tif_s = time.perf_counter() - t0
+    total_tif_bytes = sum(os.path.getsize(p) for p in tif_paths)
+    print(f"  Wrote {len(tif_paths)} GeoTIFF(s) in {write_tif_s:.2f} s "
+          f"(total {total_tif_bytes / 1024:.1f} KB):")
+    for p in tif_paths:
+        print(f"    {p}  ({os.path.getsize(p) / 1024:.1f} KB)")
 
     print(f"\nTotal aggregate time: {time.perf_counter() - t_total:.2f} s")
 

@@ -37,13 +37,15 @@ from pathlib import Path
 import numpy as np
 import psutil
 
-# Make the bacdm/ subpackage importable. Same path setup as
-# predict_testing/run_predict.py — on INCD the model code lives under
-# `prediction_model/bacdm/` (we point sys.path at `prediction_model/`).
-# Locally for dev, callers must symlink or otherwise wire it up the same.
+# Make the bacdm/ subpackage importable. The INCD layout places
+# prediction_model/ as a sibling of distribute/ (under shared/), so we
+# point sys.path at `<shared>/prediction_model/` rather than
+# `<distribute>/prediction_model/`. The bacdm/ subpackage's own modules
+# use `from bacdm.X import ...` internally, so we point at the *parent*
+# of bacdm/, not at bacdm/ itself.
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent))                          # shared/
-sys.path.insert(0, str(_HERE / "prediction_model"))            # for bacdm.*
+sys.path.insert(0, str(_HERE.parent / "prediction_model"))     # for bacdm.*
 
 from input_setup import read_block, get_block_grid_shape
 from composite_shift_chips import (
@@ -55,7 +57,7 @@ from postprocess import (
     VoteAccumulator,
     write_voted_block,
 )
-from predict import load_model, predict_before_after_chips
+from bacdm.predict import load_model, predict_before_after_chips
 
 
 def rss_mb() -> float:

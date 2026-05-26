@@ -309,6 +309,96 @@ def test_inconsistent_target_dates_rejected():
     print("  Aggregator: inconsistent target_dates rejected — OK")
 
 
+def test_geotiff_per_date_written():
+    """Aggregator writes one LZW-compressed GeoTIFF per target date,
+    with class 0 tagged as NoData and the correct affine transform."""
+    import rasterio
+    with tempfile.TemporaryDirectory() as tmpd:
+        tmpd = Path(tmpd)
+        target_dates = np.array([738887, 738900], dtype=np.int64)
+        # Put a 5x5 class-1 patch in block (0, 0), date 0; rest empty.
+        lab = _block_labels_with_square(
+            r=0, c=0, date_idx=0, class_id=1,
+            y0=10, x0=10, side=5,
+        )
+        _write_block(tmpd, 0, 0, lab, target_dates)
+        for (r, c) in [(0, 1), (1, 0), (1, 1)]:
+            _write_block(tmpd, r, c, _empty_block_labels(), target_dates)
+
+        res = _run_aggregator(tmpd)
+        assert res.returncode == 0, res.stderr
+
+        # One GeoTIFF per date.
+        expected_tifs = [
+            tmpd / f"{TILE_ID}_tile_2024-01-02.tif",
+            tmpd / f"{TILE_ID}_tile_2024-01-15.tif",
+        ]
+        for p in expected_tifs:
+            assert p.exists(), f"missing {p}"
+
+        # Open the first one and verify everything.
+        with rasterio.open(expected_tifs[0]) as src:
+            assert src.width == 2 * CHIP_SIZE
+            assert src.height == 2 * CHIP_SIZE
+            assert src.count == 1
+            assert src.dtypes == ("uint8",)
+            assert src.nodata == 0
+            # Compression tag should report LZW.
+            assert src.compression.value == "LZW"
+            # Affine transform: (xres, 0, x_origin, 0, -yres, y_origin)
+            t = src.transform
+            assert abs(t.a - PIXEL_RES) < 1e-9
+            assert abs(t.e + PIXEL_RES) < 1e-9   # -yres
+            assert abs(t.c - TILE_ORIGIN_X) < 1e-6
+            assert abs(t.f - TILE_ORIGIN_Y) < 1e-6
+            # The 5x5 class-1 patch must be present at (10, 10).
+            data = src.read(1)
+            assert data.shape == (2 * CHIP_SIZE, 2 * CHIP_SIZE)
+            assert (data[10:15, 10:15] == 1).all()
+            # Everywhere else is 0 (nodata).
+            mask = np.ones_like(data, dtype=bool)
+            mask[10:15, 10:15] = False
+            assert (data[mask] == 0).all()
+            # Band description should mention the date.
+            assert "2024-01-02" in src.descriptions[0]
+
+        # Second GeoTIFF (date 1) is all-zero everywhere.
+        with rasterio.open(expected_tifs[1]) as src:
+            data = src.read(1)
+            assert (data == 0).all()
+            assert "2024-01-15" in src.descriptions[0]
+    print("  GeoTIFF: per-date file, dims, transform, NoData, descriptions — OK")
+
+
+def test_geotiff_without_hdf5_path_still_writes():
+    """If TILE_HDF5_PATH isn't set in the env, the GeoTIFFs are still
+    written but with no CRS tag (only the transform is georef'd)."""
+    import rasterio
+    with tempfile.TemporaryDirectory() as tmpd:
+        tmpd = Path(tmpd)
+        _write_synthetic_grid_empty(tmpd, n_rows=2, n_cols=2)
+
+        env = os.environ.copy()
+        env["TILE_ID"] = TILE_ID
+        env["OUTPUT_DIR"] = str(tmpd)
+        # Make sure TILE_HDF5_PATH isn't lurking in the env from a prior run.
+        env.pop("TILE_HDF5_PATH", None)
+        res = subprocess.run(
+            [sys.executable, str(_HERE / "aggregate_tile.py")],
+            env=env, capture_output=True, text=True,
+        )
+        assert res.returncode == 0, res.stderr
+
+        tif = tmpd / f"{TILE_ID}_tile_2024-01-02.tif"
+        assert tif.exists()
+        with rasterio.open(tif) as src:
+            # CRS should be None / falsy.
+            assert not src.crs
+            # Transform is still set.
+            assert src.transform.a == PIXEL_RES
+    print("  GeoTIFF: missing TILE_HDF5_PATH -> CRS-less but still georef'd — OK")
+
+
 def main():
     print("Running aggregate_tile tests...")
     test_full_grid_stitches_into_dense_npz()
@@ -318,6 +408,8 @@ def main():
     test_empty_tile_yields_empty_parquet()
     test_missing_block_is_detected()
     test_inconsistent_target_dates_rejected()
+    test_geotiff_per_date_written()
+    test_geotiff_without_hdf5_path_still_writes()
     print("All aggregate_tile tests passed.")
 
 

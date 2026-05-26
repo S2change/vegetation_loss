@@ -80,6 +80,12 @@ echo
 # Export N_COLS so the per-block wrapper can decode SLURM_ARRAY_TASK_ID.
 export N_COLS
 
+# Export DISTRIBUTE_DIR so the wrappers can locate the Python entry points.
+# SLURM copies batch scripts into /var/spool/slurmd/jobXXXX/ before running,
+# so resolving via ${BASH_SOURCE[0]} inside the wrapper points at the spool,
+# not the real script dir.
+export DISTRIBUTE_DIR
+
 # ── Submit array job (one task per block) ─────────────────────────────────
 ARRAY_JOB_ID=$(
     sbatch --parsable \

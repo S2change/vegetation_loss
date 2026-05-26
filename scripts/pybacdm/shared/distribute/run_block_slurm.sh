@@ -30,7 +30,7 @@ export BLOCK_COL=$(( SLURM_ARRAY_TASK_ID % N_COLS ))
 
 echo "=== task $SLURM_ARRAY_TASK_ID -> block ($BLOCK_ROW, $BLOCK_COL) ==="
 
-DISTRIBUTE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+: "${DISTRIBUTE_DIR:?DISTRIBUTE_DIR must be exported by submit_tile.sh}"
 python "$DISTRIBUTE_DIR/predict_block.py"
 
 echo "Finished task $SLURM_ARRAY_TASK_ID (block $BLOCK_ROW, $BLOCK_COL)"

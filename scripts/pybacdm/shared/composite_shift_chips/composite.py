@@ -28,6 +28,7 @@ import numpy as np
 
 NODATA_U8 = 255
 SELECTION_BAND_IDX_DEFAULT = 0
+B2_VALID_MAX = 5000
 
 
 def cascading_select(block_subset: np.ndarray,
@@ -71,7 +72,10 @@ def cascading_select(block_subset: np.ndarray,
     n, _, h, w = block_subset.shape
 
     # Validity mask along time axis using only the selection band.
-    valid_mask = block_subset[:, selection_band_idx, :, :] != nodata  # (N, H, W)
+    if selection_band_idx == 0:
+        valid_mask = block_subset[:, selection_band_idx, :, :] < B2_VALID_MAX # (N, H, W)
+    else:
+        valid_mask = block_subset[:, selection_band_idx, :, :] != nodata # (N, H, W)
     any_valid = valid_mask.any(axis=0)                                # (H, W)
     first_idx = valid_mask.argmax(axis=0)                             # (H, W)
 
