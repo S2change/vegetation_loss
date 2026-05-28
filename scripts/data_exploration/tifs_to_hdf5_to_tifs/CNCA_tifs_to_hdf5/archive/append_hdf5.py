@@ -3,7 +3,7 @@ import numpy as np
 import h5py
 import rasterio
 import rasterio.transform
-from datetime import datetime
+from datetime import datetime,date
 
 from hdf5_utils import TILE_NAMES, parse_and_sort_files, INPUT_NODATA_VAL, OUTPUT_NODATA_VAL
 
@@ -24,8 +24,8 @@ root_folder = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5"
 folder_tifs = os.path.join(root_folder, "input_tifs")
 folder_hdf5=os.path.join(root_folder, "hdf5")
 
-MIN_DATE = None # or datetime(2017, 1, 1) # set a minimum date to filter out files with earlier timestamps; if None, all files are included regardless of date
-MAX_DATE = None # or datetime(2030, 1, 1) # set a maximum date to filter out files with later timestamps; if None, all files are included regardless of date
+MIN_DATE = None # or date(2017, 1, 1) # set a minimum date to filter out files with earlier timestamps; if None, all files are included regardless of date
+MAX_DATE = None # 
 
 def main():
     """

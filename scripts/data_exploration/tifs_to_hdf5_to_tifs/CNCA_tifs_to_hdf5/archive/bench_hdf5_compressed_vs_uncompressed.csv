@@ -1,0 +1,10 @@
+strategy,label,run,seconds,peak_ram_gb,retained_ram_gb
+A,compressed_per_ts,1,139.149,12.008,0.023
+A,compressed_per_ts,2,139.959,12.031,0.000
+A,compressed_per_ts,3,137.594,12.031,0.000
+B,uncompressed_per_ts,1,17.315,12.031,0.022
+B,uncompressed_per_ts,2,17.541,12.053,0.000
+B,uncompressed_per_ts,3,17.557,12.053,0.000
+C,uncompressed_all_at_once,1,16.576,12.009,0.022
+C,uncompressed_all_at_once,2,16.918,12.032,0.000
+C,uncompressed_all_at_once,3,16.798,12.031,0.000

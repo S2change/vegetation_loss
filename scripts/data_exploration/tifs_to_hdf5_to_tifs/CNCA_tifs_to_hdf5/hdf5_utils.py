@@ -1,83 +1,266 @@
 import os
 import re
+import numpy as np
 import rasterio
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-BAND_NAMES= ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8a", "B11", "B12"] # ["B3", "B4", "B8", "B12"] for testing with fewer bands
+BAND_NAMES= ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8a", "B11", "B12"]
 TILE_NAMES = ['T29SMC', 'T29TQF', 'T29SMD', 'T29TQG', 'T29SNB', 'T29TME', 'T29SNC', 'T29SND', 'T29SPB', 'T29SPC', 'T29TNE', 'T29SPD', 'T29TNF', 'T29TNG', 'T29TPE', 'T29TPF', 'T29TPG']
 
 INPUT_NODATA_VAL = 65535
 OUTPUT_NODATA_VAL = 65535
 
-def parse_and_sort_files(folder, tile, min_date=None, max_date=None):
+# cloud cover will be computed relatively to the portuguese territory (+2 km buffer)
+MAX_CLOUD_COVER_PT = 0.6 # file_metadata only stores timestamps where cloud_cover_PT is below 60% and date is between MIN_DATE and MAX_DATE
+
+# S2 geotiff files
+FOLDER_S2 = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testes_cnca_filtar_hdf5_nuvems\exemplo_T29SMD_SMC" # 2025/S2B_MSIL2A_.../S2B_MSIL2A_...tif+S2B_MSIL1C_..._mask_omni.tif
+FOLDER_PT_MASKS = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testes_cnca_filtar_hdf5_nuvems\exemplo_T29SMD_SMC\Mascara_PT_S2" # mask_T29SMC.tif, etc
+FOLDER_HDF5 = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testes_cnca_filtar_hdf5_nuvems\exemplo_T29SMD_SMC\hdf5"
+
+# Date filters
+MIN_DATE = None #date(2025, 12, 15) 
+MAX_DATE = None
+####################################################
+"""
+    File structure:
+
+    |--- mascaras_PT_S2/
+       |--- mask_T29SMC.tif : pixels of interest have value 0
+       |--- mask_T29SMD.tif
+       |--- mask_T29SNB.tif
+       |--- etc
+       
+    2025/
+    |--- S2C_MSIL2A_20251109-112321_N0511_R037_T29SMC_20251109T130709/
+        |--- S2C_MSIL2A_20251109-112321_N0511_R037_T29SMC_20251109T130709.tif: 10 bands; NoData=65535
+        |--- S2C_MSIL1C_20251109-112321_N0511_R037_T29SMC_mask_omni.tif: 1 encodes cloud pixel
+    |--- S2C_MSIL2A_20251109-112321_N0511_R037_T29SMC_20251109T141914
+        |---  S2C_MSIL2A_20251109-112321_N0511_R037_T29SMC_20251109T141914.tif
+        |--- S2C_MSIL1C_20251109-112321_N0511_R037_T29SMC_mask_omni.tif
+    |--- S2B_MSIL2A_20250826-112119_N0511_R037_T29SNB_20250826T133202
+        |--- etc
+
+    2026/
+    ...
+"""
+#############################################
+
+def extract_s2_prefix_from_s2_folder_name(f):
+    """Strip the trailing processing timestamp token.
+    'S2B_MSIL2A_20250826-112119_N0511_R037_T29SNB_20250826T133202'
+    -> 'S2B_MSIL2A_20250826-112119_N0511_R037_T29SNB'
     """
-    Recursively finds Sentinel-2 TIFs in subfolders and extracts metadata.
-    Parse timestamps from filenames and return metadata sorted by date.
+    return f.rsplit('_', 1)[0]
+
+def extract_s2_prefix_dt_timestamp_ms_from_S2_folder_name(f):
+    """Return (s2_prefix, date, timestamp_ms) parsed from a S2 folder name."""
+    parts = f.split('_')
+    if len(parts) < 3:
+        return None
+    time_str = parts[2]  # e.g. 20251109-112321
+    s2_prefix = extract_s2_prefix_from_s2_folder_name(f)
+    dt_obj = datetime.strptime(time_str, "%Y%m%d-%H%M%S").replace(tzinfo=timezone.utc)
+    dt = dt_obj.date()
+    timestamp_ms = int(dt_obj.timestamp() * 1000)
+    return s2_prefix, dt, timestamp_ms
+
+def determine_pt_mask_file(folder_pt_mask, tile):
+    """
+    Return the full path to the Portugal-boundary raster mask for `tile`.
+
+    Scans all files in `folder_pt_mask` (non-recursively) and returns the one
+    whose filename contains `tile` (e.g. 'T29SMC'). Pixels with value 0 mark
+    the area of interest (Portugal); all others are outside.
 
     Inputs:
-    - folder: directory containing the TIF files
-    - min_date: datetime.date or None, minimum date to select files
-    - max_date: datetime.date or None, maximum date to select files
+    - folder_pt_mask : str — directory containing one mask file per tile
+    - tile           : str — tile identifier, e.g. 'T29SMC'
 
     Output:
-    - List of dicts with keys: 'filename', 'path', 'ordinal', 'timestamp_ms', sorted by 'timestamp_ms' (date)
-    - filename is the original filename (path is not included)
-    - path is the full path to the file
-    - ordinal is the date converted to an integer for sorting
-    - timestamp_ms is the original timestamp in milliseconds extracted from the filename    
-    """
-    file_metadata = []
-    
-    # 1. Use os.walk to go through all years and subfolders
-    for root, dirs, files in os.walk(folder):
-        for f in files:
-            # 2. Filter: Only TIFs, must be MSIL2A, and ignore mask_omni
-            if f.endswith('.tif') and 'S2C_MSIL2A' in f and tile in f and 'mask_omni' not in f:
-                
-                try:
-                    # 3. Extract the date-time string (e.g., 20251007-110951)
-                    # We split by underscore and take the 3rd element
-                    parts = f.split('_')
-                    if len(parts) < 3: continue
-                    
-                    time_str = parts[2]
-                    
-                    # 4. Parse into datetime object (UTC)
-                    dt_obj = datetime.strptime(time_str, "%Y%m%d-%H%M%S").replace(tzinfo=timezone.utc)
-                    dt = dt_obj.date()
-                    
-                    # 5. Date Range Filtering
-                    if (min_date is None or min_date <= dt) and (max_date is None or dt <= max_date):
-                        # Store the FULL path so build_stack can actually find the file
-                        full_path = os.path.join(root, f)
-                        
-                        file_metadata.append({
-                            'filename': f, # file basename without path, since that's how we will reference the files later
-                            'path': full_path,  # Added path for convenience
-                            'ordinal': dt.toordinal(),
-                            'timestamp_ms': int(dt_obj.timestamp() * 1000)
-                        })
-                except (ValueError, IndexError):
-                    # Skip files that don't match the Sentinel-2 naming convention
-                    continue
+    - str — full path to the mask file
 
-    # 6. Sort by timestamp in ascending order
+    Raises FileNotFoundError if no matching file is found.
+    Raises ValueError if more than one file matches (ambiguous).
+    """
+    matches = [
+        os.path.join(folder_pt_mask, f)
+        for f in os.listdir(folder_pt_mask)
+        if os.path.isfile(os.path.join(folder_pt_mask, f)) and tile in f and f.endswith('.tif') and f.startswith('mask')
+    ]
+    if len(matches) == 0:
+        raise FileNotFoundError(f"No PT mask file found for tile {tile} in {folder_pt_mask}")
+    if len(matches) > 1:
+        raise ValueError(f"Ambiguous PT mask: multiple files match tile {tile} in {folder_pt_mask}: {matches}")
+    return matches[0]
+
+def create_dict_of_s2_folder_prefixes(folder_s2, tile, min_date, max_date):
+    """
+    Walk `folder_s2` recursively and group S2 acquisition folders by their
+    acquisition-time prefix (everything except the trailing processing timestamp).
+
+    Two folders with the same acquisition time but different processing runs share
+    the same prefix and are stored together in the same list, e.g.:
+        'S2C_MSIL2A_20251109-112321_N0511_R037_T29SMC': [
+            '.../S2C_MSIL2A_20251109-112321_N0511_R037_T29SMC_20251109T130709',
+            '.../S2C_MSIL2A_20251109-112321_N0511_R037_T29SMC_20251109T141914',
+        ]
+
+    Inputs:
+    - folder_s2 : str — root directory to search recursively (e.g. contains
+                  year subfolders 2025/, 2026/, …)
+    - tile       : str — tile identifier to filter on, e.g. 'T29SMC'
+    - min_date   : datetime.date or None — earliest acquisition date (inclusive)
+    - max_date   : datetime.date or None — latest acquisition date (inclusive)
+
+    Output:
+    - dict[str, list[str]] — keys are S2 prefixes, values are lists of full
+      folder paths that share that prefix, in discovery order
+    """
+    result = {}
+    for root, dirs, _ in os.walk(folder_s2):
+        for f in dirs:
+            if f.startswith('S2') and '_MSIL2A' in f and tile in f:
+                parsed = extract_s2_prefix_dt_timestamp_ms_from_S2_folder_name(f)
+                if parsed is None:
+                    continue
+                s2_prefix, dt, _ = parsed
+                if (min_date is None or min_date <= dt) and (max_date is None or dt <= max_date):
+                    result.setdefault(s2_prefix, []).append(os.path.join(root, f))
+    return result
+
+
+
+def parse_filter_sort_files(folder_s2, folder_pt_mask, tile, min_date=None, max_date=None):
+    """
+    Collect, filter, and sort S2 acquisition metadata for one tile.
+
+    For each unique acquisition time found under `folder_s2` (grouped by S2 prefix,
+    so multiple processing runs for the same acquisition are handled together):
+      - cloud cover over Portugal is estimated by combining the per-run cloud masks
+        (mask_omni, pixel value 1 = cloud) with pixel-wise max and dividing by the
+        number of PT-mask interest pixels (value 0 in the PT mask file).
+      - acquisitions whose cloud cover exceeds MAX_CLOUD_COVER_PT are discarded.
+
+    The PT mask is also used to derive the tight bounding box (smallest rectangle
+    enclosing all value-0 pixels), which is carried in every returned entry so that
+    callers can open the S2 tifs with a rasterio Window without re-reading the mask.
+
+    Inputs:
+    - folder_s2      : str — root directory searched recursively for S2 acquisition
+                       folders (e.g. contains year sub-folders 2025/, 2026/, …)
+    - folder_pt_mask : str — directory containing one PT mask file per tile
+    - tile           : str — tile identifier, e.g. 'T29SMC'
+    - min_date       : datetime.date or None — earliest acquisition date (inclusive)
+    - max_date       : datetime.date or None — latest acquisition date (inclusive)
+
+    Output:
+    - list of dicts sorted by timestamp_ms, one entry per accepted acquisition:
+        filename       : str        — S2 acquisition prefix (shared key for all processing runs)
+        paths          : list[str]  — full paths to the L2A tif(s) for this acquisition
+        path_pt_mask   : str        — full path to the PT mask tif for this tile
+        ordinal        : int        — acquisition date as datetime.date.toordinal()
+        timestamp_ms   : int        — acquisition time as UTC milliseconds since epoch
+        cloud_cover_pt : float      — fraction of PT-mask pixels covered by clouds
+        nrows_pt       : int        — number of rows in the tight bbox
+        ncols_pt       : int        — number of columns in the tight bbox
+        left_pt        : float      — left edge of tight bbox (CRS units)
+        bottom_pt      : float      — bottom edge of tight bbox (CRS units)
+        right_pt       : float      — right edge of tight bbox (CRS units)
+        top_pt         : float      — top edge of tight bbox (CRS units)
+        row_off_pt     : int        — row offset of tight bbox top-left in full tile
+        col_off_pt     : int        — col offset of tight bbox top-left in full tile
+        transform_pt   : Affine     — affine transform of the tight bbox
+        crs            : CRS        — coordinate reference system of the PT mask
+        pixel_count_pt : int        — number of interest pixels (value 0) in PT mask
+    """
+   
+    file_metadata = []
+
+    #0. path for PT_mask file: pixels of interest have value 0
+    path_pt_mask= determine_pt_mask_file(folder_pt_mask,tile)
+
+    #1. collect paths of s2_folders and filters using dates
+    folders_dict=create_dict_of_s2_folder_prefixes(folder_s2, tile, min_date, max_date)
+
+    # 2. loop through folders_dict. For each key, estimate cloud cover from cloud_masks and PT_mask
+    # cloud cover files: names like S2C_MSIL1C_20251109-112321_N0511_R037_T29SMC_mask_omni.tif: 1 encodes cloud pixel
+    #if there is just one path for each key, then the estimated cloud cover value is just the number of "1" in the cloud cover tif file over the number of "0" in the pt_mask_file
+
+    # Read PT mask once: denominator = number of pixels of interest (value == 0)
+    with rasterio.open(path_pt_mask) as src:
+        pt_mask = src.read(1)
+        pt_transform = src.transform
+        crs = src.crs
+    pt_pixel_count = int((pt_mask == 0).sum())
+
+    # Tight bounding box of value-0 pixels in the PT mask
+    rows0, cols0 = np.where(pt_mask == 0)
+    if rows0.size > 0:
+        tight_row_off = int(rows0.min())
+        tight_col_off = int(cols0.min())
+        tight_nrows = int(rows0.max() - rows0.min() + 1)
+        tight_ncols = int(cols0.max() - cols0.min() + 1)
+        tight_left,  tight_top    = rasterio.transform.xy(pt_transform, tight_row_off, tight_col_off, offset='ul')
+        tight_right, tight_bottom = rasterio.transform.xy(pt_transform, rows0.max(), cols0.max(), offset='lr')
+        tight_transform = rasterio.windows.transform(
+            rasterio.windows.Window(tight_col_off, tight_row_off, tight_ncols, tight_nrows),
+            pt_transform,
+        )
+    else:
+        tight_row_off = tight_col_off = 0
+        tight_left = tight_bottom = tight_right = tight_top = None
+        tight_nrows = tight_ncols = 0
+        tight_transform = pt_transform
+
+    # loop through all timestamps
+    for _, folder_paths in sorted(folders_dict.items()):
+        combined_cloud_mask = None
+        for fp in folder_paths:
+            cloud_mask_files = [
+                f for f in os.listdir(fp)
+                if f.endswith('.tif') and 'mask_omni' in f
+            ]
+            if len(cloud_mask_files) == 0:
+                print(f"WARNING: no mask_omni file found in {fp} — skipping")
+                combined_cloud_mask = None
+                break
+            if len(cloud_mask_files) > 1:
+                print(f"WARNING: multiple mask_omni files in {fp}: {cloud_mask_files} — skipping")
+                combined_cloud_mask = None
+                break
+            with rasterio.open(os.path.join(fp, cloud_mask_files[0])) as src:
+                mask = src.read(1)
+            combined_cloud_mask = mask if combined_cloud_mask is None else np.maximum(combined_cloud_mask, mask)
+        if combined_cloud_mask is None:
+            continue
+        cloud_cover = int((combined_cloud_mask == 1).sum()) / pt_pixel_count if pt_pixel_count > 0 else None
+        parsed = extract_s2_prefix_dt_timestamp_ms_from_S2_folder_name(os.path.basename(folder_paths[0]))
+        if parsed is None:
+            continue
+        s2_prefix, dt, timestamp_ms = parsed
+        tif_paths = [os.path.join(fp, os.path.basename(fp) + '.tif') for fp in folder_paths]
+
+        if cloud_cover < MAX_CLOUD_COVER_PT:
+            file_metadata.append({
+                'filename': s2_prefix,
+                'paths': tif_paths,
+                'path_pt_mask': path_pt_mask,
+                'ordinal': dt.toordinal(),
+                'timestamp_ms': timestamp_ms,
+                'cloud_cover_pt': cloud_cover,
+                'nrows_pt': tight_nrows,
+                'ncols_pt': tight_ncols,
+                'left_pt': tight_left,
+                'bottom_pt': tight_bottom,
+                'right_pt': tight_right,
+                'top_pt': tight_top,
+                'row_off_pt': tight_row_off,
+                'col_off_pt': tight_col_off,
+                'transform_pt': tight_transform,
+                'crs': crs,
+                'pixel_count_pt': pt_pixel_count,
+            })
+
     file_metadata.sort(key=lambda x: x['timestamp_ms'])
     return file_metadata
-
-def read_all_bounds(sorted_pathnames):
-    """
-    Read bounding boxes for all TIF files.
-    Input:
-    - sorted_pathnames: list of file paths to TIFs
-    Output:
-    - Dictionary mapping file basenames to their bounding boxes (left, bottom, right, top)  
-    """
-    print("Reading extents from all files...")
-    all_bounds = {}
-    for path in sorted_pathnames:
-        with rasterio.open(path) as src:
-            # convert path into filename for the key of all_bounds, since that's how we will reference the files later
-            f = os.path.basename(path)
-            all_bounds[f] = src.bounds
-    return all_bounds
