@@ -1,7 +1,7 @@
 # Instructions
 
-- `hdf5_utils.py`: edit to change constants value (e.g. `TILE_NAMES`, `MIN_DATE`, `MAX_DATE`, `MAX_CLOUD_COVER_PT`), folders, etc; defines function `parse_filter_sort_files` that estimated PT_cloud_cover for each tile and applies cloud cover filter and date filter
-- `create_hdf5.py`: **not to be edited**. File to be executed: uses `parse_filter_sort_files` to filter iamges to include in hdf5 file, aggregates geotiff files with identical timestamp and creates hdf5 file for each tile.
+- File to edit if constants need to be changed: `hdf5_utils.py`. It includes configuration constants (e.g. `TILE_NAMES`, `MIN_DATE`, `MAX_DATE`, `MAX_CLOUD_COVER_PT`), folders, etc. It also contains function `parse_filter_sort_files` that estimates `pt_cloud_cover` for each timestamp and applies the (by default 60%) maximum cloud cover filter (over the portuguese territory) and the date filter.
+- File to be executed but **not to be edited**: `create_hdf5.py`. This script imports `hdf5_utils.py` and  uses `parse_filter_sort_files` to filter images to include in hdf5 file. Then, it aggregates geotiff files with identical timestamps and creates one hdf5 file for each tile.
 
 # File Structure
 
@@ -38,37 +38,15 @@ portugal_S2_data
 
 # Assumptions
 
-1. GeoTIFF filenames to be processed for a given tile (e.g. 'T29TNE') need to satisfy the following condition: `f.endswith('.tif') and 'S2' AND '_MSIL2A' in f and tile in f and 'mask_omni' not in f`
+1.Goetiff files have already been modified after OMNI cloud screening. Cloud pixels are encoded as 65535 in the geotiff spectral band files.
+2. GeoTIFF filenames to be processed for a given tile (e.g. 'T29TNE') need to satisfy the following condition: `f.endswith('.tif') and 'S2' AND '_MSIL2A' in f and tile in f and 'mask_omni' not in f`
 1. Bands in GeoTiff files are in the following order: `BAND_NAMES=["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8a", "B11", "B12"]`. Otherwise, variable `BAND_NAMES` in `hdf5_utils.py` has to be re-ordered. 
 1. There will be a single output `hdf5` file per Sentinel-2 tile that contains all years, i.e. there will be 17 `hdf5` files for the whole Continental Portugal and Sentinel-2 time span 
 2. The list of tiles is `TILE_NAMES=['T29SMC', 'T29TQF', 'T29SMD', 'T29TQG', 'T29SNB', 'T29TME', 'T29SNC', 'T29SND', 'T29SPB', 'T29SPC', 'T29TNE', 'T29SPD', 'T29TNF', 'T29TNG', 'T29TPE', 'T29TPF', 'T29TPG']` in `hdf5_utils.py`. Otherwise, it needs to be redefined.
-2. Ideally the output HDF5 file should store coordinates in CRS EPSG:32629 (WGS 84 / UTM zone 29N). In the current code, the CRS of the output hdf5 file is identical to the CRS of the input GeoTIFF files, but this can be changed in case the CRS of the GeoTIFF files is not EPSG:32629.
-4. Vector mask: use CNCA vector mask for Portugal with a 2 km buffer. The input vector mask (any CRS) is used to filters out TIFs with no overlap with a vector mask, rasterizes the mask to identify valid pixels, and writes the sparse pixel time series to an HDF5 file. Only pixels inside the vector mask are stored in the HDF5 file.
-5. Input and output *nodata* values (either missing data in GeoTIFF files or pixels outside the vector mask but within the output spatial grid) are defined in `hdf5_utils.INPUT_NODATA_VAL` and `hdf5_utils.OUTPUT_NODATA_VAL`. Currently, `INPUT_NODATA_VAL = 65535` but this should be changed if the *nodata* value of the input GeoTIFF files. The `OUTPUT_NODATA_VAL = 65535` should be left as is.
+2. The output HDF5 file should store coordinates in CRS EPSG:32629 (WGS 84 / UTM zone 29N). It also stores the S2 file name and the estimated cloud cover (over PT).
+4. Raster PT masks: uses raster masks in folder `Mascara_PT_S2`, where pixels in PT have value 0, to estimate `pt_cloud_cover` and to define the bounding box for each hdf5 file. 
 
-# Options
-
-1. `create_hdf5.py`: Creates a new HDF5 file from 10-band GeoTIFF files 
-
-    Inputs:
-    - 'folder_tifs': Directory containing the 10-band GeoTIFF files.
-    - 'vector_mask_path': Path to vector file (shapefile, GeoJSON, etc.) defining the region of interest.
-    - 'folder_hdf5': Path for the folder where the output HDF5 files will be saved.
-    - 'MIN_DATE' and 'MAX_DATE': Optional date filters to only include TIFs within a certain date range, based on the timestamp in the filename.
-    - `band_names`: List of Sentinel-2 band names that will used as column names in the outputted HDF5. Order should be the same order that the bands appear in the GeoTIFF files.
-    - `MIN_DATE`, `MAX_DATE`: `None` or `datetime(y, m, d)`, defining the period of interest (if None, all GeoTIFF file are processed)
-
-2. `append_hdf5.py`: Appends new timesteps to an existing HDF5 file created by `create_hdf5.py`. Timestamps already present in the HDF5 are skipped automatically. The spatial
-grid (xs, ys) is read from the existing HDF5 file and new TIFs must cover the same pixel footprint.
-
-    Inputs:
-    - 'folder_tifs': Directory containing the 10-band GeoTIFF files.
-    - 'folder_hdf5': Path to the folder containing the existing HDF5 files (one per tile).
-    - 'MIN_DATE' and 'MAX_DATE': Optional date filters to only include TIFs within a certain date range, based on the timestamp in the filename.
-
-3. `reconstruct_tifs.py`: script to test the output hdf5 file. From the hdf5 file it creates one tif file with all bands corresponding to the first timestamp, or to the date closest to  `DATE_OUTPUT` if provided.
-
-# PT_masks
+# PT_masks original bounding boxes and tight PT bounding boxes used to create hdf5 files
 
 mask_T29SMC.tif
   CRS        : EPSG:32629
