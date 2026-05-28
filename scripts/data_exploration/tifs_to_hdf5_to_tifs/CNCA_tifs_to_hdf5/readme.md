@@ -15,15 +15,24 @@ portugal_S2_data
             |-- S2C_MSIL2A_20251007-110951_N0511_R137_T29TPE_20251007T145121
                 |-- S2C_MSIL2A_20251007-110951_N0511_R137_T29TPE_20251007T145121.tif
                 |-- S2C_MSIL1C_20251007-110951_N0511_R137_T29TPE_mask_omni.tif
-            |-- ...
+            |--- S2C_MSIL2A_20251109-112321_N0511_R037_T29SMC_20251109T130709
+                |--- S2C_MSIL2A_20251109-112321_N0511_R037_T29SMC_20251109T130709.tif
+                |--- S2C_MSIL1C_20251109-112321_N0511_R037_T29SMC_mask_omni.tif
+            |--- S2C_MSIL2A_20251109-112321_N0511_R037_T29SMC_20251109T141914
+                |--- S2C_MSIL2A_20251109-112321_N0511_R037_T29SMC_20251109T141914.tif
+                |----S2C_MSIL1C_20251109-112321_N0511_R037_T29SMC_mask_omni.tif
+                |-- ...
         |-- 2024
             |-- S2C_MSIL2A_2024...
                 |-- S2C_MSIL2A_2024...tif
                 |-- S2C_MSIL2A_2024..._mask_omni.tif
             |-- ...
         |-- ...
-    |-- vector_mask
-        |-- mask_continental_portugal_CNCA.gpkg
+    |-- Mascara_PT_S2
+        |--- mask_T29SMC.tif
+        |--- mask_T29SMD.tif
+        |--- mask_T29SNB.tif
+        |--- ...
 ```
 
 # Assumptions
