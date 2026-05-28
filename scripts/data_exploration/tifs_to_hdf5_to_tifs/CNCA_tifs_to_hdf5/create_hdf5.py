@@ -72,7 +72,7 @@ def write_hdf5(h5_filename, file_metadata, band_names, mask_rows, mask_cols, xs_
             "values",
             shape=(n_times, nbands, n_pixels),
             dtype='uint16',
-            chunks=(1, nbands, min(n_pixels, 1 << 20)),
+            chunks=(1, nbands, min(n_pixels, 2_810_880)),
             compression="lzf",
         )
 
