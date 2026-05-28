@@ -38,13 +38,13 @@ portugal_S2_data
 
 # Assumptions
 
-1.Goetiff files have already been modified after OMNI cloud screening. Cloud pixels are encoded as 65535 in the geotiff spectral band files.
+1. Goetiff files have already been modified after OMNI cloud screening. Cloud pixels are encoded as 65535 in the geotiff spectral band files.
 2. GeoTIFF filenames to be processed for a given tile (e.g. 'T29TNE') need to satisfy the following condition: `f.endswith('.tif') and 'S2' AND '_MSIL2A' in f and tile in f and 'mask_omni' not in f`
-1. Bands in GeoTiff files are in the following order: `BAND_NAMES=["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8a", "B11", "B12"]`. Otherwise, variable `BAND_NAMES` in `hdf5_utils.py` has to be re-ordered. 
-1. There will be a single output `hdf5` file per Sentinel-2 tile that contains all years, i.e. there will be 17 `hdf5` files for the whole Continental Portugal and Sentinel-2 time span 
-2. The list of tiles is `TILE_NAMES=['T29SMC', 'T29TQF', 'T29SMD', 'T29TQG', 'T29SNB', 'T29TME', 'T29SNC', 'T29SND', 'T29SPB', 'T29SPC', 'T29TNE', 'T29SPD', 'T29TNF', 'T29TNG', 'T29TPE', 'T29TPF', 'T29TPG']` in `hdf5_utils.py`. Otherwise, it needs to be redefined.
-2. The output HDF5 file should store coordinates in CRS EPSG:32629 (WGS 84 / UTM zone 29N). It also stores the S2 file name and the estimated cloud cover (over PT).
-4. Raster PT masks: uses raster masks in folder `Mascara_PT_S2`, where pixels in PT have value 0, to estimate `pt_cloud_cover` and to define the bounding box for each hdf5 file. 
+3. Bands in GeoTiff files are in the following order: `BAND_NAMES=["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8a", "B11", "B12"]`. Otherwise, variable `BAND_NAMES` in `hdf5_utils.py` has to be re-ordered. 
+4. There will be a single output `hdf5` file per Sentinel-2 tile that contains all years, i.e. there will be 17 `hdf5` files for the whole Continental Portugal and Sentinel-2 time span 
+5. The list of tiles is `TILE_NAMES=['T29SMC', 'T29TQF', 'T29SMD', 'T29TQG', 'T29SNB', 'T29TME', 'T29SNC', 'T29SND', 'T29SPB', 'T29SPC', 'T29TNE', 'T29SPD', 'T29TNF', 'T29TNG', 'T29TPE', 'T29TPF', 'T29TPG']` in `hdf5_utils.py`. Otherwise, it needs to be redefined.
+6. The output HDF5 file should store coordinates in CRS EPSG:32629 (WGS 84 / UTM zone 29N). It also stores the S2 file name and the estimated cloud cover (over PT).
+7. Raster PT masks: uses raster masks in folder `Mascara_PT_S2`, where pixels in PT have value 0, to estimate `pt_cloud_cover` and to define the bounding box for each hdf5 file. 
 
 # PT_masks original bounding boxes and tight PT bounding boxes used to create hdf5 files
 
