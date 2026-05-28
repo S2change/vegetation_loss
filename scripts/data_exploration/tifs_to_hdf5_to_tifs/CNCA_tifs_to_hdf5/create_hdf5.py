@@ -63,6 +63,11 @@ def write_hdf5(h5_filename, file_metadata, band_names, mask_rows, mask_cols, xs_
         h5f.create_dataset("original_timestamps",
                            data=[m['timestamp_ms'] for m in file_metadata],
                            dtype='int64')
+        h5f.create_dataset("S2_filename",
+                           data=[m['filename'].encode('ascii') for m in file_metadata])
+        h5f.create_dataset("cloud_cover_pt",
+                           data=[round(m['cloud_cover_pt'] * 100) for m in file_metadata],
+                           dtype='uint8')
         dset = h5f.create_dataset(
             "values",
             shape=(n_times, nbands, n_pixels),
