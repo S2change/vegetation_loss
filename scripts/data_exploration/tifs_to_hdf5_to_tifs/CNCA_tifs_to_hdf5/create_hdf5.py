@@ -32,7 +32,7 @@ def read_and_combine_tifs(paths, window):
     """
     combined = None
     for path in paths:
-        print(path, window)
+        #print(path, window)
         with rasterio.open(path) as src:
             data = src.read(window=window)  # (nbands, nrows_pt, ncols_pt), uint16
         combined = data if combined is None else np.minimum(combined, data)
