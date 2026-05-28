@@ -1,6 +1,7 @@
-- `create_hdf5.py` edited by Gonçalo Barradas (to be run on the INCD platform; this script read a report file with cloud cover estimates per tile and date and applies a 60% threshold)
-- `append_hdf5.py` : to be tested
-- `hdf5_utils.py`: auxiliary functions and constants
+# Instructions
+
+- `hdf5_utils.py`: edit to change constants value (e.g. `TILE_NAMES`, `MIN_DATE`, `MAX_DATE`, `MAX_CLOUD_COVER_PT`), folders, etc; defines function `parse_filter_sort_files` that estimated PT_cloud_cover for each tile and applies cloud cover filter and date filter
+- `create_hdf5.py`: **not to be edited**. File to be executed: uses `parse_filter_sort_files` to filter iamges to include in hdf5 file, aggregates geotiff files with identical timestamp and creates hdf5 file for each tile.
 
 # File Structure
 
