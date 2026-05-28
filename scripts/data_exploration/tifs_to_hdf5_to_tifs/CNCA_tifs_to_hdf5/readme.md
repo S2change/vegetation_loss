@@ -57,3 +57,141 @@ grid (xs, ys) is read from the existing HDF5 file and new TIFs must cover the sa
     - 'MIN_DATE' and 'MAX_DATE': Optional date filters to only include TIFs within a certain date range, based on the timestamp in the filename.
 
 3. `reconstruct_tifs.py`: script to test the output hdf5 file. From the hdf5 file it creates one tif file with all bands corresponding to the first timestamp, or to the date closest to  `DATE_OUTPUT` if provided.
+
+# PT_masks
+
+mask_T29SMC.tif
+  CRS        : EPSG:32629
+  Bounds     : left=399960.0, bottom=4190220.0, right=509760.0, top=4300020.0
+  Shape      : 10980 rows x 10980 cols
+  Value domain: min=0, max=1, unique=[0 1]
+  Tight bbox (value==0): left=454470.0, bottom=4197220.0, right=509760.0, top=4300020.0
+  Tight bbox shape     : 10280 rows x 5529 cols
+
+mask_T29SMD.tif
+  CRS        : EPSG:32629
+  Bounds     : left=399960.0, bottom=4290240.0, right=509760.0, top=4400040.0
+  Shape      : 10980 rows x 10980 cols
+  Value domain: min=0, max=1, unique=[0 1]
+  Tight bbox (value==0): left=453450.0, bottom=4290240.0, right=509760.0, top=4400040.0
+  Tight bbox shape     : 10980 rows x 5631 cols
+
+mask_T29SNB.tif
+  CRS        : EPSG:32629
+  Bounds     : left=499980.0, bottom=4090200.0, right=609780.0, top=4200000.0
+  Shape      : 10980 rows x 10980 cols
+  Value domain: min=0, max=1, unique=[0 1]
+  Tight bbox (value==0): left=499980.0, bottom=4090200.0, right=609780.0, top=4200000.0
+  Tight bbox shape     : 10980 rows x 10980 cols
+
+mask_T29SNC.tif
+  CRS        : EPSG:32629
+  Bounds     : left=499980.0, bottom=4190220.0, right=609780.0, top=4300020.0
+  Shape      : 10980 rows x 10980 cols
+  Value domain: min=0, max=1, unique=[0 1]
+  Tight bbox (value==0): left=499980.0, bottom=4190220.0, right=609780.0, top=4300020.0
+  Tight bbox shape     : 10980 rows x 10980 cols
+
+mask_T29SND.tif
+  CRS        : EPSG:32629
+  Bounds     : left=499980.0, bottom=4290240.0, right=609780.0, top=4400040.0
+  Shape      : 10980 rows x 10980 cols
+  Value domain: min=0, max=0, unique=[0]
+  Tight bbox (value==0): left=499980.0, bottom=4290240.0, right=609780.0, top=4400040.0
+  Tight bbox shape     : 10980 rows x 10980 cols
+
+mask_T29SPB.tif
+  CRS        : EPSG:32629
+  Bounds     : left=600000.0, bottom=4090200.0, right=709800.0, top=4200000.0
+  Shape      : 10980 rows x 10980 cols
+  Value domain: min=0, max=1, unique=[0 1]
+  Tight bbox (value==0): left=600000.0, bottom=4090200.0, right=655530.0, top=4200000.0
+  Tight bbox shape     : 10980 rows x 5553 cols
+
+mask_T29SPC.tif
+  CRS        : EPSG:32629
+  Bounds     : left=600000.0, bottom=4190220.0, right=709800.0, top=4300020.0
+  Shape      : 10980 rows x 10980 cols
+  Value domain: min=0, max=1, unique=[0 1]
+  Tight bbox (value==0): left=600000.0, bottom=4190220.0, right=683130.0, top=4300020.0
+  Tight bbox shape     : 10980 rows x 8313 cols
+
+mask_T29SPD.tif
+  CRS        : EPSG:32629
+  Bounds     : left=600000.0, bottom=4290240.0, right=709800.0, top=4400040.0
+  Shape      : 10980 rows x 10980 cols
+  Value domain: min=0, max=1, unique=[0 1]
+  Tight bbox (value==0): left=600000.0, bottom=4290240.0, right=679410.0, top=4400040.0
+  Tight bbox shape     : 10980 rows x 7941 cols
+
+mask_T29TME.tif
+  CRS        : EPSG:32629
+  Bounds     : left=399960.0, bottom=4390200.0, right=509760.0, top=4500000.0
+  Shape      : 10980 rows x 10980 cols
+  Value domain: min=0, max=1, unique=[0 1]
+  Tight bbox (value==0): left=492090.0, bottom=4390200.0, right=509760.0, top=4460380.0
+  Tight bbox shape     : 7018 rows x 1767 cols
+
+mask_T29TNE.tif
+  CRS        : EPSG:32629
+  Bounds     : left=499980.0, bottom=4390200.0, right=609780.0, top=4500000.0
+  Shape      : 10980 rows x 10980 cols
+  Value domain: min=0, max=1, unique=[0 1]
+  Tight bbox (value==0): left=499980.0, bottom=4390200.0, right=609780.0, top=4500000.0
+  Tight bbox shape     : 10980 rows x 10980 cols
+
+mask_T29TNF.tif
+  CRS        : EPSG:32629
+  Bounds     : left=499980.0, bottom=4490220.0, right=609780.0, top=4600020.0
+  Shape      : 10980 rows x 10980 cols
+  Value domain: min=0, max=1, unique=[0 1]
+  Tight bbox (value==0): left=515130.0, bottom=4490220.0, right=609780.0, top=4600020.0
+  Tight bbox shape     : 10980 rows x 9465 cols
+
+mask_T29TNG.tif
+  CRS        : EPSG:32629
+  Bounds     : left=499980.0, bottom=4590240.0, right=609780.0, top=4700040.0
+  Shape      : 10980 rows x 10980 cols
+  Value domain: min=0, max=1, unique=[0 1]
+  Tight bbox (value==0): left=507810.0, bottom=4590240.0, right=609780.0, top=4669240.0
+  Tight bbox shape     : 7900 rows x 10197 cols
+
+mask_T29TPE.tif
+  CRS        : EPSG:32629
+  Bounds     : left=600000.0, bottom=4390200.0, right=709800.0, top=4500000.0
+  Shape      : 10980 rows x 10980 cols
+  Value domain: min=0, max=1, unique=[0 1]
+  Tight bbox (value==0): left=600000.0, bottom=4390200.0, right=690450.0, top=4500000.0
+  Tight bbox shape     : 10980 rows x 9045 cols
+
+mask_T29TPF.tif
+  CRS        : EPSG:32629
+  Bounds     : left=600000.0, bottom=4490220.0, right=709800.0, top=4600020.0
+  Shape      : 10980 rows x 10980 cols
+  Value domain: min=0, max=1, unique=[0 1]
+  Tight bbox (value==0): left=600000.0, bottom=4490220.0, right=709800.0, top=4600020.0
+  Tight bbox shape     : 10980 rows x 10980 cols
+
+mask_T29TPG.tif
+  CRS        : EPSG:32629
+  Bounds     : left=600000.0, bottom=4590240.0, right=709800.0, top=4700040.0
+  Shape      : 10980 rows x 10980 cols
+  Value domain: min=0, max=1, unique=[0 1]
+  Tight bbox (value==0): left=600000.0, bottom=4590240.0, right=709800.0, top=4653280.0
+  Tight bbox shape     : 6304 rows x 10980 cols
+
+mask_T29TQF.tif
+  CRS        : EPSG:32629
+  Bounds     : left=699960.0, bottom=4490220.0, right=809760.0, top=4600020.0
+  Shape      : 10980 rows x 10980 cols
+  Value domain: min=0, max=1, unique=[0 1]
+  Tight bbox (value==0): left=699960.0, bottom=4566040.0, right=732690.0, top=4600020.0
+  Tight bbox shape     : 3398 rows x 3273 cols
+
+mask_T29TQG.tif
+  CRS        : EPSG:32629
+  Bounds     : left=699960.0, bottom=4590240.0, right=809760.0, top=4700040.0
+  Shape      : 10980 rows x 10980 cols
+  Value domain: min=0, max=1, unique=[0 1]
+  Tight bbox (value==0): left=699960.0, bottom=4590240.0, right=736410.0, top=4651000.0
+  Tight bbox shape     : 6076 rows x 3645 cols
