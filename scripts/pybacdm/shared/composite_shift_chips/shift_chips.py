@@ -1,37 +1,58 @@
-"""Generate model-ready chip pairs from a 25-chip block of composites.
+"""Generate model-ready chip pairs from a 2-D composite block.
 
-Step 4 of the chip-chunked prediction pipeline. Takes the (2, |D|, 10, P)
-uint8 composite array produced by step 3 and yields ChipPair named-tuples,
-each containing a (before, after) 256x256 chip pair ready for the model.
+Step 4 of the chip-chunked prediction pipeline. Takes the
+(2, |D|, 10, BLOCK_H, BLOCK_W) uint8 composite array produced by step 3
+and yields ChipPair named-tuples, each containing a (before, after)
+256x256 chip pair ready for the model.
 
-The 25-chip block is laid out as a 5x5 grid; the upper-left 4x4 (rows 0-3,
-cols 0-3) is the "live" area that this block is responsible for predicting.
-The 5th row and 5th column (R=4 and C=4) form a ghost border that supplies
-neighbour pixels for shifts extending past the live area's right/bottom
-edge. Adjacent blocks overlap by 1 chip — the right neighbour block's
-column 0 is this block's column 4 — so each chip is predicted by exactly
-one block (no duplicated work across blocks).
+Block layout (matches input_setup.hdf5_reader):
+  - BLOCK_H = BLOCK_W = 1280 (= LIVE + 2*GHOST = 1024 + 256)
+  - Live 4x4 area sits at block[..., GHOST:GHOST+LIVE_H, GHOST:GHOST+LIVE_W]
+  - 128-px ghost ring surrounds it on all 4 sides
+  - 128x128 corner squares at the 4 corners
 
-Per target date, 64 chip pairs are yielded:
+Per target date, 81 chip pairs are yielded:
   - 16 originals      (4x4 live positions, no shift)
-  - 16 H-shifts       (4 between-col gaps x 4 rows — gap 3 uses ghost col 4)
-  - 16 V-shifts       (4 between-row gaps x 4 cols — gap 3 uses ghost row 4)
-  - 16 diagonals      (4x4 between-corner positions — last row/col use ghost)
+  - 20 H-shifts       (4 rows x 5 between-col gap positions, c_gap in -1..3)
+  - 20 V-shifts       (5 between-row gap positions x 4 cols, r_gap in -1..3)
+  - 25 diagonals      (5x5 between-corner positions, both gaps in -1..3)
+
+Negative-gap shifts extend into the ghost ring. Each live-area pixel ends
+up covered by exactly 4 chips (one of each kind) — this is the design
+intent for the downstream pixel-level voting.
 """
 from collections import namedtuple
 from typing import Iterator
 
 import numpy as np
 
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
 CHIP_H = 256
 CHIP_W = 256
-CHIP_PIXELS = CHIP_H * CHIP_W
 HALF = 128                     # half-chip in pixels (50% overlap stride)
 
-BLOCK_GRID_ROWS = 5
-BLOCK_GRID_COLS = 5
-LIVE_ROWS = 4                  # rows 0..3 are predicted; row 4 is ghost
-LIVE_COLS = 4                  # cols 0..3 are predicted; col 4 is ghost
+LIVE_ROWS = 4                  # 4x4 live area
+LIVE_COLS = 4
+LIVE_H = LIVE_ROWS * CHIP_H    # 1024
+LIVE_W = LIVE_COLS * CHIP_W    # 1024
+GHOST = 128                    # ghost ring thickness on all 4 sides
+BLOCK_H = LIVE_H + 2 * GHOST   # 1280
+BLOCK_W = LIVE_W + 2 * GHOST   # 1280
+
+# Per-kind shift counts in the new layout:
+#   originals:  4 x 4         = 16
+#   h_shifts:   4 x 5         = 20  (5 gaps: x = -128, 128, 384, 640, 896)
+#   v_shifts:   5 x 4         = 20
+#   diagonals:  5 x 5         = 25
+# Total per target date: 81.
+N_ORIGINALS = LIVE_ROWS * LIVE_COLS
+N_H_SHIFTS  = LIVE_ROWS * (LIVE_COLS + 1)
+N_V_SHIFTS  = (LIVE_ROWS + 1) * LIVE_COLS
+N_DIAGONALS = (LIVE_ROWS + 1) * (LIVE_COLS + 1)
+BUNDLE_SIZE = N_ORIGINALS + N_H_SHIFTS + N_V_SHIFTS + N_DIAGONALS    # 81
 
 
 ChipPair = namedtuple("ChipPair", [
@@ -44,74 +65,97 @@ ChipPair = namedtuple("ChipPair", [
 ])
 
 
-def _extract_chip(side: np.ndarray, R: int, C: int) -> np.ndarray:
-    """Extract chip at grid position (R, C) from a flat pixel axis.
+# ============================================================================
+# SHIFT-OFFSET MATH
+# ============================================================================
+
+def chip_nw_pixel_offset(chip_kind: str,
+                         grid_row: int,
+                         grid_col: int,
+                         ) -> tuple[int, int]:
+    """Return (px_y, px_x) of the chip's NW corner relative to the LIVE area's
+    NW corner.
+
+    Values may be negative (chips that extend into the ghost ring) — e.g. an
+    h_shift at grid_col = -1 has NW at (256·grid_row, -128).
+
+    Per-kind formulas:
+      - original  (r, c):     ( 256r,            256c        )
+      - h_shift   (r, c_gap): ( 256r,            256·c_gap + 128 )
+      - v_shift   (r_gap, c): ( 256·r_gap + 128, 256c        )
+      - diagonal  (r_gap, c_gap): ( 256·r_gap + 128, 256·c_gap + 128 )
+    """
+    if chip_kind == "original":
+        return grid_row * CHIP_H, grid_col * CHIP_W
+    if chip_kind == "h_shift":
+        return grid_row * CHIP_H, grid_col * CHIP_W + HALF
+    if chip_kind == "v_shift":
+        return grid_row * CHIP_H + HALF, grid_col * CHIP_W
+    if chip_kind == "diagonal":
+        return grid_row * CHIP_H + HALF, grid_col * CHIP_W + HALF
+    raise ValueError(f"unknown chip_kind {chip_kind!r}")
+
+
+def _slice_chip(side_2d: np.ndarray, nw_y: int, nw_x: int) -> np.ndarray:
+    """Slice a 256x256 chip from a 2-D block-side array.
 
     Parameters
     ----------
-    side : (10, P) uint8
-        One side (before or after) of one target date's composite.
-    R, C : int
-        Grid row and column in the 5x5 block (0..4 each).
+    side_2d : (10, BLOCK_H, BLOCK_W) uint8
+        One side (before or after) of one target date's composite, in 2-D layout.
+    nw_y, nw_x : int
+        NW pixel offset of the chip relative to the LIVE area's NW corner.
+        Can be negative (-128 for shifts that extend into the ghost ring).
 
     Returns
     -------
     (10, 256, 256) uint8
     """
-    flat_idx = R * BLOCK_GRID_COLS + C
-    start = flat_idx * CHIP_PIXELS
-    end = start + CHIP_PIXELS
-    return side[:, start:end].reshape(10, CHIP_H, CHIP_W)
+    # Translate to block-local coords by adding GHOST (the live area's NW
+    # corner is at block[GHOST, GHOST]).
+    by = GHOST + nw_y
+    bx = GHOST + nw_x
+    return side_2d[:, by:by + CHIP_H, bx:bx + CHIP_W]
 
 
-def _h_shift(side: np.ndarray, R: int, c_gap: int) -> np.ndarray:
-    """Build an H-shifted chip from inner-grid chips (R, c_gap) and (R, c_gap+1).
+# ============================================================================
+# SHIFT POSITION ENUMERATION (gap index ranges)
+# ============================================================================
 
-    Output cols 0..127 come from cols 128..255 of (R, c_gap).
-    Output cols 128..255 come from cols 0..127 of (R, c_gap+1).
+def _iter_shift_positions(chip_kind: str):
+    """Yield (grid_row, grid_col) for every shift position of the given kind.
+
+    Originals: 4 x 4 = 16    (r, c)        in [0,4) x [0,4)
+    H-shifts:  4 x 5 = 20    (r, c_gap)    in [0,4) x [-1,4)
+    V-shifts:  5 x 4 = 20    (r_gap, c)    in [-1,4) x [0,4)
+    Diagonals: 5 x 5 = 25    (r_gap, c_gap) in [-1,4) x [-1,4)
     """
-    left  = _extract_chip(side, R, c_gap)
-    right = _extract_chip(side, R, c_gap + 1)
-    out = np.empty((10, CHIP_H, CHIP_W), dtype=np.uint8)
-    out[:, :, :HALF]  = left[:, :, HALF:]
-    out[:, :, HALF:]  = right[:, :, :HALF]
-    return out
+    if chip_kind == "original":
+        for r in range(LIVE_ROWS):
+            for c in range(LIVE_COLS):
+                yield r, c
+        return
+    if chip_kind == "h_shift":
+        for r in range(LIVE_ROWS):
+            for c_gap in range(-1, LIVE_COLS):
+                yield r, c_gap
+        return
+    if chip_kind == "v_shift":
+        for r_gap in range(-1, LIVE_ROWS):
+            for c in range(LIVE_COLS):
+                yield r_gap, c
+        return
+    if chip_kind == "diagonal":
+        for r_gap in range(-1, LIVE_ROWS):
+            for c_gap in range(-1, LIVE_COLS):
+                yield r_gap, c_gap
+        return
+    raise ValueError(f"unknown chip_kind {chip_kind!r}")
 
 
-def _v_shift(side: np.ndarray, r_gap: int, C: int) -> np.ndarray:
-    """Build a V-shifted chip from inner-grid chips (r_gap, C) and (r_gap+1, C).
-
-    Output rows 0..127 come from rows 128..255 of (r_gap, C).
-    Output rows 128..255 come from rows 0..127 of (r_gap+1, C).
-    """
-    top    = _extract_chip(side, r_gap, C)
-    bottom = _extract_chip(side, r_gap + 1, C)
-    out = np.empty((10, CHIP_H, CHIP_W), dtype=np.uint8)
-    out[:, :HALF, :]  = top[:, HALF:, :]
-    out[:, HALF:, :]  = bottom[:, :HALF, :]
-    return out
-
-
-def _diagonal(side: np.ndarray, r_gap: int, c_gap: int) -> np.ndarray:
-    """Build a diagonal-shifted chip from the 4 inner chips around (r_gap, c_gap).
-
-    Output is split into 4 quadrants, one from each of:
-      top-left     (r_gap,   c_gap)        bottom-right quadrant of source
-      top-right    (r_gap,   c_gap+1)      bottom-left  quadrant of source
-      bottom-left  (r_gap+1, c_gap)        top-right    quadrant of source
-      bottom-right (r_gap+1, c_gap+1)      top-left     quadrant of source
-    """
-    tl_src = _extract_chip(side, r_gap,     c_gap)
-    tr_src = _extract_chip(side, r_gap,     c_gap + 1)
-    bl_src = _extract_chip(side, r_gap + 1, c_gap)
-    br_src = _extract_chip(side, r_gap + 1, c_gap + 1)
-    out = np.empty((10, CHIP_H, CHIP_W), dtype=np.uint8)
-    out[:, :HALF, :HALF] = tl_src[:, HALF:, HALF:]
-    out[:, :HALF, HALF:] = tr_src[:, HALF:, :HALF]
-    out[:, HALF:, :HALF] = bl_src[:, :HALF, HALF:]
-    out[:, HALF:, HALF:] = br_src[:, :HALF, :HALF]
-    return out
-
+# ============================================================================
+# PER-PAIR GENERATOR
+# ============================================================================
 
 def generate_shifted_chips(composites: np.ndarray,
                            target_dates: np.ndarray,
@@ -122,38 +166,23 @@ def generate_shifted_chips(composites: np.ndarray,
 
     Parameters
     ----------
-    composites : (2, |D|, 10, n_chips * 65_536) uint8
-        Output of `create_before_after_composites`. composites[0] is before,
-        composites[1] is after.
+    composites : (2, |D|, 10, BLOCK_H, BLOCK_W) uint8
+        Output of `create_before_after_composites` for a 2-D block. axis 0:
+        0 = before, 1 = after. axis 1: target dates.
     target_dates : (|D|,) int
         Ordinal dates aligned to composites' axis 1.
     valid_dates_mask : (|D|,) bool
-        Output of step 3 alongside `composites`. False entries are skipped
-        here with a note explaining why (matching step 3's earlier warning).
+        Output of step 3 alongside `composites`. False entries are skipped.
     verbose : bool
         Print a one-line note per skipped target date.
 
     Yields
     ------
     ChipPair
-        64 instances per valid target date: 16 originals + 16 H-shifts +
-        16 V-shifts + 16 diagonals.
+        81 instances per valid target date: 16 originals + 20 H-shifts +
+        20 V-shifts + 25 diagonals.
     """
-    if composites.ndim != 4 or composites.shape[0] != 2 or composites.shape[2] != 10:
-        raise ValueError(
-            "composites must have shape (2, |D|, 10, P); "
-            f"got {composites.shape}"
-        )
-    if target_dates.shape != (composites.shape[1],):
-        raise ValueError(
-            f"target_dates shape {target_dates.shape} must equal (|D|,) = "
-            f"({composites.shape[1]},)"
-        )
-    if valid_dates_mask.shape != (composites.shape[1],):
-        raise ValueError(
-            f"valid_dates_mask shape {valid_dates_mask.shape} must equal (|D|,) = "
-            f"({composites.shape[1]},)"
-        )
+    _validate_composites(composites, target_dates, valid_dates_mask)
 
     for k, target in enumerate(target_dates):
         if not valid_dates_mask[k]:
@@ -162,114 +191,80 @@ def generate_shifted_chips(composites: np.ndarray,
                       f"in shift generator (already skipped by step 3).")
             continue
 
-        before_side = composites[0, k]  # (10, P)
-        after_side  = composites[1, k]  # (10, P)
+        before_side = composites[0, k]   # (10, BLOCK_H, BLOCK_W)
+        after_side  = composites[1, k]
         date_ordinal = int(target)
 
-        # Originals: 4x4 live positions
-        for r in range(LIVE_ROWS):
-            for c in range(LIVE_COLS):
+        for kind in ("original", "h_shift", "v_shift", "diagonal"):
+            for gr, gc in _iter_shift_positions(kind):
+                nw_y, nw_x = chip_nw_pixel_offset(kind, gr, gc)
                 yield ChipPair(
-                    before=_extract_chip(before_side, r, c),
-                    after=_extract_chip(after_side, r, c),
+                    before=_slice_chip(before_side, nw_y, nw_x).copy(),
+                    after=_slice_chip(after_side, nw_y, nw_x).copy(),
                     date_idx=k, date_ordinal=date_ordinal,
-                    chip_kind="original", grid_position=(r, c),
+                    chip_kind=kind, grid_position=(gr, gc),
                 )
 
-        # H-shifts: 4 rows x 4 between-col gaps (gap 3 uses ghost col 4)
-        for r in range(LIVE_ROWS):
-            for c_gap in range(LIVE_COLS):
-                yield ChipPair(
-                    before=_h_shift(before_side, r, c_gap),
-                    after=_h_shift(after_side, r, c_gap),
-                    date_idx=k, date_ordinal=date_ordinal,
-                    chip_kind="h_shift", grid_position=(r, c_gap),
-                )
 
-        # V-shifts: 4 between-row gaps x 4 cols (gap 3 uses ghost row 4)
-        for r_gap in range(LIVE_ROWS):
-            for c in range(LIVE_COLS):
-                yield ChipPair(
-                    before=_v_shift(before_side, r_gap, c),
-                    after=_v_shift(after_side, r_gap, c),
-                    date_idx=k, date_ordinal=date_ordinal,
-                    chip_kind="v_shift", grid_position=(r_gap, c),
-                )
-
-        # Diagonals: 4x4 between-corner positions (last row/col use ghost)
-        for r_gap in range(LIVE_ROWS):
-            for c_gap in range(LIVE_COLS):
-                yield ChipPair(
-                    before=_diagonal(before_side, r_gap, c_gap),
-                    after=_diagonal(after_side, r_gap, c_gap),
-                    date_idx=k, date_ordinal=date_ordinal,
-                    chip_kind="diagonal", grid_position=(r_gap, c_gap),
-                )
+def _validate_composites(composites: np.ndarray,
+                         target_dates: np.ndarray,
+                         valid_dates_mask: np.ndarray) -> None:
+    """Shape checks shared by both generators."""
+    if composites.ndim != 5 or composites.shape[0] != 2 or composites.shape[2] != 10:
+        raise ValueError(
+            "composites must have shape (2, |D|, 10, BLOCK_H, BLOCK_W); "
+            f"got {composites.shape}"
+        )
+    if composites.shape[3] != BLOCK_H or composites.shape[4] != BLOCK_W:
+        raise ValueError(
+            f"composites' spatial dims must be ({BLOCK_H}, {BLOCK_W}); "
+            f"got ({composites.shape[3]}, {composites.shape[4]})"
+        )
+    if target_dates.shape != (composites.shape[1],):
+        raise ValueError(
+            f"target_dates shape {target_dates.shape} must equal (|D|,) = "
+            f"({composites.shape[1]},)"
+        )
+    if valid_dates_mask.shape != (composites.shape[1],):
+        raise ValueError(
+            f"valid_dates_mask shape {valid_dates_mask.shape} must equal "
+            f"(|D|,) = ({composites.shape[1]},)"
+        )
 
 
 # ============================================================================
-# BUNDLED VARIANT (one yield per target date, all 64 chips at once)
+# BUNDLED VARIANT (one yield per target date, all 81 chips at once)
 # ============================================================================
 
 ChipBundle = namedtuple("ChipBundle", [
-    "before",          # (64, 256, 256, 10) uint8 — predictor-native layout
-    "after",           # (64, 256, 256, 10) uint8 — predictor-native layout
-    "chip_kinds",      # list[str] length 64 — parallel to batch axis
-    "grid_positions",  # list[tuple[int, int]] length 64 — parallel to batch axis
+    "before",          # (BUNDLE_SIZE, 256, 256, 10) uint8 — predictor-native layout
+    "after",           # (BUNDLE_SIZE, 256, 256, 10) uint8
+    "chip_kinds",      # list[str] length BUNDLE_SIZE — parallel to batch axis
+    "grid_positions",  # list[tuple[int, int]] length BUNDLE_SIZE
     "date_idx",        # int — index into target_dates
     "date_ordinal",    # int — the ordinal date itself
 ])
 
-BUNDLE_SIZE = (
-    LIVE_ROWS * LIVE_COLS              # originals
-    + LIVE_ROWS * LIVE_COLS            # h_shifts
-    + LIVE_ROWS * LIVE_COLS            # v_shifts
-    + LIVE_ROWS * LIVE_COLS            # diagonals
-)  # == 64 with the current geometry
 
-
-def _fill_bundle_side(side: np.ndarray, dst: np.ndarray) -> tuple[list, list]:
+def _fill_bundle_side(side_2d: np.ndarray, dst: np.ndarray) -> tuple[list, list]:
     """Fill a (BUNDLE_SIZE, 256, 256, 10) uint8 array `dst` from one composite
-    side, walking the same originals/h_shifts/v_shifts/diagonals order as the
-    per-pair generator. Returns the parallel (chip_kinds, grid_positions)
-    metadata so the caller can attach it to the bundle.
+    side. Returns the parallel (chip_kinds, grid_positions) metadata.
 
-    `dst` is filled in place. Each chip is computed in (10, 256, 256) layout
-    and written into `dst[i]` with a single (1, 2, 0) transpose to match the
-    predictor's (H, W, C) expectation.
+    `dst` is filled in place. Each 256x256 chip is sliced from the 2-D block
+    and transposed (C, H, W) -> (H, W, C) to match the predictor's input
+    layout.
     """
     chip_kinds: list[str] = []
     grid_positions: list[tuple[int, int]] = []
     i = 0
-
-    for r in range(LIVE_ROWS):
-        for c in range(LIVE_COLS):
-            dst[i] = _extract_chip(side, r, c).transpose(1, 2, 0)
-            chip_kinds.append("original")
-            grid_positions.append((r, c))
+    for kind in ("original", "h_shift", "v_shift", "diagonal"):
+        for gr, gc in _iter_shift_positions(kind):
+            nw_y, nw_x = chip_nw_pixel_offset(kind, gr, gc)
+            chip = _slice_chip(side_2d, nw_y, nw_x)            # (10, 256, 256)
+            dst[i] = chip.transpose(1, 2, 0)                   # (256, 256, 10)
+            chip_kinds.append(kind)
+            grid_positions.append((gr, gc))
             i += 1
-
-    for r in range(LIVE_ROWS):
-        for c_gap in range(LIVE_COLS):
-            dst[i] = _h_shift(side, r, c_gap).transpose(1, 2, 0)
-            chip_kinds.append("h_shift")
-            grid_positions.append((r, c_gap))
-            i += 1
-
-    for r_gap in range(LIVE_ROWS):
-        for c in range(LIVE_COLS):
-            dst[i] = _v_shift(side, r_gap, c).transpose(1, 2, 0)
-            chip_kinds.append("v_shift")
-            grid_positions.append((r_gap, c))
-            i += 1
-
-    for r_gap in range(LIVE_ROWS):
-        for c_gap in range(LIVE_COLS):
-            dst[i] = _diagonal(side, r_gap, c_gap).transpose(1, 2, 0)
-            chip_kinds.append("diagonal")
-            grid_positions.append((r_gap, c_gap))
-            i += 1
-
     assert i == BUNDLE_SIZE
     return chip_kinds, grid_positions
 
@@ -281,34 +276,15 @@ def generate_shifted_chips_bundled(composites: np.ndarray,
                                    ) -> Iterator[ChipBundle]:
     """Bundled variant: yield one ChipBundle per valid target date.
 
-    Same geometry as `generate_shifted_chips` (64 chips per date in
+    Same geometry as `generate_shifted_chips` (81 chips per date in
     originals -> h_shift -> v_shift -> diagonal order). Differences:
 
-    - One yield per target date (not 64).
-    - `before`/`after` are pre-allocated `(64, 256, 256, 10)` uint8 arrays
-      in the predictor's native (H, W, C) layout, so the caller can slice
-      directly into batches without an extra `np.stack` + transpose.
-    - Metadata is carried as parallel `chip_kinds` / `grid_positions` lists.
-
-    Memory cost per active bundle: 64 * 2 * 256 * 256 * 10 = ~84 MB. The
-    generator only holds one bundle at a time, so memory does not scale
-    with |D|.
+    - One yield per target date (not 81).
+    - `before`/`after` are pre-allocated `(BUNDLE_SIZE, 256, 256, 10)` uint8
+      arrays in the predictor's native (H, W, C) layout.
+    - Memory cost per active bundle: 81 * 2 * 256 * 256 * 10 = ~106 MB.
     """
-    if composites.ndim != 4 or composites.shape[0] != 2 or composites.shape[2] != 10:
-        raise ValueError(
-            "composites must have shape (2, |D|, 10, P); "
-            f"got {composites.shape}"
-        )
-    if target_dates.shape != (composites.shape[1],):
-        raise ValueError(
-            f"target_dates shape {target_dates.shape} must equal (|D|,) = "
-            f"({composites.shape[1]},)"
-        )
-    if valid_dates_mask.shape != (composites.shape[1],):
-        raise ValueError(
-            f"valid_dates_mask shape {valid_dates_mask.shape} must equal (|D|,) = "
-            f"({composites.shape[1]},)"
-        )
+    _validate_composites(composites, target_dates, valid_dates_mask)
 
     for k, target in enumerate(target_dates):
         if not valid_dates_mask[k]:
@@ -328,7 +304,6 @@ def generate_shifted_chips_bundled(composites: np.ndarray,
 
         kinds_b, positions_b = _fill_bundle_side(before_side, before_bundle)
         kinds_a, positions_a = _fill_bundle_side(after_side,  after_bundle)
-        # Sanity: before and after walk the same order, so metadata matches.
         assert kinds_b == kinds_a and positions_b == positions_a
 
         yield ChipBundle(
