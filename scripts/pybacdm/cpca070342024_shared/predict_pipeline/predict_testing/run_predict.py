@@ -60,7 +60,7 @@ from postprocess import (
     write_voted_block,
     read_voted_block,
 )
-from predict import load_model, predict_before_after_chips
+from bacdm.predict import load_model, predict_before_after_chips
 
 
 def rss_mb():
