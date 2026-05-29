@@ -1,1 +1,2 @@
-<https://sentiwiki.copernicus.eu/web/s2-products>
+- MSI Products Overview: <https://sentiwiki.copernicus.eu/web/s2-products>;
+- Overview of Sentinel-2 Mission; orbits: <https://sentiwiki.copernicus.eu/web/s2-mission>
