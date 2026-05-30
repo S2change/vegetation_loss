@@ -20,10 +20,6 @@ module purge
 
 # Load software modules
 module load gcc13/openmpi/4.1.6
-# NOTE: do not `module load python/3.10` — it prepends CVMFS site-packages
-# ahead of the venv's, which shadows the venv's typing_extensions and
-# breaks `import torch` (TypeIs missing in the older CVMFS copy).
-# The venv ships its own Python interpreter; activate alone is enough.
 
 source /users1/cpca070342024/shared/vchips/venv/bin/activate
 

@@ -28,7 +28,7 @@ import numpy as np
 
 NODATA_U8 = 255
 SELECTION_BAND_IDX_DEFAULT = 0
-B2_VALID_MAX = 5000
+B2_VALID_MAX = 200
 
 
 def cascading_select(block_subset: np.ndarray,
