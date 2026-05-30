@@ -8,6 +8,7 @@
   - band files, e.g. `S2C_MSIL2A_20250625-113341_N0511_R080_T29TPG_20250625T165206.tif`
   - PT mask files, e.g. `mask_T29TPG.tif`
   Note: PT cloud files (e.g. `S2C_MSIL1C_20250625-113341_N0511_R080_T29TPG_mask_omni.tif`) are not used since OMNI cloud screening results are incorporated into the band files.
+- HDF5 chunks: (12,10,256*256), open for appending new timestamps
 
 # Instructions
 
