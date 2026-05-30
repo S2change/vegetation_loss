@@ -14,8 +14,8 @@ portugal_S2_data
     |-- input_tifs
         |-- 2025
             |-- S2C_MSIL2A_20251007-110951_N0511_R137_T29TPE_20251007T145121
-                |-- S2C_MSIL2A_20251007-110951_N0511_R137_T29TPE_20251007T145121.tif
-                |-- S2C_MSIL1C_20251007-110951_N0511_R137_T29TPE_mask_omni.tif
+                |-- S2C_MSIL2A_20251007-110951_N0511_R137_T29TPE_20251007T145121.tif: dados espetrais 10 bandas. NOData=65535 codifica pixels fora de tile/órbita (NoData ESA) e também codifica pixels na máscara de nuvens
+                |-- S2C_MSIL1C_20251007-110951_N0511_R137_T29TPE_mask_omni.tif: 1 corresponde a nuvem; 0 corresponde a não nuvem ou a pixel exterior ao território. 
             |--- S2C_MSIL2A_20251109-112321_N0511_R037_T29SMC_20251109T130709
                 |--- S2C_MSIL2A_20251109-112321_N0511_R037_T29SMC_20251109T130709.tif
                 |--- S2C_MSIL1C_20251109-112321_N0511_R037_T29SMC_mask_omni.tif
@@ -30,7 +30,7 @@ portugal_S2_data
             |-- ...
         |-- ...
     |-- Mascara_PT_S2
-        |--- mask_T29SMC.tif
+        |--- mask_T29SMC.tif: em que 0 representa território e 1 representa fora do território 
         |--- mask_T29SMD.tif
         |--- mask_T29SNB.tif
         |--- ...
