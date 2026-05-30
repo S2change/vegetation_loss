@@ -3,7 +3,7 @@
 - Geotiff files for the same day (yyyy-mm-dd) are aggregated in a single timestamp. Multiple files can correspont to distinct `geotiff` subfiles (same acquisition date and distinct processing date) and/or to `geotiff` files for the same day (e.g. S2A and S2B separated by ~10 minutes);
 - Output hdf5 files have fields: xs, ys, ts, original_timestamps, S2_filename, S2_original_filenames (all aggregated files), cloud_cover_pt, pixel_count_pt, clear_pixel_count_pt:
 - Cloud cover is estimated just for PT and for the whole aggregate; aggregates with `pt_cloud_cover` less than `MAX_CLOUD_COVER_PT` (60%) are not stored in the output hdf5 files
-- Aggregates (e.g. tile T20TPG and orbit 080) with `clear_pixel_count_pt==0` are not stored in the output hdf5 files.
+- Aggregates (e.g. tile T29TPG and orbit 080) with `clear_pixel_count_pt==0` are not stored in the output hdf5 files.
 - Inputs are:
   - band files, e.g. `S2C_MSIL2A_20250625-113341_N0511_R080_T29TPG_20250625T165206.tif`
   - PT mask files, e.g. `mask_T29TPG.tif`
