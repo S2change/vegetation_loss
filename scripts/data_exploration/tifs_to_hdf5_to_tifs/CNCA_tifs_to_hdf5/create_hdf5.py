@@ -7,7 +7,7 @@ from rasterio.transform import xy
 from hdf5_utils import (
     parse_filter_sort_files,
     FOLDER_S2, FOLDER_PT_MASKS, FOLDER_HDF5,
-    BAND_NAMES, TILE_NAMES, MIN_DATE, MAX_DATE,
+    BAND_NAMES, TILE_NAMES, MIN_DATE, MAX_DATE, N_TS_CHUNK, CHIP_SIZE
 )
 
 
@@ -32,12 +32,11 @@ def read_and_combine_tifs(paths, window):
     """
     combined = None
     for path in paths:
-        #print(path, window)
+        print(path, window)
         with rasterio.open(path) as src:
             data = src.read(window=window)  # (nbands, nrows_pt, ncols_pt), uint16
         combined = data if combined is None else np.minimum(combined, data)
     return combined  # (nbands, nrows_pt, ncols_pt)
-
 
 def write_hdf5(h5_filename, file_metadata, band_names, mask_rows, mask_cols, xs_flat, ys_flat):
     nbands = len(band_names)
@@ -59,21 +58,34 @@ def write_hdf5(h5_filename, file_metadata, band_names, mask_rows, mask_cols, xs_
         h5f.create_dataset("ys", data=ys_flat, dtype='int32')
         h5f.create_dataset("ts",
                            data=[m['ordinal'] for m in file_metadata],
-                           dtype='int32')
+                           dtype='int32', maxshape=(None,))
         h5f.create_dataset("original_timestamps",
                            data=[m['timestamp_ms'] for m in file_metadata],
-                           dtype='int64')
+                           dtype='int64', maxshape=(None,))
         h5f.create_dataset("S2_filename",
-                           data=[m['filename'].encode('ascii') for m in file_metadata])
+                           data=[m['filename'].encode('ascii') for m in file_metadata],
+                           maxshape=(None,))
+        h5f.create_dataset("S2_original_filenames",
+                           data=[m['s2_original_filenames'].encode('ascii') for m in file_metadata],
+                           maxshape=(None,))
         h5f.create_dataset("cloud_cover_pt",
                            data=[round(m['cloud_cover_pt'] * 100) for m in file_metadata],
-                           dtype='uint8')
+                           dtype='uint8', maxshape=(None,))
+        h5f.create_dataset("pixel_count_pt",
+                           data=[round(m['pixel_count_pt']) for m in file_metadata],
+                           dtype='uint64', maxshape=(None,))
+        h5f.create_dataset("clear_pixel_count_pt",
+                           data=[round(m['clear_pixel_count_pt']) for m in file_metadata],
+                           dtype='uint64', maxshape=(None,))
+
+        #                 pixel_count_pt
         dset = h5f.create_dataset(
             "values",
             shape=(n_times, nbands, n_pixels),
             dtype='uint16',
-            chunks=(1, nbands, min(n_pixels, 2_810_880)),
+            chunks=(N_TS_CHUNK, nbands, min(n_pixels, CHIP_SIZE)),
             compression="lzf",
+            maxshape=(None, nbands, n_pixels),
         )
 
         for i, m in enumerate(file_metadata):
