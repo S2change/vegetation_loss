@@ -22,6 +22,18 @@ module load gcc13/openmpi/4.1.6
 
 source "${VENV:-/users1/cpca070342024/shared/vchips/venv}/bin/activate"
 
+# Cap thread pools to the CPUs SLURM actually granted this task. Without
+# this, PyTorch / NumPy / the BLAS backend default to the node's full core
+# count (96 on fct), so N concurrent array tasks oversubscribe the node by
+# ~N x 96 threads and each inference call slows ~2x from context-switching.
+# These MUST be set before Python imports torch/numpy (the pools size at
+# import time), which is why it lives here, not in predict_block.py.
+THREADS="${SLURM_CPUS_PER_TASK:-1}"
+export OMP_NUM_THREADS="$THREADS"
+export MKL_NUM_THREADS="$THREADS"
+export OPENBLAS_NUM_THREADS="$THREADS"
+export NUMEXPR_NUM_THREADS="$THREADS"
+
 : "${SLURM_ARRAY_TASK_ID:?Must be invoked as an array task}"
 : "${N_COLS:?N_COLS must be exported by submit_tile.sh}"
 

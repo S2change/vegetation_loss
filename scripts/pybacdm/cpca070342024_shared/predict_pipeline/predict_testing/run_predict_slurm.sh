@@ -23,6 +23,15 @@ module load gcc13/openmpi/4.1.6
 
 source /users1/cpca070342024/shared/vchips/venv/bin/activate
 
+# Cap thread pools to the granted CPU count so PyTorch/NumPy/BLAS don't
+# default to the node's full core count and oversubscribe under concurrency.
+# Must be set before Python imports torch/numpy. See distribute/run_block_slurm.sh.
+THREADS="${SLURM_CPUS_PER_TASK:-1}"
+export OMP_NUM_THREADS="$THREADS"
+export MKL_NUM_THREADS="$THREADS"
+export OPENBLAS_NUM_THREADS="$THREADS"
+export NUMEXPR_NUM_THREADS="$THREADS"
+
 src='run_predict.py'
 
 echo "=== Running ==="

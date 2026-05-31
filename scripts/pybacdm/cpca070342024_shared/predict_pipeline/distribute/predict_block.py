@@ -36,6 +36,7 @@ from pathlib import Path
 
 import numpy as np
 import psutil
+import torch
 
 # Make the bacdm/ subpackage importable. The INCD layout places
 # prediction_model/ as a sibling of distribute/ (under shared/), so we
@@ -179,6 +180,14 @@ def main() -> None:
         return
 
     # ── Load model ────────────────────────────────────────────────────────
+    # Pin PyTorch's intra-op thread pool to the granted CPU count. The SLURM
+    # wrapper already exports OMP/MKL/OpenBLAS thread caps before Python
+    # starts (those size at import time); this is the matching torch-side
+    # cap and also covers running predict_block.py outside the wrapper.
+    n_threads = int(os.environ.get("SLURM_CPUS_PER_TASK", "1"))
+    torch.set_num_threads(n_threads)
+    print(f"\ntorch threads:  {torch.get_num_threads()}")
+
     print("\nLoading model...")
     t0 = time.perf_counter()
     model = load_model(weights_path)
