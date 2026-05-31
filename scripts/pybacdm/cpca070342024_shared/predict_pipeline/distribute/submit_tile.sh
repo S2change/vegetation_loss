@@ -17,6 +17,14 @@
 #       TARGET_DATES=2025-11-15,2025-12-01 \
 #       OUTPUT_DIR=/users1/cpca070342024/shared/predict_outputs/T29TPG_run01
 #
+# Optional knobs (KEY=VALUE):
+#   MAX_CONCURRENT=30   max array tasks running at once (--array %N cap).
+#                       Lower = less HDF5/filesystem contention; default 30.
+#   WEIGHTS_PATH=...    .pth checkpoint (has a default).
+#   BATCH_SIZE=8        model batch size.
+#   VOTE_CLASSES=1,2    non-bg class IDs to vote on.
+#   VOTE_THRESHOLD=2    min votes per pixel to keep a detection.
+#
 # All KEY=VALUE pairs become env vars that the array tasks and aggregator
 # inherit (sbatch --export=ALL is the default — we use that).
 
@@ -43,6 +51,14 @@ export WEIGHTS_PATH="${WEIGHTS_PATH:-/users1/cpca070342024/shared/model_weights/
 export BATCH_SIZE="${BATCH_SIZE:-8}"
 export VOTE_CLASSES="${VOTE_CLASSES:-1,2}"
 export VOTE_THRESHOLD="${VOTE_THRESHOLD:-2}"
+
+# Max array tasks allowed to run at once (the `%N` in --array=0-LAST%N).
+# Each task is 1 CPU + 1 thread, but they share the node's HDF5/filesystem
+# bandwidth and memory. Capping concurrency trades wall time for far less
+# I/O contention during the chip-read step — which (with the thread fix)
+# tends to make each task faster, so total core-hours often drop too.
+# Set to a large number (e.g. >= N_BLOCKS) to effectively disable the cap.
+MAX_CONCURRENT="${MAX_CONCURRENT:-30}"
 
 # Each array task and the aggregator log to its own file under LOG_DIR.
 export LOG_DIR="${LOG_DIR:-${OUTPUT_DIR}/logs}"
@@ -74,6 +90,7 @@ echo "Target dates:   $TARGET_DATES"
 echo "Batch size:     $BATCH_SIZE"
 echo "Vote classes:   $VOTE_CLASSES"
 echo "Vote threshold: $VOTE_THRESHOLD"
+echo "Max concurrent: $MAX_CONCURRENT"
 echo "Weights:        $WEIGHTS_PATH"
 echo
 
@@ -89,14 +106,14 @@ export DISTRIBUTE_DIR
 # ── Submit array job (one task per block) ─────────────────────────────────
 ARRAY_JOB_ID=$(
     sbatch --parsable \
-        --array=0-${LAST_IDX} \
+        --array=0-${LAST_IDX}%${MAX_CONCURRENT} \
         --export=ALL \
         --output="$LOG_DIR/predict_block_%a.out" \
         --error="$LOG_DIR/predict_block_%a.err" \
         --job-name="predict_${TILE_ID}" \
         "$DISTRIBUTE_DIR/run_block_slurm.sh"
 )
-echo "Submitted array job:      $ARRAY_JOB_ID  (array 0-$LAST_IDX)"
+echo "Submitted array job:      $ARRAY_JOB_ID  (array 0-${LAST_IDX}%${MAX_CONCURRENT})"
 
 # ── Submit aggregator (depends on array success) ──────────────────────────
 AGGR_JOB_ID=$(
