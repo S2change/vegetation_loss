@@ -7,7 +7,7 @@ from rasterio.transform import xy
 from hdf5_utils import (
     parse_filter_sort_files,
     FOLDER_S2, FOLDER_PT_MASKS, FOLDER_HDF5,
-    BAND_NAMES, TILE_NAMES, MIN_DATE, MAX_DATE, N_TS_CHUNK, CHIP_SIZE
+    BAND_NAMES, TILE_NAMES, MIN_DATE, MAX_DATE, N_TS_CHUNK, CHIP_SIZE, OUTPUT_NODATA_VAL
 )
 
 
@@ -77,6 +77,10 @@ def write_hdf5(h5_filename, file_metadata, band_names, mask_rows, mask_cols, xs_
         h5f.create_dataset("clear_pixel_count_pt",
                            data=[round(m['clear_pixel_count_pt']) for m in file_metadata],
                            dtype='uint64', maxshape=(None,))
+        h5f.create_dataset("count_orbit_pixels_pt",
+                           data=[round(m['count_orbit_pixels_pt']) for m in file_metadata],
+                           dtype='uint64', maxshape=(None,))
+
 
         #                 pixel_count_pt
         dset = h5f.create_dataset(
@@ -86,6 +90,7 @@ def write_hdf5(h5_filename, file_metadata, band_names, mask_rows, mask_cols, xs_
             chunks=(N_TS_CHUNK, nbands, min(n_pixels, CHIP_SIZE)),
             compression="lzf",
             maxshape=(None, nbands, n_pixels),
+            fillvalue=OUTPUT_NODATA_VAL,
         )
 
         for i, m in enumerate(file_metadata):

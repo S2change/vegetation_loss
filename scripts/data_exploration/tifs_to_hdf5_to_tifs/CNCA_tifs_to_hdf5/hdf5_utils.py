@@ -12,12 +12,12 @@ INPUT_NODATA_VAL = 65535
 OUTPUT_NODATA_VAL = 65535
 
 # cloud cover will be computed relatively to the portuguese territory (+2 km buffer)
-MAX_CLOUD_COVER_PT = 0.6 # file_metadata only stores timestamps where cloud_cover_PT is below 60% and date is between MIN_DATE and MAX_DATE
+MAX_CLOUD_COVER_PT = 0.6 # (proportion: 0.6=60%) file_metadata only stores timestamps where cloud_cover_PT is below 60% and date is between MIN_DATE and MAX_DATE
 
 # S2 geotiff files
-FOLDER_S2 = r"..." # 2025/S2B_MSIL2A_.../S2B_MSIL2A_...tif+S2B_MSIL1C_..._mask_omni.tif
-FOLDER_PT_MASKS = r"...\Mascara_PT_S2" # mask_T29SMC.tif, etc
-FOLDER_HDF5 = r"...\hdf5_2025"
+FOLDER_S2 = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testes_cnca_filtar_hdf5_nuvems\exemplos_geotiff_CNCA" # 2025/S2B_MSIL2A_.../S2B_MSIL2A_...tif+S2B_MSIL1C_..._mask_omni.tif
+FOLDER_PT_MASKS = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testes_cnca_filtar_hdf5_nuvems\exemplos_geotiff_CNCA\Mascara_PT_S2" # mask_T29SMC.tif, etc
+FOLDER_HDF5 = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testes_cnca_filtar_hdf5_nuvems\exemplos_geotiff_CNCA\hdf5"
 
 # Date filters
 MIN_DATE = date(2025, 1, 1) 
@@ -82,11 +82,12 @@ def extract_s2_prefix_dt_timestamp_ms_from_S2_folder_name(f):
     parts = f.split('_')
     if len(parts) < 3:
         return None
-    time_str = parts[2]  # e.g. 20251109-112321
+    time_str = parts[2][0:8]  # use just day 20251109 from part[2]: 20251109-112321
     s2_prefix = extract_s2_aquisition_day_from_s2_folder_name(f)
-    dt_obj = datetime.strptime(time_str, "%Y%m%d-%H%M%S").replace(tzinfo=timezone.utc)
+    #dt_obj = datetime.strptime(time_str, "%Y%m%d-%H%M%S").replace(tzinfo=timezone.utc)
+    dt_obj = datetime.strptime(time_str, "%Y%m%d").replace(tzinfo=timezone.utc)
     dt = dt_obj.date()
-    timestamp_ms = int(dt_obj.timestamp() * 1000)
+    timestamp_ms = int(dt_obj.timestamp() * 1000) # this is just a coarse value for timestamp_ms, since we're aggregating several images
     return s2_prefix, dt, timestamp_ms
 
 def determine_pt_mask_file(folder_pt_mask, tile):
@@ -242,7 +243,6 @@ def parse_filter_sort_files(folder_s2, folder_pt_mask, tile, min_date=None, max_
         combined_cloud_mask = None
         combined_b2 = None
         for fp in folder_paths:
-            '''
             # PT_CLOUD_MASK
             cloud_mask_files = [
                 f for f in os.listdir(fp)
@@ -259,7 +259,10 @@ def parse_filter_sort_files(folder_s2, folder_pt_mask, tile, min_date=None, max_
             with rasterio.open(os.path.join(fp, cloud_mask_files[0])) as src:
                 mask = src.read(1)
                 combined_cloud_mask = mask if combined_cloud_mask is None else np.maximum(combined_cloud_mask, mask)
-            '''
+        if combined_cloud_mask is None:
+            continue
+        
+        for fp in folder_paths:
             # B2
             band_files = [
                 f for f in os.listdir(fp)
@@ -278,11 +281,16 @@ def parse_filter_sort_files(folder_s2, folder_pt_mask, tile, min_date=None, max_
                 combined_b2 = b2 if combined_b2 is None else np.minimum(combined_b2, b2)
         if combined_b2 is None:
             continue
-        # Determine if combined  has no non-cloud pixels in PT
-        number_clear_pixels_in_PT = int(((combined_b2 < 65535) & (pt_mask == 0)).sum())
+        # pt_pixel_count = int((pt_mask == 0).sum())
+        a0=int((combined_b2 < 65535).sum()) # number of pixels in PT, in available orbits, and not masked as clouds
+        a1=int((combined_cloud_mask ==1).sum()) # number of pixels in PT, in available orbits, and masked as clouds
+        count_orbit_pixels_pt= a0+a1 # total number of pixels in available orbits
+        # Determine if combined  has no non-cloud pixels in PT, in the orbits
+        number_clear_pixels_in_PT = a0 #int(((combined_b2 < 65535) & (pt_mask == 0)).sum())
         #combined_cloud_pixels_pt=int((combined_cloud_mask == 1).sum())
         #cloud_cover = combined_cloud_pixels_pt / pt_pixel_count if pt_pixel_count > 0 else None
-        cloud_cover = (1-number_clear_pixels_in_PT/ pt_pixel_count) if pt_pixel_count > 0 else None
+        #cloud_cover = (1-number_clear_pixels_in_PT/ pt_pixel_count) if pt_pixel_count > 0 else None
+        cloud_cover = (1-number_clear_pixels_in_PT/ count_orbit_pixels_pt) if count_orbit_pixels_pt > 0 else None
         
          
         parsed = extract_s2_prefix_dt_timestamp_ms_from_S2_folder_name(os.path.basename(folder_paths[0]))
@@ -294,7 +302,7 @@ def parse_filter_sort_files(folder_s2, folder_pt_mask, tile, min_date=None, max_
             os.path.basename(fp) for fp in folder_paths
         )
 
-        print(s2_prefix," has",number_clear_pixels_in_PT,"clear pixels in PT in a total of ",pt_pixel_count," PT pixels")
+        print(s2_prefix," has",number_clear_pixels_in_PT,"clear pixels in PT in a total of ",pt_pixel_count," PT pixels, with ",count_orbit_pixels_pt, " within orbits")
         if number_clear_pixels_in_PT>0:
             print("cloud_cover",cloud_cover)
 
@@ -320,6 +328,7 @@ def parse_filter_sort_files(folder_s2, folder_pt_mask, tile, min_date=None, max_
                 'crs': crs,
                 'pixel_count_pt': pt_pixel_count,
                 'clear_pixel_count_pt': number_clear_pixels_in_PT,
+                'count_orbit_pixels_pt': count_orbit_pixels_pt,
             })
 
     file_metadata.sort(key=lambda x: x['timestamp_ms'])
