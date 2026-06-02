@@ -1,4 +1,4 @@
-Lista de datas selecionadas. A mesma data corresponde a 1 ou à agregação de 2 ou 3 ficheiros geotiff ESA. A cobertura de nuvens *Cloud%*  é determinada sobre a área no território português coberta pela(s) órbitas e para a tile. A última coluna tem os nemos oficiais dos ficheiros geotiff agregados em cada data.
+Lista de datas selecionadas. A mesma data corresponde a 1 ou à agregação de 2 ou 3 ficheiros geotiff ESA. A cobertura de nuvens *Cloud%*  é determinada sobre a área no território português coberta pela(s) órbitas e para a tile. A última coluna tem os nomes oficiais dos ficheiros geotiff agregados em cada data.
 
 Ver animação para 48 datas em <https://github.com/S2change/vegetation_loss/blob/main/scripts/data_exploration/tifs_to_hdf5_to_tifs/CNCA_tifs_to_hdf5/T29SMD_48ts_animation.gif>
     
