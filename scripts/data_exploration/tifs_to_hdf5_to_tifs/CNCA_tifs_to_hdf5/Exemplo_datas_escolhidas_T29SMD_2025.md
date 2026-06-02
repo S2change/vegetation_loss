@@ -1,3 +1,5 @@
+Lista de datas selecionadas. Na mesma data, podem estar agregados até 3 ficheiros geotiff ESA. A cobertura de nuvens *Cloud%*  é determinada sobre a área no território português coberta pela(s) órbitas e para a tile. A última coluna tem os nemos oficiais dos ficheiros geotiff agregados em cada data.
+    
     Date          Cloud%   days  clear_pixls orbit_pixls S2 prefix
     -----------------------------------------------------------------------------------------------
     2025-01-01        0%      -   40845070   40903528  S2_MSIL2A_20250101_T29SMD  S2B_MSIL2A_20250101-113409_N0511_R080_T29SMD_20250101T134107
