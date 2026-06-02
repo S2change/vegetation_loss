@@ -1,4 +1,4 @@
-# New version June 1, 2026
+# version June 2, 2026
 
 - Geotiff files for the same day (yyyy-mm-dd) are aggregated in a single timestamp. Multiple files can correspont to distinct `geotiff` subfiles (same acquisition date and distinct processing date) and/or to `geotiff` files for the same day (e.g. S2A and S2B separated by ~10 minutes);
 - Output hdf5 files have fields: xs, ys, ts, original_timestamps, S2_filename, S2_original_filenames (all aggregated files), cloud_cover_pt, pixel_count_pt, clear_pixel_count_pt, count_orbit_pixels_pt,  with `cloud_cover_pt = (1-clear_pixel_count_pt/count_orbit_pixels_pt)`, where `clear_pixel_count_pt` is the number of pixels that satisfy 3 conditions: within the orbit, within the territory (pt), and not masked as clouds:
@@ -8,7 +8,7 @@
   - band files, e.g. `S2C_MSIL2A_20250625-113341_N0511_R080_T29TPG_20250625T165206.tif`
   - PT mask files, e.g. `mask_T29TPG.tif`
   Note: PT cloud files (e.g. `S2C_MSIL1C_20250625-113341_N0511_R080_T29TPG_mask_omni.tif`) are not used since OMNI cloud screening results are incorporated into the band files.
-- HDF5 chunks: (12,10,256*256), open for appending new timestamps
+- HDF5 chunks: (12,10,n_slots=256*256), open for appending new timestamps; COORDS_NODATA=-9999
 
 # Instructions
 
