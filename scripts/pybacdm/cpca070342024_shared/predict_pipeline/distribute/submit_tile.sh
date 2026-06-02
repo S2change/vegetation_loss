@@ -22,7 +22,7 @@
 #                       Lower = less HDF5/filesystem contention; default 30.
 #   WEIGHTS_PATH=...    .pth checkpoint (has a default).
 #   BATCH_SIZE=8        model batch size.
-#   VOTE_CLASSES=1,2    non-bg class IDs to vote on.
+#   VOTE_CLASSES=1,2    non-bg class IDs to vote on. 1 = Cuts, 2 = Fires. Class names are in AAA_Configs.py
 #   VOTE_THRESHOLD=2    min votes per pixel to keep a detection.
 #
 # All KEY=VALUE pairs become env vars that the array tasks and aggregator

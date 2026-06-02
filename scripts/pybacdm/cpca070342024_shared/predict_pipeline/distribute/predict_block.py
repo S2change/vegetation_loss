@@ -58,6 +58,7 @@ from postprocess import (
     VoteAccumulator,
     write_voted_block,
 )
+from polygonize import labels_to_polygons, polygons_to_records
 from bacdm.predict import load_model, predict_before_after_chips
 
 
@@ -159,9 +160,11 @@ def main() -> None:
     if n_valid == 0:
         # Empty output is still useful: aggregator can detect missing/empty
         # blocks. Write a .npz with zero-filled labels for any dates the
-        # user asked for so the file shape stays predictable.
+        # user asked for so the file shape stays predictable, plus an empty
+        # .gpkg so every block has both outputs (keeps the aggregator's
+        # complete-grid check symmetric).
         print("\n  No valid target dates for this block. Writing empty .npz "
-              "(all-bg labels) and exiting.")
+              "+ empty .gpkg and exiting.")
         labels = np.zeros(
             (len(target_dates),
              1024, 1024),  # default LIVE size — postprocess.vote.LIVE_H/W
@@ -176,6 +179,10 @@ def main() -> None:
             world_origin_y=position.world_origin_y,
             pixel_res=position.pixel_res,
             threshold=vote_threshold,
+        )
+        _write_empty_block_gpkg(
+            output_dir, tile_id, block_row, block_col,
+            crs=_read_hdf5_crs(hdf5_path),
         )
         return
 
@@ -309,7 +316,90 @@ def main() -> None:
     npz_bytes = os.path.getsize(npz_path)
     print(f"  Wrote {npz_path} in {write_s:.2f} s  "
           f"({npz_bytes / 1024:.1f} KB)")
+
+    # ── Step 6b: polygonize voted labels -> per-block GeoPackage ──────────
+    # One polygon per connected patch of each class on each date, in world
+    # (UTM) coords. The tile aggregator dissolves edge-adjacent polygons
+    # across block boundaries. Stamped with the HDF5's CRS so each .gpkg is
+    # self-contained.
+    print(f"\nStep 6b: polygonizing voted labels...")
+    t0 = time.perf_counter()
+    crs = _read_hdf5_crs(hdf5_path)
+    rows: list = []
+    for i, d in enumerate(target_dates):
+        patches = labels_to_polygons(
+            voted_labels[i], date_ordinal=int(d),
+            classes=tuple(int(c) for c in vote_classes),
+            world_origin_x=position.world_origin_x,
+            world_origin_y=position.world_origin_y,
+            pixel_res=position.pixel_res,
+        )
+        rows.extend(polygons_to_records(patches, tile_id))
+
+    gpkg_path = _write_block_gpkg(
+        rows, output_dir, tile_id,
+        position.block_row, position.block_col, crs=crs,
+    )
+    print(f"  Wrote {gpkg_path} in {time.perf_counter() - t0:.2f} s  "
+          f"({len(rows)} polygons)")
+
     print(f"\n[RSS] Final:                           {rss_mb():7.1f} MB")
+
+
+# Column order for the per-block GeoPackage. Shared by the populated and
+# empty writers so the schema is identical whether or not a block had
+# detections.
+_GPKG_COLUMNS = [
+    "tile_id", "date_ordinal", "date_iso", "class_id",
+    "n_pixels", "area_m2", "centroid_x", "centroid_y", "geometry",
+]
+
+
+def _write_block_gpkg(rows: list, output_dir: str, tile_id: str,
+                      block_row: int, block_col: int, *, crs) -> str:
+    """Write one block's polygon rows to a GeoPackage; return its path.
+
+    Empty `rows` writes a valid empty layer so every block has a .gpkg.
+    """
+    import geopandas as gpd
+    if rows:
+        gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=crs)
+        gdf = gdf[_GPKG_COLUMNS]
+    else:
+        gdf = gpd.GeoDataFrame(
+            columns=_GPKG_COLUMNS, geometry="geometry", crs=crs,
+        )
+    gpkg_path = os.path.join(
+        output_dir,
+        f"{tile_id}_block_{block_row:03d}_{block_col:03d}.gpkg",
+    )
+    gdf.to_file(gpkg_path, layer="detections", driver="GPKG")
+    return gpkg_path
+
+
+def _write_empty_block_gpkg(output_dir: str, tile_id: str,
+                            block_row: int, block_col: int, *, crs) -> str:
+    """Write an empty per-block GeoPackage (no detections)."""
+    return _write_block_gpkg([], output_dir, tile_id, block_row, block_col,
+                             crs=crs)
+
+
+def _read_hdf5_crs(hdf5_path: str):
+    """Return the tile's CRS (EPSG string/int or WKT) from the HDF5 `crs`
+    attr, or None if absent. geopandas accepts any pyproj-parsable form.
+    """
+    try:
+        import h5py
+    except ImportError:
+        return None
+    try:
+        with h5py.File(hdf5_path, "r") as h5f:
+            raw = h5f.attrs.get("crs")
+    except (OSError, KeyError):
+        return None
+    if raw is None:
+        return None
+    return raw.decode("utf-8") if isinstance(raw, bytes) else raw
 
 
 if __name__ == "__main__":

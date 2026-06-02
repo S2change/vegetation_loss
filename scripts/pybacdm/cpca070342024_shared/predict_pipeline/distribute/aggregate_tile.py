@@ -1,26 +1,26 @@
-"""Stitch per-block voted .npz shards into tile-level Parquet + .npz + GeoTIFFs.
+"""Merge per-block polygons + voted .npz shards into tile-level outputs.
 
 Runs once after all array tasks for a tile complete (gated by the SLURM
 `afterok` dependency in submit_tile.sh). Reads every
-`{TILE_ID}_block_*.npz` in `OUTPUT_DIR`, places each block's
-`(n_dates, LIVE_H, LIVE_W)` labels at its `(block_row, block_col)`
-position in a tile-sized canvas, and writes:
+`{TILE_ID}_block_*.gpkg` (per-block polygons) and `{TILE_ID}_block_*.npz`
+(per-block voted label maps) in `OUTPUT_DIR`, and writes:
 
-  - `{TILE_ID}_tile.parquet` (PRIMARY) — one row per detected connected
-    component (class > 0). Schema: tile_id, date_ordinal, date_iso,
-    class_id, component_id, n_pixels, bbox + centroid in tile-pixel
-    coords, bbox + centroid in UTM, and the component's RLE.
+  - `{TILE_ID}_tile.gpkg` (PRIMARY) — one polygon per detected patch,
+    class > 0. Patches straddling block boundaries are dissolved into a
+    single geometry (per date + class) via unary_union of edge-adjacent
+    polygons. Schema: tile_id, date_ordinal, date_iso, class_id,
+    n_pixels, area_m2, centroid_x/y, geometry (Polygon, in the tile CRS).
+  - `{TILE_ID}_tile.parquet` (PRIMARY, analysis) — the same patches as
+    GeoParquet for fast pandas/geopandas reads.
   - `{TILE_ID}_tile.npz` (AUXILIARY) — the dense `(n_dates, TILE_H, TILE_W)`
-    uint8 label map and the metadata needed to re-project it.
-  - `{TILE_ID}_tile_{YYYY-MM-DD}.tif` (GIS) — one georeferenced GeoTIFF
-    per target date, LZW-compressed, with class 0 tagged as NoData so
-    GIS tools render background transparent. CRS comes from the source
-    HDF5 if `TILE_HDF5_PATH` is set in the env; otherwise the GeoTIFFs
-    are still spatially located via the transform but without a CRS tag.
+    uint8 label map (blocks stitched into one canvas) + metadata.
+  - `{TILE_ID}_tile_{YYYY-MM-DD}.tif` (GIS raster) — one LZW GeoTIFF per
+    date, class 0 as NoData.
 
-The Parquet is the unit of analysis ("here's a patch detected on date X");
-the .npz preserves the dense map for visualisation/debugging via numpy;
-the GeoTIFFs are for direct ingestion into QGIS / ArcGIS / gdal.
+Boundary merge: LIVE areas tile with no gap, so a patch crossing a block
+seam yields two edge-touching polygons in adjacent blocks. unary_union
+welds touching/overlapping polygons, so the dissolved result is one patch
+— no ghost output or overlap dedup needed.
 """
 import os
 import sys
@@ -29,12 +29,12 @@ from datetime import date as _date
 from pathlib import Path
 
 import numpy as np
+import geopandas as gpd
 import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
 import rasterio
 from rasterio.transform import from_origin
 from rasterio.crs import CRS
+from shapely.ops import unary_union
 
 # h5py used only to grab the CRS attribute from the source HDF5. Optional
 # so the aggregator can still run when TILE_HDF5_PATH isn't provided.
@@ -46,22 +46,16 @@ except ImportError:
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent))   # shared/
-sys.path.insert(0, str(_HERE))          # distribute/ (for tile_components)
+sys.path.insert(0, str(_HERE))          # distribute/
 
 from postprocess.voted_output import read_voted_block
 from postprocess.vote import LIVE_H, LIVE_W
-from tile_components import extract_components
 
 
-# Parquet column order — fixed for stable schema across runs.
-_PARQUET_COLUMNS = [
-    "tile_id", "date_ordinal", "date_iso", "class_id", "component_id",
-    "n_pixels",
-    "bbox_y0", "bbox_x0", "bbox_y1", "bbox_x1",
-    "centroid_y", "centroid_x",
-    "world_bbox_x0", "world_bbox_y0", "world_bbox_x1", "world_bbox_y1",
-    "world_centroid_x", "world_centroid_y",
-    "rle_starts", "rle_lengths",
+# Output column order for the dissolved tile vector (.gpkg / .parquet).
+_VECTOR_COLUMNS = [
+    "tile_id", "date_ordinal", "date_iso", "class_id",
+    "n_pixels", "area_m2", "centroid_x", "centroid_y", "geometry",
 ]
 
 
@@ -100,56 +94,56 @@ def _stitch_blocks(blocks: list[dict], n_rows: int, n_cols: int,
     return labels
 
 
-def _components_to_dataframe(labels: np.ndarray,
-                             target_dates: np.ndarray,
-                             classes: np.ndarray,
+def _dissolve_block_polygons(block_gdf: gpd.GeoDataFrame,
                              tile_id: str,
-                             world_origin_x: float,
-                             world_origin_y: float,
                              pixel_res: float,
-                             ) -> pd.DataFrame:
-    """Enumerate every connected component in `labels` and return them
-    as a row-per-component DataFrame ready to write as Parquet."""
+                             ) -> gpd.GeoDataFrame:
+    """Dissolve per-block polygons into per-patch tile polygons.
+
+    For each (date_ordinal, class_id) group, unary_union all member
+    polygons — edge-touching patches from adjacent blocks weld into one —
+    then explode the resulting (multi)polygon back to individual patches.
+    Re-derives n_pixels / area_m2 / centroid per merged patch.
+
+    Returns a GeoDataFrame with `_VECTOR_COLUMNS`, same CRS as the input.
+    """
+    px_area = float(pixel_res) * float(pixel_res)
+    crs = block_gdf.crs
+
+    if len(block_gdf) == 0:
+        return gpd.GeoDataFrame(columns=_VECTOR_COLUMNS, geometry="geometry",
+                                crs=crs)
+
     rows: list[dict] = []
-    for date_idx in range(labels.shape[0]):
-        ordinal = int(target_dates[date_idx])
-        iso = _date.fromordinal(ordinal).isoformat()
-        for cls in classes:
-            cls_int = int(cls)
-            for comp in extract_components(labels[date_idx], cls_int, ordinal):
-                # World coords: x = origin_x + col * res ; y = origin_y - row * res
-                w_x0 = world_origin_x + comp.bbox_x0 * pixel_res
-                w_x1 = world_origin_x + comp.bbox_x1 * pixel_res
-                w_y0 = world_origin_y - comp.bbox_y0 * pixel_res
-                w_y1 = world_origin_y - comp.bbox_y1 * pixel_res
-                # NW->SE bbox in UTM: x grows east (x0 < x1), y shrinks south (y0 > y1).
-                # Use min/max so x0<x1 and y0<y1 in the stored bbox.
-                rows.append({
-                    "tile_id": tile_id,
-                    "date_ordinal": ordinal,
-                    "date_iso": iso,
-                    "class_id": cls_int,
-                    "component_id": comp.component_id,
-                    "n_pixels": comp.n_pixels,
-                    "bbox_y0": comp.bbox_y0, "bbox_x0": comp.bbox_x0,
-                    "bbox_y1": comp.bbox_y1, "bbox_x1": comp.bbox_x1,
-                    "centroid_y": comp.centroid_y,
-                    "centroid_x": comp.centroid_x,
-                    "world_bbox_x0": min(w_x0, w_x1),
-                    "world_bbox_y0": min(w_y0, w_y1),
-                    "world_bbox_x1": max(w_x0, w_x1),
-                    "world_bbox_y1": max(w_y0, w_y1),
-                    "world_centroid_x": world_origin_x + comp.centroid_x * pixel_res,
-                    "world_centroid_y": world_origin_y - comp.centroid_y * pixel_res,
-                    "rle_starts":  comp.rle_starts.tolist(),
-                    "rle_lengths": comp.rle_lengths.tolist(),
-                })
+    # Group by (date, class); within each, weld touching/overlapping polys.
+    for (ordinal, cls), grp in block_gdf.groupby(["date_ordinal", "class_id"]):
+        merged = unary_union(list(grp.geometry))
+        # unary_union returns a Polygon or MultiPolygon; normalise to a list.
+        geoms = list(merged.geoms) if merged.geom_type == "MultiPolygon" \
+            else [merged]
+        iso = _date.fromordinal(int(ordinal)).isoformat()
+        for geom in geoms:
+            if geom.is_empty:
+                continue
+            area_m2 = float(geom.area)
+            centroid = geom.centroid
+            rows.append({
+                "tile_id": tile_id,
+                "date_ordinal": int(ordinal),
+                "date_iso": iso,
+                "class_id": int(cls),
+                "n_pixels": int(round(area_m2 / px_area)),
+                "area_m2": area_m2,
+                "centroid_x": float(centroid.x),
+                "centroid_y": float(centroid.y),
+                "geometry": geom,
+            })
+
     if not rows:
-        # Empty DataFrame with the right columns so Parquet readers don't
-        # have to special-case "no components found" tiles.
-        return pd.DataFrame(columns=_PARQUET_COLUMNS)
-    df = pd.DataFrame(rows)
-    return df[_PARQUET_COLUMNS]
+        return gpd.GeoDataFrame(columns=_VECTOR_COLUMNS, geometry="geometry",
+                                crs=crs)
+    out = gpd.GeoDataFrame(rows, geometry="geometry", crs=crs)
+    return out[_VECTOR_COLUMNS]
 
 
 def _read_hdf5_crs(hdf5_path: str | None) -> CRS | None:
@@ -383,31 +377,52 @@ def main() -> None:
         iso = _date.fromordinal(int(ref_dates[i])).isoformat()
         print(f"  {iso}: {post}")
 
-    # ── Step A: connected-component enumeration -> Parquet ────────────────
-    print("\nExtracting connected components per (date, class)...")
+    # ── Step A: read per-block polygons, dissolve, write vector outputs ───
+    print("\nReading per-block polygons (.gpkg)...")
     t0 = time.perf_counter()
-    df = _components_to_dataframe(
-        labels, ref_dates, ref_classes, tile_id,
-        tile_origin_x, tile_origin_y, ref_pres,
+    gpkg_pattern = f"{tile_id}_block_*.gpkg"
+    gpkg_paths = sorted(Path(output_dir).glob(gpkg_pattern))
+    if not gpkg_paths:
+        raise SystemExit(
+            f"[aggregate_tile] No per-block polygons matching {gpkg_pattern} "
+            f"in {output_dir}. Did predict_block write .gpkg files?"
+        )
+    block_gdfs = [gpd.read_file(str(p), layer="detections") for p in gpkg_paths]
+    # Concatenate; preserve CRS from the first non-empty frame.
+    block_gdf = gpd.GeoDataFrame(
+        pd.concat(block_gdfs, ignore_index=True),
+        geometry="geometry",
     )
-    print(f"  Components found: {len(df)}")
-    if len(df) > 0:
-        per_class = df.groupby(["class_id", "date_iso"])["n_pixels"].agg(
+    src_crs = next((g.crs for g in block_gdfs if g.crs is not None), None)
+    block_gdf.set_crs(src_crs, inplace=True, allow_override=True)
+    print(f"  Read {len(gpkg_paths)} block .gpkg ({len(block_gdf)} polygons) "
+          f"in {time.perf_counter() - t0:.2f} s")
+
+    print("\nDissolving boundary-straddling patches per (date, class)...")
+    t0 = time.perf_counter()
+    tile_gdf = _dissolve_block_polygons(block_gdf, tile_id, ref_pres)
+    print(f"  {len(block_gdf)} block polygons -> {len(tile_gdf)} merged "
+          f"patches in {time.perf_counter() - t0:.2f} s")
+    if len(tile_gdf) > 0:
+        per_class = tile_gdf.groupby(["class_id", "date_iso"])["n_pixels"].agg(
             ["count", "sum"]
         )
-        print(f"  By (class, date) — count = n_components, "
-              f"sum = total pixels:")
+        print("  By (class, date) — count = n_patches, sum = total pixels:")
         print(per_class.to_string())
-    print(f"  Component extraction time: {time.perf_counter() - t0:.2f} s")
 
+    # Stamp the tile CRS (from the source HDF5) if the block files lacked one.
+    crs = _read_hdf5_crs(os.environ.get("TILE_HDF5_PATH"))
+    if tile_gdf.crs is None and crs is not None:
+        tile_gdf.set_crs(crs, inplace=True, allow_override=True)
+
+    gpkg_path = os.path.join(output_dir, f"{tile_id}_tile.gpkg")
     parquet_path = os.path.join(output_dir, f"{tile_id}_tile.parquet")
     t0 = time.perf_counter()
-    table = pa.Table.from_pandas(df, preserve_index=False)
-    pq.write_table(table, parquet_path, compression="snappy")
-    write_parquet_s = time.perf_counter() - t0
-    parquet_bytes = os.path.getsize(parquet_path)
-    print(f"\nWrote {parquet_path}")
-    print(f"  ({parquet_bytes / 1024:.1f} KB in {write_parquet_s:.2f} s)")
+    tile_gdf.to_file(gpkg_path, layer="detections", driver="GPKG")
+    tile_gdf.to_parquet(parquet_path)
+    print(f"\nWrote {gpkg_path}")
+    print(f"      {parquet_path}")
+    print(f"  ({len(tile_gdf)} patches in {time.perf_counter() - t0:.2f} s)")
 
     # ── Step B: dense .npz (auxiliary output) ─────────────────────────────
     npz_path = os.path.join(output_dir, f"{tile_id}_tile.npz")

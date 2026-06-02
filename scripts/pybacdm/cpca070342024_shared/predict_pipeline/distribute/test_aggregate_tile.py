@@ -1,10 +1,12 @@
-"""End-to-end tests for aggregate_tile.py using synthetic per-block .npzes.
+"""End-to-end tests for aggregate_tile.py using synthetic per-block shards.
 
-Builds fake block shards in a tempdir, runs the aggregator via
+Builds fake block shards in a tempdir (both the voted .npz AND the per-block
+polygon .gpkg, mirroring what predict_block writes), runs the aggregator via
 subprocess, and verifies:
-  - The auxiliary .npz stitches blocks correctly (pixel-level)
-  - The primary .parquet enumerates connected components with correct
-    counts, bboxes, centroids, world coords, and RLE.
+  - The auxiliary .npz stitches blocks correctly (pixel-level).
+  - The primary tile .gpkg / .parquet carry one polygon per detected patch,
+    with boundary-straddling patches dissolved into a single geometry.
+  - The per-date GeoTIFFs are written with the right transform / NoData.
   - Failure modes (missing block, inconsistent metadata) surface as
     non-zero exit + diagnostic text.
 
@@ -18,16 +20,18 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import geopandas as gpd
 import pandas as pd
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent))
+sys.path.insert(0, str(_HERE))
 
 from postprocess.voted_output import write_voted_block
+from polygonize import labels_to_polygons, polygons_to_records
 
 
-# Use smaller-than-real block size to keep tests fast. 64x64 is plenty
-# for component enumeration tests.
+# Small block size keeps the synthetic tile cheap. 64x64 per block.
 CHIP_SIZE = 64
 TILE_ID = "T_TEST"
 PIXEL_RES = 10.0
@@ -43,32 +47,53 @@ def _block_labels_with_square(r: int, c: int,
                               date_idx: int, class_id: int,
                               y0: int, x0: int, side: int,
                               n_dates: int = 2) -> np.ndarray:
-    """Per-block labels with one square of `class_id` on `date_idx`.
-    The other dates / blocks remain all-bg."""
+    """Per-block labels with one square of `class_id` on `date_idx`."""
     out = _empty_block_labels(n_dates=n_dates)
     out[date_idx, y0:y0 + side, x0:x0 + side] = class_id
     return out
 
 
+def _block_origin(r: int, c: int) -> tuple[float, float]:
+    return (TILE_ORIGIN_X + c * CHIP_SIZE * PIXEL_RES,
+            TILE_ORIGIN_Y - r * CHIP_SIZE * PIXEL_RES)
+
+
 def _write_block(tmpd: Path, r: int, c: int, labels: np.ndarray,
                  target_dates: np.ndarray, classes: tuple[int, ...] = (1, 2),
                  threshold: int = 2) -> None:
+    """Write BOTH the voted .npz and the per-block polygon .gpkg, exactly
+    as predict_block.py does in production."""
+    ox, oy = _block_origin(r, c)
     write_voted_block(
         str(tmpd), TILE_ID, r, c,
         labels=labels,
         target_dates=target_dates,
         classes=classes,
-        world_origin_x=TILE_ORIGIN_X + c * CHIP_SIZE * PIXEL_RES,
-        world_origin_y=TILE_ORIGIN_Y - r * CHIP_SIZE * PIXEL_RES,
+        world_origin_x=ox, world_origin_y=oy,
         pixel_res=PIXEL_RES,
         threshold=threshold,
     )
+    # Per-block polygons (LIVE only), in world coords.
+    rows: list = []
+    for i in range(labels.shape[0]):
+        patches = labels_to_polygons(
+            labels[i], date_ordinal=int(target_dates[i]),
+            classes=classes,
+            world_origin_x=ox, world_origin_y=oy, pixel_res=PIXEL_RES,
+        )
+        rows.extend(polygons_to_records(patches, TILE_ID))
+    cols = ["tile_id", "date_ordinal", "date_iso", "class_id",
+            "n_pixels", "area_m2", "centroid_x", "centroid_y", "geometry"]
+    gdf = gpd.GeoDataFrame(rows, geometry="geometry") if rows else \
+        gpd.GeoDataFrame(columns=cols, geometry="geometry")
+    if rows:
+        gdf = gdf[cols]
+    gpkg = tmpd / f"{TILE_ID}_block_{r:03d}_{c:03d}.gpkg"
+    gdf.to_file(gpkg, layer="detections", driver="GPKG")
 
 
 def _write_synthetic_grid_empty(tmpd: Path, n_rows: int, n_cols: int,
                                 n_dates: int = 2) -> np.ndarray:
-    """Write all-bg block shards (so the merged tile has no components).
-    Returns the target_dates array used."""
     target_dates = np.array([738887, 738900][:n_dates], dtype=np.int64)
     for r in range(n_rows):
         for c in range(n_cols):
@@ -81,19 +106,15 @@ def _run_aggregator(tmpd: Path) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env["TILE_ID"] = TILE_ID
     env["OUTPUT_DIR"] = str(tmpd)
+    env.pop("TILE_HDF5_PATH", None)   # no real HDF5 in tests
     return subprocess.run(
         [sys.executable, str(_HERE / "aggregate_tile.py")],
         env=env, capture_output=True, text=True,
     )
 
 
-def _decode_rle(starts: np.ndarray, lengths: np.ndarray,
-                shape: tuple[int, int]) -> np.ndarray:
-    """Decode tile-relative RLE back into a 2-D bool mask."""
-    flat = np.zeros(shape[0] * shape[1], dtype=bool)
-    for s, l in zip(starts, lengths):
-        flat[int(s):int(s) + int(l)] = True
-    return flat.reshape(shape)
+def _read_tile_vector(tmpd: Path) -> gpd.GeoDataFrame:
+    return gpd.read_file(str(tmpd / f"{TILE_ID}_tile.gpkg"), layer="detections")
 
 
 # ============================================================================
@@ -101,14 +122,11 @@ def _decode_rle(starts: np.ndarray, lengths: np.ndarray,
 # ============================================================================
 
 def test_full_grid_stitches_into_dense_npz():
-    """Same shape-correctness check the old test had — the .npz is still
-    a first-class output."""
+    """The auxiliary .npz stitches blocks correctly (pixel-level)."""
     with tempfile.TemporaryDirectory() as tmpd:
         tmpd = Path(tmpd)
         n_rows, n_cols, n_dates = 2, 3, 2
         target_dates = np.array([738887, 738900], dtype=np.int64)
-        # Each block carries a uniform value (r*7 + c*3 + d*5)%254 + 1
-        # so we can verify per-pixel placement.
         for r in range(n_rows):
             for c in range(n_cols):
                 lab = _empty_block_labels(n_dates=n_dates)
@@ -139,20 +157,17 @@ def test_full_grid_stitches_into_dense_npz():
     print("  dense .npz stitches correctly — OK")
 
 
-def test_components_parquet_single_square_block():
-    """One 5x5 class-1 square at LIVE (10, 10) in block (0, 0). Parquet
-    must have exactly one component row with the expected geometry."""
+def test_vector_single_square_block():
+    """One 5x5 class-1 square at LIVE (10,10) in block (0,0). The tile
+    vector must have exactly one polygon with the expected geometry."""
     with tempfile.TemporaryDirectory() as tmpd:
         tmpd = Path(tmpd)
         target_dates = np.array([738887, 738900], dtype=np.int64)
-        # Block (0, 0) gets one square; all other blocks all-bg.
         for r in range(2):
             for c in range(2):
                 if r == 0 and c == 0:
                     lab = _block_labels_with_square(
-                        r=0, c=0, date_idx=0, class_id=1,
-                        y0=10, x0=10, side=5,
-                    )
+                        0, 0, date_idx=0, class_id=1, y0=10, x0=10, side=5)
                 else:
                     lab = _empty_block_labels()
                 _write_block(tmpd, r, c, lab, target_dates)
@@ -160,56 +175,47 @@ def test_components_parquet_single_square_block():
         res = _run_aggregator(tmpd)
         assert res.returncode == 0, res.stderr
 
-        df = pd.read_parquet(tmpd / f"{TILE_ID}_tile.parquet")
-        assert len(df) == 1, f"expected 1 component, got {len(df)}"
-        row = df.iloc[0]
+        gdf = _read_tile_vector(tmpd)
+        assert len(gdf) == 1, f"expected 1 polygon, got {len(gdf)}"
+        row = gdf.iloc[0]
         assert row["tile_id"] == TILE_ID
         assert row["date_ordinal"] == 738887
-        assert row["date_iso"] == "2024-01-02"  # date.fromordinal(738887)
+        assert row["date_iso"] == "2024-01-02"
         assert row["class_id"] == 1
         assert row["n_pixels"] == 25
-        assert row["bbox_y0"] == 10 and row["bbox_x0"] == 10
-        assert row["bbox_y1"] == 15 and row["bbox_x1"] == 15
-        # Centroid of a 5x5 at (10..14) is (12, 12).
-        assert abs(row["centroid_y"] - 12.0) < 1e-6
-        assert abs(row["centroid_x"] - 12.0) < 1e-6
-        # World centroid:
-        #   x = TILE_ORIGIN_X + 12 * PIXEL_RES = 500_000 + 120 = 500_120
-        #   y = TILE_ORIGIN_Y - 12 * PIXEL_RES = 4_500_000 - 120 = 4_499_880
-        assert abs(row["world_centroid_x"] - 500_120.0) < 1e-6
-        assert abs(row["world_centroid_y"] - 4_499_880.0) < 1e-6
-        # World bbox: x grows east (x0<x1), y grows south (y0<y1 after min/max).
-        assert abs(row["world_bbox_x0"] - 500_100.0) < 1e-6
-        assert abs(row["world_bbox_x1"] - 500_150.0) < 1e-6
-        # RLE decode -> reconstructs the same 5x5 square at the same place.
-        mask = _decode_rle(
-            np.asarray(row["rle_starts"]),
-            np.asarray(row["rle_lengths"]),
-            (2 * CHIP_SIZE, 2 * CHIP_SIZE),
-        )
-        assert mask.sum() == 25
-        assert mask[10:15, 10:15].all()
-        assert not mask[:10, :].any() and not mask[15:, :].any()
-    print("  Parquet: single-component bbox/centroid/world/RLE — OK")
+        assert abs(row["area_m2"] - 25 * PIXEL_RES * PIXEL_RES) < 1e-6
+
+        # World bbox: cols 10..15 -> x[500100,500150]; rows 10..15 ->
+        # y[4499850,4499900].
+        minx, miny, maxx, maxy = row["geometry"].bounds
+        assert abs(minx - 500_100.0) < 1e-6
+        assert abs(maxx - 500_150.0) < 1e-6
+        assert abs(maxy - 4_499_900.0) < 1e-6
+        assert abs(miny - 4_499_850.0) < 1e-6
+        # Centroid at pixel (12.5,12.5).
+        assert abs(row["centroid_x"] - 500_125.0) < 1e-6
+        assert abs(row["centroid_y"] - 4_499_875.0) < 1e-6
+
+        # GeoParquet mirror exists and matches row count.
+        gdf_pq = gpd.read_parquet(tmpd / f"{TILE_ID}_tile.parquet")
+        assert len(gdf_pq) == 1
+    print("  vector: single polygon geometry + GeoParquet mirror — OK")
 
 
-def test_components_parquet_spanning_block_boundary():
-    """A class-1 region that crosses the boundary between block (0, 0)
-    and (0, 1) must yield ONE component in the tile-level Parquet, not
-    two, because stitching happens before component enumeration."""
+def test_vector_spanning_block_boundary_dissolved():
+    """A class-1 region crossing the boundary between block (0,0) and
+    (0,1) must dissolve into ONE polygon in the tile vector — the two
+    edge-adjacent block polygons are welded by unary_union."""
     with tempfile.TemporaryDirectory() as tmpd:
         tmpd = Path(tmpd)
         target_dates = np.array([738887, 738900], dtype=np.int64)
-        # Block (0, 0): square at the east edge (x = CHIP_SIZE-3 .. CHIP_SIZE-1)
+        # Block (0,0): 3x3 at the east edge (cols CHIP_SIZE-3..CHIP_SIZE-1).
         b00 = _block_labels_with_square(
-            r=0, c=0, date_idx=0, class_id=1,
-            y0=20, x0=CHIP_SIZE - 3, side=3,
-        )
-        # Block (0, 1): square at the west edge (x = 0 .. 2) — adjacent to b00.
+            0, 0, date_idx=0, class_id=1, y0=20, x0=CHIP_SIZE - 3, side=3)
+        # Block (0,1): 3x3 at the west edge (cols 0..2) — geographically
+        # adjacent to b00 across the seam.
         b01 = _block_labels_with_square(
-            r=0, c=1, date_idx=0, class_id=1,
-            y0=20, x0=0, side=3,
-        )
+            0, 1, date_idx=0, class_id=1, y0=20, x0=0, side=3)
         _write_block(tmpd, 0, 0, b00, target_dates)
         _write_block(tmpd, 0, 1, b01, target_dates)
         _write_block(tmpd, 1, 0, _empty_block_labels(), target_dates)
@@ -218,29 +224,34 @@ def test_components_parquet_spanning_block_boundary():
         res = _run_aggregator(tmpd)
         assert res.returncode == 0, res.stderr
 
-        df = pd.read_parquet(tmpd / f"{TILE_ID}_tile.parquet")
-        assert len(df) == 1, (
-            f"expected one merged component across the boundary, "
-            f"got {len(df)} rows"
+        gdf = _read_tile_vector(tmpd)
+        assert len(gdf) == 1, (
+            f"expected one dissolved polygon across the boundary, "
+            f"got {len(gdf)}"
         )
-        row = df.iloc[0]
-        # bbox in tile coords: y [20, 23), x [CHIP_SIZE-3, CHIP_SIZE+3)
-        assert row["bbox_y0"] == 20 and row["bbox_y1"] == 23
-        assert row["bbox_x0"] == CHIP_SIZE - 3
-        assert row["bbox_x1"] == CHIP_SIZE + 3
-        # 6 wide x 3 tall = 18 pixels
+        row = gdf.iloc[0]
+        # 6 wide x 3 tall = 18 px = 1800 m^2.
         assert row["n_pixels"] == 18
-    print("  Parquet: boundary-spanning component merged — OK")
+        assert abs(row["area_m2"] - 1800.0) < 1e-6
+        # World bbox spans the seam: east edge of block 0 is at
+        # x = TILE_ORIGIN_X + CHIP_SIZE*PIXEL_RES = 500000 + 640 = 500640.
+        # The merged patch x range: [500640 - 3*10, 500640 + 3*10] = [500610, 500670].
+        minx, miny, maxx, maxy = row["geometry"].bounds
+        assert abs(minx - 500_610.0) < 1e-6
+        assert abs(maxx - 500_670.0) < 1e-6
+        # Single connected polygon (no multipart).
+        assert row["geometry"].geom_type == "Polygon"
+    print("  vector: boundary-spanning patch dissolved to one polygon — OK")
 
 
-def test_components_parquet_multi_class_multi_date():
-    """Two classes on two different dates -> 2 component rows."""
+def test_vector_multi_class_multi_date():
+    """Two classes on two different dates -> 2 polygons."""
     with tempfile.TemporaryDirectory() as tmpd:
         tmpd = Path(tmpd)
         target_dates = np.array([738887, 738900], dtype=np.int64)
         lab = _empty_block_labels(n_dates=2)
-        lab[0, 5:10, 5:10] = 1   # class 1 on date 0
-        lab[1, 30:32, 30:35] = 2  # class 2 on date 1
+        lab[0, 5:10, 5:10] = 1     # class 1, date 0, 25 px
+        lab[1, 30:32, 30:35] = 2   # class 2, date 1, 10 px
         _write_block(tmpd, 0, 0, lab, target_dates)
         _write_block(tmpd, 0, 1, _empty_block_labels(), target_dates)
         _write_block(tmpd, 1, 0, _empty_block_labels(), target_dates)
@@ -249,20 +260,17 @@ def test_components_parquet_multi_class_multi_date():
         res = _run_aggregator(tmpd)
         assert res.returncode == 0, res.stderr
 
-        df = pd.read_parquet(tmpd / f"{TILE_ID}_tile.parquet")
-        assert len(df) == 2, f"expected 2 components, got {len(df)}"
-        # Sort by (date, class) for deterministic assertions.
-        df = df.sort_values(["date_ordinal", "class_id"]).reset_index(drop=True)
-        assert df.iloc[0]["class_id"] == 1
-        assert df.iloc[0]["n_pixels"] == 25
-        assert df.iloc[1]["class_id"] == 2
-        assert df.iloc[1]["n_pixels"] == 10   # 2 x 5
-    print("  Parquet: multi-class multi-date emission — OK")
+        gdf = _read_tile_vector(tmpd)
+        assert len(gdf) == 2, f"expected 2 polygons, got {len(gdf)}"
+        gdf = gdf.sort_values(["date_ordinal", "class_id"]).reset_index(drop=True)
+        assert gdf.iloc[0]["class_id"] == 1 and gdf.iloc[0]["n_pixels"] == 25
+        assert gdf.iloc[1]["class_id"] == 2 and gdf.iloc[1]["n_pixels"] == 10
+    print("  vector: multi-class multi-date emission — OK")
 
 
-def test_empty_tile_yields_empty_parquet():
-    """A tile with no detections still emits a (zero-row) Parquet with
-    the right column set."""
+def test_empty_tile_yields_empty_vector():
+    """A tile with no detections still emits an empty tile .gpkg/.parquet
+    with the right schema."""
     with tempfile.TemporaryDirectory() as tmpd:
         tmpd = Path(tmpd)
         _write_synthetic_grid_empty(tmpd, n_rows=2, n_cols=2)
@@ -270,29 +278,27 @@ def test_empty_tile_yields_empty_parquet():
         res = _run_aggregator(tmpd)
         assert res.returncode == 0, res.stderr
 
-        df = pd.read_parquet(tmpd / f"{TILE_ID}_tile.parquet")
-        assert len(df) == 0
-        # Schema must still carry the expected columns.
+        gdf = _read_tile_vector(tmpd)
+        assert len(gdf) == 0
         for col in ("tile_id", "date_ordinal", "class_id", "n_pixels",
-                    "bbox_y0", "world_centroid_x", "rle_starts"):
-            assert col in df.columns, f"missing column {col}"
-    print("  Parquet: empty tile -> zero-row Parquet with schema — OK")
+                    "area_m2", "centroid_x", "geometry"):
+            assert col in gdf.columns, f"missing column {col}"
+    print("  vector: empty tile -> zero-row .gpkg with schema — OK")
 
 
 def test_missing_block_is_detected():
     with tempfile.TemporaryDirectory() as tmpd:
         tmpd = Path(tmpd)
         _write_synthetic_grid_empty(tmpd, n_rows=2, n_cols=3)
-        # Delete one shard.
-        missing_path = tmpd / f"{TILE_ID}_block_001_002.npz"
-        missing_path.unlink()
+        # Delete one .npz shard (the npz-based completeness check fires first).
+        (tmpd / f"{TILE_ID}_block_001_002.npz").unlink()
 
         res = _run_aggregator(tmpd)
         assert res.returncode != 0
         combined = res.stdout + res.stderr
         assert "incomplete" in combined
         assert "(1, 2)" in combined
-    print("  Aggregator: missing block surfaces error + lists (r,c) — OK")
+    print("  aggregator: missing block surfaces error + lists (r,c) — OK")
 
 
 def test_inconsistent_target_dates_rejected():
@@ -306,21 +312,18 @@ def test_inconsistent_target_dates_rejected():
         res = _run_aggregator(tmpd)
         assert res.returncode != 0
         assert "target_dates mismatch" in (res.stdout + res.stderr)
-    print("  Aggregator: inconsistent target_dates rejected — OK")
+    print("  aggregator: inconsistent target_dates rejected — OK")
 
 
 def test_geotiff_per_date_written():
-    """Aggregator writes one LZW-compressed GeoTIFF per target date,
-    with class 0 tagged as NoData and the correct affine transform."""
+    """Aggregator still writes one LZW GeoTIFF per date, class 0 = NoData,
+    correct affine transform."""
     import rasterio
     with tempfile.TemporaryDirectory() as tmpd:
         tmpd = Path(tmpd)
         target_dates = np.array([738887, 738900], dtype=np.int64)
-        # Put a 5x5 class-1 patch in block (0, 0), date 0; rest empty.
         lab = _block_labels_with_square(
-            r=0, c=0, date_idx=0, class_id=1,
-            y0=10, x0=10, side=5,
-        )
+            0, 0, date_idx=0, class_id=1, y0=10, x0=10, side=5)
         _write_block(tmpd, 0, 0, lab, target_dates)
         for (r, c) in [(0, 1), (1, 0), (1, 1)]:
             _write_block(tmpd, r, c, _empty_block_labels(), target_dates)
@@ -328,7 +331,6 @@ def test_geotiff_per_date_written():
         res = _run_aggregator(tmpd)
         assert res.returncode == 0, res.stderr
 
-        # One GeoTIFF per date.
         expected_tifs = [
             tmpd / f"{TILE_ID}_tile_2024-01-02.tif",
             tmpd / f"{TILE_ID}_tile_2024-01-15.tif",
@@ -336,80 +338,41 @@ def test_geotiff_per_date_written():
         for p in expected_tifs:
             assert p.exists(), f"missing {p}"
 
-        # Open the first one and verify everything.
         with rasterio.open(expected_tifs[0]) as src:
             assert src.width == 2 * CHIP_SIZE
             assert src.height == 2 * CHIP_SIZE
             assert src.count == 1
             assert src.dtypes == ("uint8",)
             assert src.nodata == 0
-            # Compression tag should report LZW.
             assert src.compression.value == "LZW"
-            # Affine transform: (xres, 0, x_origin, 0, -yres, y_origin)
             t = src.transform
             assert abs(t.a - PIXEL_RES) < 1e-9
-            assert abs(t.e + PIXEL_RES) < 1e-9   # -yres
+            assert abs(t.e + PIXEL_RES) < 1e-9
             assert abs(t.c - TILE_ORIGIN_X) < 1e-6
             assert abs(t.f - TILE_ORIGIN_Y) < 1e-6
-            # The 5x5 class-1 patch must be present at (10, 10).
             data = src.read(1)
-            assert data.shape == (2 * CHIP_SIZE, 2 * CHIP_SIZE)
             assert (data[10:15, 10:15] == 1).all()
-            # Everywhere else is 0 (nodata).
             mask = np.ones_like(data, dtype=bool)
             mask[10:15, 10:15] = False
             assert (data[mask] == 0).all()
-            # Band description should mention the date.
             assert "2024-01-02" in src.descriptions[0]
 
-        # Second GeoTIFF (date 1) is all-zero everywhere.
         with rasterio.open(expected_tifs[1]) as src:
-            data = src.read(1)
-            assert (data == 0).all()
+            assert (src.read(1) == 0).all()
             assert "2024-01-15" in src.descriptions[0]
     print("  GeoTIFF: per-date file, dims, transform, NoData, descriptions — OK")
-
-
-def test_geotiff_without_hdf5_path_still_writes():
-    """If TILE_HDF5_PATH isn't set in the env, the GeoTIFFs are still
-    written but with no CRS tag (only the transform is georef'd)."""
-    import rasterio
-    with tempfile.TemporaryDirectory() as tmpd:
-        tmpd = Path(tmpd)
-        _write_synthetic_grid_empty(tmpd, n_rows=2, n_cols=2)
-
-        env = os.environ.copy()
-        env["TILE_ID"] = TILE_ID
-        env["OUTPUT_DIR"] = str(tmpd)
-        # Make sure TILE_HDF5_PATH isn't lurking in the env from a prior run.
-        env.pop("TILE_HDF5_PATH", None)
-        res = subprocess.run(
-            [sys.executable, str(_HERE / "aggregate_tile.py")],
-            env=env, capture_output=True, text=True,
-        )
-        assert res.returncode == 0, res.stderr
-
-        tif = tmpd / f"{TILE_ID}_tile_2024-01-02.tif"
-        assert tif.exists()
-        with rasterio.open(tif) as src:
-            # CRS should be None / falsy.
-            assert not src.crs
-            # Transform is still set.
-            assert src.transform.a == PIXEL_RES
-    print("  GeoTIFF: missing TILE_HDF5_PATH -> CRS-less but still georef'd — OK")
 
 
 def main():
     print("Running aggregate_tile tests...")
     test_full_grid_stitches_into_dense_npz()
-    test_components_parquet_single_square_block()
-    test_components_parquet_spanning_block_boundary()
-    test_components_parquet_multi_class_multi_date()
-    test_empty_tile_yields_empty_parquet()
+    test_vector_single_square_block()
+    test_vector_spanning_block_boundary_dissolved()
+    test_vector_multi_class_multi_date()
+    test_empty_tile_yields_empty_vector()
     test_missing_block_is_detected()
     test_inconsistent_target_dates_rejected()
     test_geotiff_per_date_written()
-    test_geotiff_without_hdf5_path_still_writes()
     print("All aggregate_tile tests passed.")
 
 
