@@ -6,10 +6,11 @@ from datetime import date, datetime, timezone
 
 BAND_NAMES= ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8a", "B11", "B12"]
 TILE_NAMES = ['T29SMC', 'T29TQF', 'T29SMD', 'T29TQG', 'T29SNB', 'T29TME', 'T29SNC', 'T29SND', 'T29SPB', 'T29SPC', 'T29TNE', 'T29SPD', 'T29TNF', 'T29TNG', 'T29TPE', 'T29TPF', 'T29TPG']
-TILE_NAMES = ['T29TPG']
+TILE_NAMES = ['T29TQF']
 
 INPUT_NODATA_VAL = 65535
 OUTPUT_NODATA_VAL = 65535
+COORD_NODATA_VAL = -9999   # nodata sentinel for int32 coordinate arrays (xs_new, ys_new) at padding slots
 
 # cloud cover will be computed relatively to the portuguese territory (+2 km buffer)
 MAX_CLOUD_COVER_PT = 0.6 # (proportion: 0.6=60%) file_metadata only stores timestamps where cloud_cover_PT is below 60% and date is between MIN_DATE and MAX_DATE
