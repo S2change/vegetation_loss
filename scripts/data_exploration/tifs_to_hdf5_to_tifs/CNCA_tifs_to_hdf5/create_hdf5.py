@@ -8,11 +8,9 @@ from rasterio.transform import xy
 from hdf5_utils import (
     parse_filter_sort_files,
     FOLDER_S2, FOLDER_PT_MASKS, FOLDER_HDF5,
-    BAND_NAMES, TILE_NAMES, MIN_DATE, MAX_DATE, N_TS_CHUNK, OUTPUT_NODATA_VAL, COORD_NODATA_VAL
+    BAND_NAMES, TILE_NAMES, MIN_DATE, MAX_DATE, N_TS_CHUNK, OUTPUT_NODATA_VAL, COORD_NODATA_VAL, 
+    CHIP_SIDE, PIXEL_RES
 )
-
-CHIP_SIDE = 256   # pixels per chip side (256 × 256 = 65 536 px/chip)
-PIXEL_RES = 10    # Sentinel-2 native resolution, metres
 
 
 def read_pt_mask_pixels(m):
