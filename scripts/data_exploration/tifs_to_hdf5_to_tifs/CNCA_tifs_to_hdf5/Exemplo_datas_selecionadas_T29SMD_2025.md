@@ -1,6 +1,8 @@
 Lista de datas selecionadas. A mesma data corresponde a 1 ou à agregação de 2 ou 3 ficheiros geotiff ESA. A cobertura de nuvens *Cloud%*  é determinada sobre a área no território português coberta pela(s) órbitas e para a tile. A última coluna tem os nomes oficiais dos ficheiros geotiff agregados em cada data.
 
 Ver animação para 48 datas em <https://github.com/S2change/vegetation_loss/blob/main/scripts/data_exploration/tifs_to_hdf5_to_tifs/CNCA_tifs_to_hdf5/T29SMD_48ts_animation.gif>
+
+Um caso interessante é `2025-10-12        0%      2   42409124   42427020  S2_MSIL2A_20251012_T29SMD`, em que o filtro de nuvens (OMNI) não deteta nuvens mas a existem nuvens e a qualidade da imagem é em geral muito baixa. Idealmente esta imagem deveria ter sido excluída na seleção mas não há um critério claro para tomar essa decisão automaticamente.
     
     Date          Cloud%   days  clear_pixls orbit_pixls S2 prefix
     -----------------------------------------------------------------------------------------------
