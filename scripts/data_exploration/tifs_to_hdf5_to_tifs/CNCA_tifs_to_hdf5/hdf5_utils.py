@@ -27,6 +27,8 @@ MAX_DATE = date(2025,12,31)
 # hdf5 chunck size
 N_TS_CHUNK = 12       # number of timestamps per chunk
 CHIP_SIZE = 256 * 256  # spatial pixels per chunk (one 256×256 chip flattened)
+CHIP_SIDE = 256   # pixels per chip side (256 × 256 = 65 536 px/chip)
+PIXEL_RES = 10    # Sentinel-2 native resolution, metres
 ####################################################
 """
     File structure:
