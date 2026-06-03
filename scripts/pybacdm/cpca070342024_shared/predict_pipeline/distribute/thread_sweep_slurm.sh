@@ -32,8 +32,19 @@ module load gcc13/openmpi/4.1.6
 source "${VENV:-/users1/cpca070342024/shared/vchips/venv}/bin/activate"
 
 # ── Experiment config ──────────────────────────────────────────────────────
-DISTRIBUTE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# SLURM copies the batch script into /var/spool/slurmd/jobXXXX/ before
+# running, so ${BASH_SOURCE[0]} resolves to the spool, not the real script
+# dir. Use $SLURM_SUBMIT_DIR (the dir you ran `sbatch` from) instead — submit
+# this script from the distribute/ directory so it finds predict_block.py.
+DISTRIBUTE_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 export DISTRIBUTE_DIR
+if [ ! -f "$DISTRIBUTE_DIR/predict_block.py" ]; then
+    echo "ERROR: predict_block.py not found in DISTRIBUTE_DIR=$DISTRIBUTE_DIR" >&2
+    echo "Submit this script from the distribute/ directory (sbatch is run" >&2
+    echo "from there), or set SLURM_SUBMIT_DIR / edit DISTRIBUTE_DIR." >&2
+    exit 1
+fi
+echo "DISTRIBUTE_DIR: $DISTRIBUTE_DIR"
 
 export TILE_ID="T29TPG"
 export TILE_HDF5_PATH="/users1/cpca070342024/shared/hdf5/T29TPG_48ts_20251028_20251229.h5"
