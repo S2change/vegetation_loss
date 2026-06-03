@@ -27,7 +27,6 @@ import numpy as np
 
 # ============================================================================
 # REAL-FILE VALIDATION  (no hdf5_reader dependency)
-# Run with:  python hdf5_chip_chunked_validation.py --real
 # ============================================================================
 
 import argparse
