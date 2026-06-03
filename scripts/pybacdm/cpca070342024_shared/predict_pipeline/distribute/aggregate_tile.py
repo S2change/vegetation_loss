@@ -97,13 +97,17 @@ def _stitch_blocks(blocks: list[dict], n_rows: int, n_cols: int,
 def _dissolve_block_polygons(block_gdf: gpd.GeoDataFrame,
                              tile_id: str,
                              pixel_res: float,
+                             min_area_m2: float = 0.0,
                              ) -> gpd.GeoDataFrame:
     """Dissolve per-block polygons into per-patch tile polygons.
 
     For each (date_ordinal, class_id) group, unary_union all member
     polygons — edge-touching patches from adjacent blocks weld into one —
     then explode the resulting (multi)polygon back to individual patches.
-    Re-derives n_pixels / area_m2 / centroid per merged patch.
+    Re-derives n_pixels / area_m2 / centroid per merged patch, and drops
+    patches below `min_area_m2` (the master-level floor, applied AFTER the
+    cross-block merge so boundary-straddling patches are measured at full
+    size).
 
     Returns a GeoDataFrame with `_VECTOR_COLUMNS`, same CRS as the input.
     """
@@ -126,6 +130,8 @@ def _dissolve_block_polygons(block_gdf: gpd.GeoDataFrame,
             if geom.is_empty:
                 continue
             area_m2 = float(geom.area)
+            if area_m2 < min_area_m2:
+                continue
             centroid = geom.centroid
             rows.append({
                 "tile_id": tile_id,
@@ -255,6 +261,10 @@ def _write_dense_npz(out_path: str, *,
 def main() -> None:
     tile_id    = _required_env("TILE_ID")
     output_dir = _required_env("OUTPUT_DIR")
+    # Master-level patch-area floor (m^2), applied after the cross-block
+    # merge. Larger than the per-block floor so a patch that cleared the
+    # block floor in pieces but is still small overall is pruned here.
+    min_tile_patch_m2 = float(os.environ.get("MIN_TILE_PATCH_M2", "5000"))
 
     t_total = time.perf_counter()
 
@@ -399,8 +409,11 @@ def main() -> None:
           f"in {time.perf_counter() - t0:.2f} s")
 
     print("\nDissolving boundary-straddling patches per (date, class)...")
+    print(f"  Master patch-area floor: {min_tile_patch_m2} m^2 (post-merge)")
     t0 = time.perf_counter()
-    tile_gdf = _dissolve_block_polygons(block_gdf, tile_id, ref_pres)
+    tile_gdf = _dissolve_block_polygons(
+        block_gdf, tile_id, ref_pres, min_area_m2=min_tile_patch_m2,
+    )
     print(f"  {len(block_gdf)} block polygons -> {len(tile_gdf)} merged "
           f"patches in {time.perf_counter() - t0:.2f} s")
     if len(tile_gdf) > 0:

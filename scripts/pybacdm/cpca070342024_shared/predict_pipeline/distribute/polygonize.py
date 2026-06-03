@@ -23,6 +23,7 @@ from dataclasses import dataclass
 import numpy as np
 from rasterio.features import shapes as rio_shapes
 from rasterio.transform import from_origin
+from scipy.ndimage import binary_closing
 from shapely.geometry import shape as shapely_shape
 from shapely.geometry.base import BaseGeometry
 
@@ -31,6 +32,58 @@ BACKGROUND_CLASS = 0
 # rasterio connectivity: 4 = rook (no diagonal). Matches the connected-
 # component convention the raster path used before polygonization.
 CONNECTIVITY = 4
+# Morphological closing radius for the post-vote close (disk structuring
+# element). Mirrors AAA_Configs.CLOSING_RADIUS default used by the old
+# per-chip postprocess_prediction.
+DEFAULT_CLOSING_RADIUS = 3
+# Block-level minimum patch area (m^2). Patches smaller than this are
+# dropped at the per-block stage. 2500 m^2 = 25 px at 10 m/px, matching
+# the old per-chip MIN_PATCH_SIZE=25 floor.
+DEFAULT_MIN_AREA_M2 = 2500.0
+
+
+def close_labels(labels_2d: np.ndarray,
+                 classes,
+                 *,
+                 closing_radius: int = DEFAULT_CLOSING_RADIUS,
+                 ) -> np.ndarray:
+    """Morphological-close a voted label map, per non-background class.
+
+    Runs `binary_closing` with a disk structuring element on each class's
+    mask and writes the closed result back into background pixels only —
+    so closing one class never overwrites another class's pixels. Mirrors
+    the close half of the old `postprocess_prediction`, but applied once
+    to the voted block result instead of per chip.
+
+    Parameters
+    ----------
+    labels_2d : (H, W) uint8
+        Voted class labels (0 = background).
+    classes : iterable of int
+        Non-background class IDs to close. 0 is ignored.
+    closing_radius : int
+        Disk radius for the structuring element.
+
+    Returns
+    -------
+    (H, W) uint8 — closed labels (a copy; input is not mutated).
+    """
+    if labels_2d.ndim != 2:
+        raise ValueError(f"labels_2d must be 2-D, got {labels_2d.shape}")
+    r = int(closing_radius)
+    gy, gx = np.ogrid[-r:r + 1, -r:r + 1]
+    disk = (gx ** 2 + gy ** 2) <= r ** 2
+
+    out = labels_2d.copy()
+    for cls in classes:
+        cls_int = int(cls)
+        if cls_int == BACKGROUND_CLASS:
+            continue
+        closed = binary_closing(labels_2d == cls_int, structure=disk)
+        # Only fill pixels that are currently background, so we never
+        # clobber a different class's votes.
+        out[closed & (out == BACKGROUND_CLASS)] = cls_int
+    return out
 
 
 @dataclass
@@ -69,6 +122,7 @@ def labels_to_polygons(labels_2d: np.ndarray,
                        world_origin_x: float,
                        world_origin_y: float,
                        pixel_res: float,
+                       min_area_m2: float = 0.0,
                        ) -> list[PatchPolygon]:
     """Polygonize one date's voted LIVE label map.
 
@@ -82,10 +136,17 @@ def labels_to_polygons(labels_2d: np.ndarray,
         Non-background class IDs to vectorize. 0 is ignored even if passed.
     world_origin_x, world_origin_y, pixel_res : float
         Geo-reference for the block's LIVE NW corner + pixel size (metres).
+    min_area_m2 : float (default 0.0)
+        Drop polygons whose area is strictly less than this. The block-level
+        size floor — boundary-straddling patches are measured per block here,
+        so a patch split into two sub-threshold halves is dropped (firm
+        floor, by design). The master applies a second, larger floor after
+        cross-block merge.
 
     Returns
     -------
-    list[PatchPolygon] — one per connected region of each class.
+    list[PatchPolygon] — one per connected region of each class that meets
+    the area floor.
     """
     if labels_2d.ndim != 2:
         raise ValueError(
@@ -115,6 +176,8 @@ def labels_to_polygons(labels_2d: np.ndarray,
                 continue
             geom = shapely_shape(geom_json)
             area_m2 = float(geom.area)
+            if area_m2 < min_area_m2:
+                continue
             centroid = geom.centroid
             out.append(PatchPolygon(
                 date_ordinal=int(date_ordinal),

@@ -60,9 +60,15 @@ def _block_origin(r: int, c: int) -> tuple[float, float]:
 
 def _write_block(tmpd: Path, r: int, c: int, labels: np.ndarray,
                  target_dates: np.ndarray, classes: tuple[int, ...] = (1, 2),
-                 threshold: int = 2) -> None:
+                 threshold: int = 2,
+                 block_min_area_m2: float = 0.0) -> None:
     """Write BOTH the voted .npz and the per-block polygon .gpkg, exactly
-    as predict_block.py does in production."""
+    as predict_block.py does in production.
+
+    `block_min_area_m2` defaults to 0 (keep all patches) so tests with
+    small synthetic patches aren't pruned at the block stage; pass a
+    value to exercise the block-level floor.
+    """
     ox, oy = _block_origin(r, c)
     write_voted_block(
         str(tmpd), TILE_ID, r, c,
@@ -80,6 +86,7 @@ def _write_block(tmpd: Path, r: int, c: int, labels: np.ndarray,
             labels[i], date_ordinal=int(target_dates[i]),
             classes=classes,
             world_origin_x=ox, world_origin_y=oy, pixel_res=PIXEL_RES,
+            min_area_m2=block_min_area_m2,
         )
         rows.extend(polygons_to_records(patches, TILE_ID))
     cols = ["tile_id", "date_ordinal", "date_iso", "class_id",
@@ -102,11 +109,15 @@ def _write_synthetic_grid_empty(tmpd: Path, n_rows: int, n_cols: int,
     return target_dates
 
 
-def _run_aggregator(tmpd: Path) -> subprocess.CompletedProcess:
+def _run_aggregator(tmpd: Path,
+                    min_tile_patch_m2: float = 0.0) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env["TILE_ID"] = TILE_ID
     env["OUTPUT_DIR"] = str(tmpd)
     env.pop("TILE_HDF5_PATH", None)   # no real HDF5 in tests
+    # Default the master floor to 0 so the small synthetic patches most
+    # tests use aren't pruned; the dedicated filter test overrides it.
+    env["MIN_TILE_PATCH_M2"] = str(min_tile_patch_m2)
     return subprocess.run(
         [sys.executable, str(_HERE / "aggregate_tile.py")],
         env=env, capture_output=True, text=True,
@@ -315,6 +326,67 @@ def test_inconsistent_target_dates_rejected():
     print("  aggregator: inconsistent target_dates rejected — OK")
 
 
+def test_master_size_filter_prunes_small_patch():
+    """The master floor drops merged patches below MIN_TILE_PATCH_M2.
+
+    Two class-1 patches on date 0: a 4x4 (1600 m^2) and a 8x8 (6400 m^2).
+    Block .gpkg keeps both (block floor 0 here). With master floor 5000,
+    only the 6400 m^2 patch survives the tile vector."""
+    with tempfile.TemporaryDirectory() as tmpd:
+        tmpd = Path(tmpd)
+        target_dates = np.array([738887, 738900], dtype=np.int64)
+        lab = _empty_block_labels(n_dates=2)
+        lab[0, 5:9, 5:9] = 1       # 16 px  = 1600 m^2 -> pruned by master
+        lab[0, 20:28, 20:28] = 1   # 64 px  = 6400 m^2 -> kept
+        _write_block(tmpd, 0, 0, lab, target_dates)
+        for (r, c) in [(0, 1), (1, 0), (1, 1)]:
+            _write_block(tmpd, r, c, _empty_block_labels(), target_dates)
+
+        # Without the master filter (floor 0): both patches survive.
+        res0 = _run_aggregator(tmpd, min_tile_patch_m2=0.0)
+        assert res0.returncode == 0, res0.stderr
+        assert len(_read_tile_vector(tmpd)) == 2
+
+        # With master floor 5000: only the 6400 m^2 patch survives.
+        res = _run_aggregator(tmpd, min_tile_patch_m2=5000.0)
+        assert res.returncode == 0, res.stderr
+        gdf = _read_tile_vector(tmpd)
+        assert len(gdf) == 1, f"expected 1 patch after master filter, got {len(gdf)}"
+        assert gdf.iloc[0]["n_pixels"] == 64
+        assert gdf.iloc[0]["area_m2"] >= 5000.0
+    print("  master size filter prunes sub-5000 m^2 patch — OK")
+
+
+def test_master_filter_measures_boundary_patch_at_full_size():
+    """A patch split across a block seam, each half < 5000 m^2 but the
+    merged total > 5000 m^2, must SURVIVE the master floor (it's measured
+    after the cross-block merge, not per block)."""
+    with tempfile.TemporaryDirectory() as tmpd:
+        tmpd = Path(tmpd)
+        target_dates = np.array([738887, 738900], dtype=np.int64)
+        # Block (0,0): 8 tall x 6 wide at the east edge = 48 px = 4800 m^2.
+        b00 = _empty_block_labels()
+        b00[0, 20:28, CHIP_SIZE - 6:CHIP_SIZE] = 1
+        # Block (0,1): 8 tall x 6 wide at the west edge = 48 px = 4800 m^2.
+        b01 = _empty_block_labels()
+        b01[0, 20:28, 0:6] = 1
+        # Each half 4800 < 5000, merged 9600 > 5000.
+        _write_block(tmpd, 0, 0, b00, target_dates)
+        _write_block(tmpd, 0, 1, b01, target_dates)
+        _write_block(tmpd, 1, 0, _empty_block_labels(), target_dates)
+        _write_block(tmpd, 1, 1, _empty_block_labels(), target_dates)
+
+        res = _run_aggregator(tmpd, min_tile_patch_m2=5000.0)
+        assert res.returncode == 0, res.stderr
+        gdf = _read_tile_vector(tmpd)
+        assert len(gdf) == 1, (
+            f"boundary patch should survive (merged 9600 m^2 > 5000), "
+            f"got {len(gdf)}"
+        )
+        assert gdf.iloc[0]["n_pixels"] == 96   # 48 + 48
+    print("  master filter measures boundary patch post-merge — OK")
+
+
 def test_geotiff_per_date_written():
     """Aggregator still writes one LZW GeoTIFF per date, class 0 = NoData,
     correct affine transform."""
@@ -372,6 +444,8 @@ def main():
     test_empty_tile_yields_empty_vector()
     test_missing_block_is_detected()
     test_inconsistent_target_dates_rejected()
+    test_master_size_filter_prunes_small_patch()
+    test_master_filter_measures_boundary_patch_at_full_size()
     test_geotiff_per_date_written()
     print("All aggregate_tile tests passed.")
 

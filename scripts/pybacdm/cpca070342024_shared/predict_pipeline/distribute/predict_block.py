@@ -58,7 +58,10 @@ from postprocess import (
     VoteAccumulator,
     write_voted_block,
 )
-from polygonize import labels_to_polygons, polygons_to_records
+from polygonize import (
+    labels_to_polygons, polygons_to_records, close_labels,
+    DEFAULT_CLOSING_RADIUS,
+)
 from bacdm.predict import load_model, predict_before_after_chips
 
 
@@ -110,6 +113,12 @@ def main() -> None:
     batch_size    = int(os.environ.get("BATCH_SIZE", "8"))
     vote_classes  = _classes_env()
     vote_threshold = int(os.environ.get("VOTE_THRESHOLD", "2"))
+    # Post-vote morphological close radius (disk). 0 disables closing.
+    closing_radius = int(os.environ.get("CLOSING_RADIUS",
+                                        str(DEFAULT_CLOSING_RADIUS)))
+    # Block-level patch-area floor (m^2). Dropped at this stage; the master
+    # applies a second, larger floor after cross-block merge.
+    min_patch_m2 = float(os.environ.get("MIN_PATCH_M2", "2500"))
 
     # Bounds check the block coordinates against the HDF5's grid shape so
     # a misconfigured array index fails fast with a clear message instead
@@ -131,6 +140,8 @@ def main() -> None:
     print(f"Batch size:     {batch_size}")
     print(f"Vote classes:   {vote_classes}")
     print(f"Vote threshold: {vote_threshold}")
+    print(f"Closing radius: {closing_radius}")
+    print(f"Min patch m^2:  {min_patch_m2}")
     print(f"\n[RSS] After imports:                   {rss_mb():7.1f} MB")
 
     # ── Step 1: read chip block ───────────────────────────────────────────
@@ -317,22 +328,30 @@ def main() -> None:
     print(f"  Wrote {npz_path} in {write_s:.2f} s  "
           f"({npz_bytes / 1024:.1f} KB)")
 
-    # ── Step 6b: polygonize voted labels -> per-block GeoPackage ──────────
-    # One polygon per connected patch of each class on each date, in world
-    # (UTM) coords. The tile aggregator dissolves edge-adjacent polygons
-    # across block boundaries. Stamped with the HDF5's CRS so each .gpkg is
+    # ── Step 6b: close + polygonize voted labels -> per-block GeoPackage ──
+    # Post-vote morphological close (per class) smooths vote-boundary
+    # roughness on the voted block result, then polygonize each date into
+    # one polygon per connected patch of each class, in world (UTM) coords,
+    # dropping patches below the block-level area floor. The tile aggregator
+    # dissolves edge-adjacent polygons across block boundaries and applies
+    # a second, larger floor. Stamped with the HDF5's CRS so each .gpkg is
     # self-contained.
-    print(f"\nStep 6b: polygonizing voted labels...")
+    print(f"\nStep 6b: closing + polygonizing voted labels...")
     t0 = time.perf_counter()
     crs = _read_hdf5_crs(hdf5_path)
+    classes_t = tuple(int(c) for c in vote_classes)
     rows: list = []
     for i, d in enumerate(target_dates):
+        closed = (close_labels(voted_labels[i], classes_t,
+                               closing_radius=closing_radius)
+                  if closing_radius > 0 else voted_labels[i])
         patches = labels_to_polygons(
-            voted_labels[i], date_ordinal=int(d),
-            classes=tuple(int(c) for c in vote_classes),
+            closed, date_ordinal=int(d),
+            classes=classes_t,
             world_origin_x=position.world_origin_x,
             world_origin_y=position.world_origin_y,
             pixel_res=position.pixel_res,
+            min_area_m2=min_patch_m2,
         )
         rows.extend(polygons_to_records(patches, tile_id))
 

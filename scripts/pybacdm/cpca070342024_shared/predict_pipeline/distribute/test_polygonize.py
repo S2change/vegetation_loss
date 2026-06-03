@@ -12,7 +12,9 @@ from shapely.geometry import box
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 
-from polygonize import labels_to_polygons, block_transform, BACKGROUND_CLASS
+from polygonize import (
+    labels_to_polygons, block_transform, close_labels, BACKGROUND_CLASS,
+)
 
 
 PIXEL_RES = 10.0
@@ -140,6 +142,80 @@ def test_rejects_3d():
     raise AssertionError("expected ValueError for 3-D labels")
 
 
+# ============================================================================
+# close_labels
+# ============================================================================
+
+def test_close_fills_small_gap():
+    """A 2-px background gap between two class-1 blocks is bridged by
+    closing (dilate-then-erode spans gaps narrower than the disk)."""
+    lab = _empty()
+    lab[10:20, 10:18] = 1
+    lab[10:20, 20:28] = 1   # 2-px gap at cols 18,19
+    out = close_labels(lab, classes=(1,), closing_radius=3)
+    # Interior rows of the gap bridge (the two corner rows stay open — the
+    # disk can't fill the corner concavity, which is expected closing
+    # behaviour). Check the interior span.
+    assert (out[11:19, 18:20] == 1).all(), "closing should bridge the gap interior"
+    # Original input not mutated.
+    assert (lab[11:19, 18:20] == 0).all()
+    print("  close_labels fills small gap — OK")
+
+
+def test_close_does_not_clobber_other_class():
+    """Closing class 1 must not overwrite class-2 pixels sitting in the
+    gap region that closing would otherwise fill."""
+    lab = _empty()
+    lab[10:20, 10:18] = 1
+    lab[10:20, 20:28] = 1
+    lab[15, 18] = 2          # a class-2 pixel in the gap
+    out = close_labels(lab, classes=(1, 2), closing_radius=3)
+    # class 2 pixel preserved (closing class 1 only fills background).
+    assert out[15, 18] == 2
+    print("  close_labels preserves other-class pixels — OK")
+
+
+def test_close_ignores_background_class():
+    lab = _empty()
+    lab[5:8, 5:8] = 1
+    out = close_labels(lab, classes=(0, 1), closing_radius=2)
+    # class 0 in the list is a no-op; class 1 region intact.
+    assert (out[5:8, 5:8] == 1).all()
+    print("  close_labels ignores class 0 — OK")
+
+
+# ============================================================================
+# min_area_m2 block-level filter
+# ============================================================================
+
+def test_min_area_drops_small_patch():
+    """A 3x3 (900 m^2) patch is dropped under a 2500 m^2 floor; a 6x6
+    (3600 m^2) patch survives."""
+    lab = _empty()
+    lab[5:8, 5:8] = 1       # 9 px = 900 m^2  -> dropped
+    lab[20:26, 20:26] = 1   # 36 px = 3600 m^2 -> kept
+    patches = labels_to_polygons(
+        lab, date_ordinal=1, classes=(1,),
+        world_origin_x=ORIGIN_X, world_origin_y=ORIGIN_Y, pixel_res=PIXEL_RES,
+        min_area_m2=2500.0,
+    )
+    assert len(patches) == 1
+    assert patches[0].n_pixels == 36
+    print("  min_area_m2 drops sub-threshold patch — OK")
+
+
+def test_min_area_zero_keeps_all():
+    lab = _empty()
+    lab[5:8, 5:8] = 1
+    patches = labels_to_polygons(
+        lab, date_ordinal=1, classes=(1,),
+        world_origin_x=ORIGIN_X, world_origin_y=ORIGIN_Y, pixel_res=PIXEL_RES,
+        min_area_m2=0.0,
+    )
+    assert len(patches) == 1
+    print("  min_area_m2=0 keeps all patches — OK")
+
+
 def main():
     print("Running polygonize tests...")
     test_single_square_polygon_geometry()
@@ -149,6 +225,11 @@ def main():
     test_polygon_with_hole()
     test_transform_origin_mapping()
     test_rejects_3d()
+    test_close_fills_small_gap()
+    test_close_does_not_clobber_other_class()
+    test_close_ignores_background_class()
+    test_min_area_drops_small_patch()
+    test_min_area_zero_keeps_all()
     print("All polygonize tests passed.")
 
 

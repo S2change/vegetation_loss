@@ -24,6 +24,9 @@
 #   BATCH_SIZE=8        model batch size.
 #   VOTE_CLASSES=1,2    non-bg class IDs to vote on. 1 = Cuts, 2 = Fires. Class names are in AAA_Configs.py
 #   VOTE_THRESHOLD=2    min votes per pixel to keep a detection.
+#   CLOSING_RADIUS=3    post-vote morphological close disk radius (0 = off).
+#   MIN_PATCH_M2=2500   block-level patch-area floor (m^2), firm.
+#   MIN_TILE_PATCH_M2=5000  master patch-area floor (m^2), post cross-block merge.
 #
 # All KEY=VALUE pairs become env vars that the array tasks and aggregator
 # inherit (sbatch --export=ALL is the default — we use that).
@@ -51,6 +54,10 @@ export WEIGHTS_PATH="${WEIGHTS_PATH:-/users1/cpca070342024/shared/model_weights/
 export BATCH_SIZE="${BATCH_SIZE:-8}"
 export VOTE_CLASSES="${VOTE_CLASSES:-1,2}"
 export VOTE_THRESHOLD="${VOTE_THRESHOLD:-2}"
+# Post-vote close + two-tier patch-area floors (block then master).
+export CLOSING_RADIUS="${CLOSING_RADIUS:-3}"
+export MIN_PATCH_M2="${MIN_PATCH_M2:-2500}"
+export MIN_TILE_PATCH_M2="${MIN_TILE_PATCH_M2:-5000}"
 
 # Max array tasks allowed to run at once (the `%N` in --array=0-LAST%N).
 # Each task is 1 CPU + 1 thread, but they share the node's HDF5/filesystem
@@ -90,6 +97,9 @@ echo "Target dates:   $TARGET_DATES"
 echo "Batch size:     $BATCH_SIZE"
 echo "Vote classes:   $VOTE_CLASSES"
 echo "Vote threshold: $VOTE_THRESHOLD"
+echo "Closing radius: $CLOSING_RADIUS"
+echo "Block floor:    $MIN_PATCH_M2 m^2"
+echo "Tile floor:     $MIN_TILE_PATCH_M2 m^2"
 echo "Max concurrent: $MAX_CONCURRENT"
 echo "Weights:        $WEIGHTS_PATH"
 echo

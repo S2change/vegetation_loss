@@ -105,7 +105,8 @@ def load_model(weights_path, device=None):
     return model
 
 
-def predict_before_after_chips(before_batch, after_batch, model_or_path, device=None):
+def predict_before_after_chips(before_batch, after_batch, model_or_path,
+                               device=None, postprocess=False):
     """Segment a batch of before/after 256×256 chip pairs.
 
     Parameters
@@ -116,6 +117,12 @@ def predict_before_after_chips(before_batch, after_batch, model_or_path, device=
                     Pass a pre-loaded model when calling this function repeatedly to avoid
                     reloading weights on every batch.
     device        : torch.device or None (auto-detected)
+    postprocess   : bool (default False). When True, each chip's label map is
+                    passed through `postprocess_prediction` (morphological
+                    close + small-component removal) before being returned.
+                    The chip-chunked voting pipeline leaves this False so
+                    chips vote on raw model output — closing + size filtering
+                    happen once on the voted block result instead of per chip.
 
     Returns
     -------
@@ -157,4 +164,7 @@ def predict_before_after_chips(before_batch, after_batch, model_or_path, device=
                 pred[probs[:, cuts_id] > cuts_threshold] = cuts_id
 
     labels = pred.cpu().numpy().astype(np.uint8)
-    return np.stack([postprocess_prediction(labels[i]) for i in range(len(labels))])
+    if postprocess:
+        return np.stack([postprocess_prediction(labels[i])
+                         for i in range(len(labels))])
+    return labels
