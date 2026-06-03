@@ -1,12 +1,21 @@
-"""Tests for the chip-chunked HDF5 reader.
+"""Structural validation tests for a real chip-chunked HDF5 file.
 
-Builds tiny synthetic chip-chunked HDF5 files in a temp directory matching
-the schema from `rechunk_hdf5_chip_oriented.py`, then asserts the reader
-returns the right block content, handles missing chips correctly, and
-applies the q02/q98 stretch the same way as `dataset_swin_GZ._to_uint8`.
+Reads the file directly with h5py (no hdf5_reader dependency) and checks:
+  - Required datasets and attributes are present
+  - values shape is (n_ts, n_bands, n_chips * 65536) and chunks match one chip
+  - sort_order, xs_new, ys_new lengths are consistent with n_chips
+  - sort_order values are -1 (padding) or valid pixel indices
+  - Padding slot count matches n_chips * 65536 - sum(chip_pixel_count)
+  - xs_new / ys_new hold COORD_NODATA (-9999) exactly at padding slots
+  - All (chip_x_bin, chip_y_bin) pairs are unique
+  - ts array is strictly increasing
+  - Every chip has at least one non-nodata pixel across all timestamps
+  - Padding slots in values hold the nodata fill value
+  - Each chip's pixel coordinates lie within its expected 256x256 spatial square
+  - Pixel coordinates are consistent with the stored bounding-box attributes
 
 Run:
-    python test_input_setup.py
+    python test_real_hdf5_chip_chunked.py
 """
 import os
 import sys
