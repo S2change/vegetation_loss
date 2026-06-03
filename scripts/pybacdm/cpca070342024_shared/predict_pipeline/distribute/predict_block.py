@@ -198,11 +198,13 @@ def main() -> None:
         return
 
     # ── Load model ────────────────────────────────────────────────────────
-    # Pin PyTorch's intra-op thread pool to the granted CPU count. The SLURM
-    # wrapper already exports OMP/MKL/OpenBLAS thread caps before Python
-    # starts (those size at import time); this is the matching torch-side
-    # cap and also covers running predict_block.py outside the wrapper.
-    n_threads = int(os.environ.get("SLURM_CPUS_PER_TASK", "1"))
+    # Pin PyTorch's intra-op thread pool. Precedence: explicit THREADS env
+    # (used by the thread-sweep experiment and to tune in production) >
+    # SLURM_CPUS_PER_TASK > 1. The SLURM wrapper also exports OMP/MKL/
+    # OpenBLAS caps before Python starts (those size at import time); this is
+    # the matching torch-side cap and covers running outside the wrapper.
+    n_threads = int(os.environ.get("THREADS",
+                                   os.environ.get("SLURM_CPUS_PER_TASK", "1")))
     torch.set_num_threads(n_threads)
     print(f"\ntorch threads:  {torch.get_num_threads()}")
 
