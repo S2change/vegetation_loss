@@ -6,7 +6,7 @@ from datetime import date, datetime, timezone
 
 BAND_NAMES= ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8a", "B11", "B12"]
 TILE_NAMES = ['T29SMC', 'T29TQF', 'T29SMD', 'T29TQG', 'T29SNB', 'T29TME', 'T29SNC', 'T29SND', 'T29SPB', 'T29SPC', 'T29TNE', 'T29SPD', 'T29TNF', 'T29TNG', 'T29TPE', 'T29TPF', 'T29TPG']
-TILE_NAMES = ['T29TQF']
+TILE_NAMES = ['T29TPG']
 
 INPUT_NODATA_VAL = 65535
 OUTPUT_NODATA_VAL = 65535
@@ -16,9 +16,9 @@ COORD_NODATA_VAL = -9999   # nodata sentinel for int32 coordinate arrays (xs_new
 MAX_CLOUD_COVER_PT = 0.6 # (proportion: 0.6=60%) file_metadata only stores timestamps where cloud_cover_PT is below 60% and date is between MIN_DATE and MAX_DATE
 
 # S2 geotiff files
-FOLDER_S2 = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testes_cnca_filtar_hdf5_nuvems\exemplos_geotiff_CNCA" # 2025/S2B_MSIL2A_.../S2B_MSIL2A_...tif+S2B_MSIL1C_..._mask_omni.tif
-FOLDER_PT_MASKS = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testes_cnca_filtar_hdf5_nuvems\exemplos_geotiff_CNCA\Mascara_PT_S2" # mask_T29SMC.tif, etc
-FOLDER_HDF5 = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testes_cnca_filtar_hdf5_nuvems\exemplos_geotiff_CNCA\hdf5"
+FOLDER_S2 = r"" # 2025/S2B_MSIL2A_.../S2B_MSIL2A_...tif+S2B_MSIL1C_..._mask_omni.tif
+FOLDER_PT_MASKS = r"...\Mascara_PT_S2" # mask_T29SMC.tif, etc
+FOLDER_HDF5 = r"dgt\hdf5_2025"
 
 # Date filters
 MIN_DATE = date(2025, 1, 1) 
