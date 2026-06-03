@@ -18,11 +18,11 @@ MAX_CLOUD_COVER_PT = 0.6 # (proportion: 0.6=60%) file_metadata only stores times
 # S2 geotiff files
 FOLDER_S2 = r"" # 2025/S2B_MSIL2A_.../S2B_MSIL2A_...tif+S2B_MSIL1C_..._mask_omni.tif
 FOLDER_PT_MASKS = r"...\Mascara_PT_S2" # mask_T29SMC.tif, etc
-FOLDER_HDF5 = r"dgt\hdf5_2025"
+FOLDER_HDF5 = r"/users1/dgt/hdf5_2023"
 
 # Date filters
-MIN_DATE = date(2025, 1, 1) 
-MAX_DATE = date(2025,12,31)
+MIN_DATE = date(2023, 1, 1) 
+MAX_DATE = date(2023,12,31)
 
 # hdf5 chunck size
 N_TS_CHUNK = 12       # number of timestamps per chunk
