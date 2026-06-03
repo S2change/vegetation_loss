@@ -1,5 +1,7 @@
 Lista de datas selecionadas. A mesma data corresponde a 1 ou à agregação de 2  ficheiros geotiff ESA. A cobertura de nuvens Cloud% é determinada sobre a área no território português coberta pela(s) órbitas e para a tile. A última coluna tem os nomes oficiais dos ficheiros geotiff agregados em cada data.
 
+Uma animação para todo o ano 2025 está disponível em <https://github.com/S2change/vegetation_loss/blob/main/scripts/data_exploration/tifs_to_hdf5_to_tifs/CNCA_tifs_to_hdf5/T29TPG_79ts_animation.gif>
+
 Há 79 datas para 2025:
 
     Date          Cloud%   days  clear_pixls orbit_pixls S2 prefix
