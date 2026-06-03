@@ -79,7 +79,14 @@ def close_labels(labels_2d: np.ndarray,
         cls_int = int(cls)
         if cls_int == BACKGROUND_CLASS:
             continue
-        closed = binary_closing(labels_2d == cls_int, structure=disk)
+        cls_mask = labels_2d == cls_int
+        if not cls_mask.any():
+            # Nothing of this class in the voted map — closing an all-False
+            # mask is a no-op, so skip the (otherwise full-array) work.
+            # Common on corner/edge blocks whose detections were all in the
+            # NODATA ghost and got clipped out by voting.
+            continue
+        closed = binary_closing(cls_mask, structure=disk)
         # Only fill pixels that are currently background, so we never
         # clobber a different class's votes.
         out[closed & (out == BACKGROUND_CLASS)] = cls_int

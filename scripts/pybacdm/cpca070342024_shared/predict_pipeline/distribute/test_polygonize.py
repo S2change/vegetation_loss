@@ -184,6 +184,25 @@ def test_close_ignores_background_class():
     print("  close_labels ignores class 0 — OK")
 
 
+def test_close_empty_class_is_noop():
+    """A class with zero pixels is skipped (the empty-class fast path) and
+    the all-background map is returned unchanged."""
+    lab = _empty()
+    lab[5:8, 5:8] = 1          # only class 1 present
+    out = close_labels(lab, classes=(1, 2), closing_radius=3)  # class 2 empty
+    # class 2 contributes nothing; class 1 intact; no stray pixels added.
+    assert (out == lab).all()
+    assert (out == 2).sum() == 0
+    print("  close_labels skips empty class (no-op) — OK")
+
+
+def test_close_all_background_returns_unchanged():
+    lab = _empty()  # entirely background
+    out = close_labels(lab, classes=(1, 2), closing_radius=3)
+    assert (out == 0).all()
+    print("  close_labels all-background -> unchanged — OK")
+
+
 # ============================================================================
 # min_area_m2 block-level filter
 # ============================================================================
@@ -228,6 +247,8 @@ def main():
     test_close_fills_small_gap()
     test_close_does_not_clobber_other_class()
     test_close_ignores_background_class()
+    test_close_empty_class_is_noop()
+    test_close_all_background_returns_unchanged()
     test_min_area_drops_small_patch()
     test_min_area_zero_keeps_all()
     print("All polygonize tests passed.")
