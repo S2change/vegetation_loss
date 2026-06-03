@@ -2,7 +2,8 @@ Lista de datas selecionadas. A mesma data corresponde a 1 ou à agregação de 2
 
 Ver animação para 48 datas em <https://github.com/S2change/vegetation_loss/blob/main/scripts/data_exploration/tifs_to_hdf5_to_tifs/CNCA_tifs_to_hdf5/T29SMD_48ts_animation.gif>
 
-Um caso interessante é `2025-10-12        0%      2   42409124   42427020  S2_MSIL2A_20251012_T29SMD`, em que o filtro de nuvens (OMNI) não deteta nuvens embora a qualidade da imagem seja em geral muito baixa. Idealmente esta imagem deveria ter sido excluída na seleção mas não há um critério claro para tomar essa decisão automaticamente.
+Um caso interessante é `2025-10-12        0%      2   42409124   42427020  S2_MSIL2A_20251012_T29SMD`, em que o filtro de nuvens (OMNI) não deteta nuvens embora a qualidade da imagem seja em geral muito baixa. Idealmente esta imagem deveria ter sido excluída na seleção mas não há um critério claro para tomar essa decisão automaticamente. Ver imagem: 
+<https://github.com/S2change/vegetation_loss/blob/main/scripts/data_exploration/tifs_to_hdf5_to_tifs/CNCA_tifs_to_hdf5/S2_MSIL2A_20251012_T29SMD_2025-10-12_42409124_0.png>
     
     Date          Cloud%   days  clear_pixls orbit_pixls S2 prefix
     -----------------------------------------------------------------------------------------------
