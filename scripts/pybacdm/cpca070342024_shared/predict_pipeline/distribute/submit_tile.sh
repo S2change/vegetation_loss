@@ -18,8 +18,12 @@
 #       OUTPUT_DIR=/users1/cpca070342024/shared/predict_outputs/T29TPG_run01
 #
 # Optional knobs (KEY=VALUE):
-#   MAX_CONCURRENT=30   max array tasks running at once (--array %N cap).
-#                       Lower = less HDF5/filesystem contention; default 30.
+#   THREADS=2           CPU threads per task. Also sets --cpus-per-task so the
+#                       allocation matches. A thread sweep showed ~95% scaling
+#                       at 2 threads, ~68% at 4 — 2 is the efficient default.
+#   MAX_CONCURRENT=8   max array tasks running at once (--array %N cap).
+#                       With THREADS, keep THREADS*MAX_CONCURRENT well under the
+#                       node's core count to avoid memory-bandwidth saturation.
 #   WEIGHTS_PATH=...    .pth checkpoint (has a default).
 #   BATCH_SIZE=8        model batch size.
 #   VOTE_CLASSES=1,2    non-bg class IDs to vote on. 1 = Cuts, 2 = Fires. Class names are in AAA_Configs.py
@@ -59,13 +63,20 @@ export CLOSING_RADIUS="${CLOSING_RADIUS:-3}"
 export MIN_PATCH_M2="${MIN_PATCH_M2:-2500}"
 export MIN_TILE_PATCH_M2="${MIN_TILE_PATCH_M2:-5000}"
 
+# CPU threads per task. Exported so the array wrapper sizes its thread pools
+# to this; also passed as --cpus-per-task below so the SLURM allocation has
+# that many real cores (otherwise cgroups confine the task to 1 core and the
+# threads just fight over it). A thread sweep on a detection-heavy block
+# showed 1.9x speedup at 2 threads (95% efficiency), 2.74x at 4 (68%).
+export THREADS="${THREADS:-2}"
+
 # Max array tasks allowed to run at once (the `%N` in --array=0-LAST%N).
-# Each task is 1 CPU + 1 thread, but they share the node's HDF5/filesystem
-# bandwidth and memory. Capping concurrency trades wall time for far less
-# I/O contention during the chip-read step — which (with the thread fix)
-# tends to make each task faster, so total core-hours often drop too.
-# Set to a large number (e.g. >= N_BLOCKS) to effectively disable the cap.
-MAX_CONCURRENT="${MAX_CONCURRENT:-30}"
+# Tasks share the node's memory bandwidth + HDF5/filesystem; once
+# THREADS*MAX_CONCURRENT approaches the node core count, inference slows from
+# bandwidth saturation (observed: 30 tasks x 1 thread -> 2.5x slower/chip).
+# Keep the product comfortably under the node's cores. Lower also eases the
+# Step-1 read storm. Set >= N_BLOCKS to effectively disable the cap.
+MAX_CONCURRENT="${MAX_CONCURRENT:-8}"
 
 # Each array task and the aggregator log to its own file under LOG_DIR.
 export LOG_DIR="${LOG_DIR:-${OUTPUT_DIR}/logs}"
@@ -100,7 +111,8 @@ echo "Vote threshold: $VOTE_THRESHOLD"
 echo "Closing radius: $CLOSING_RADIUS"
 echo "Block floor:    $MIN_PATCH_M2 m^2"
 echo "Tile floor:     $MIN_TILE_PATCH_M2 m^2"
-echo "Max concurrent: $MAX_CONCURRENT"
+echo "Threads/task:   $THREADS  (= --cpus-per-task)"
+echo "Max concurrent: $MAX_CONCURRENT  (cores in use <= THREADS*MAX_CONCURRENT = $((THREADS * MAX_CONCURRENT)))"
 echo "Weights:        $WEIGHTS_PATH"
 echo
 
@@ -117,13 +129,14 @@ export DISTRIBUTE_DIR
 ARRAY_JOB_ID=$(
     sbatch --parsable \
         --array=0-${LAST_IDX}%${MAX_CONCURRENT} \
+        --cpus-per-task="${THREADS}" \
         --export=ALL \
         --output="$LOG_DIR/predict_block_%a.out" \
         --error="$LOG_DIR/predict_block_%a.err" \
         --job-name="predict_${TILE_ID}" \
         "$DISTRIBUTE_DIR/run_block_slurm.sh"
 )
-echo "Submitted array job:      $ARRAY_JOB_ID  (array 0-${LAST_IDX}%${MAX_CONCURRENT})"
+echo "Submitted array job:      $ARRAY_JOB_ID  (array 0-${LAST_IDX}%${MAX_CONCURRENT}, ${THREADS} cpu/task)"
 
 # ── Submit aggregator (depends on array success) ──────────────────────────
 AGGR_JOB_ID=$(

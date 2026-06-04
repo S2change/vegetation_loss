@@ -8,7 +8,8 @@
 #SBATCH --time=0:30:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=1
+# NOTE: --cpus-per-task is set on the sbatch command line by submit_tile.sh
+# (to match $THREADS), NOT here, so the two never drift apart.
 #SBATCH --partition=fct
 #SBATCH --account=cpca070342024
 #SBATCH --qos=cpca070342024
@@ -22,17 +23,19 @@ module load gcc13/openmpi/4.1.6
 
 source "${VENV:-/users1/cpca070342024/shared/vchips/venv}/bin/activate"
 
-# Cap thread pools to the CPUs SLURM actually granted this task. Without
-# this, PyTorch / NumPy / the BLAS backend default to the node's full core
-# count (96 on fct), so N concurrent array tasks oversubscribe the node by
-# ~N x 96 threads and each inference call slows ~2x from context-switching.
-# These MUST be set before Python imports torch/numpy (the pools size at
-# import time), which is why it lives here, not in predict_block.py.
-THREADS="${SLURM_CPUS_PER_TASK:-1}"
+# Pin all thread pools to $THREADS. submit_tile.sh exports THREADS and
+# allocates a matching --cpus-per-task, so the process has that many real
+# cores and the pools size to use them. Precedence: explicit THREADS >
+# SLURM_CPUS_PER_TASK > 1. Left uncapped, PyTorch/NumPy/BLAS default to the
+# node's full core count (96), and N concurrent tasks oversubscribe the node.
+# These MUST be set before Python imports torch/numpy (pools size at import time).
+THREADS="${THREADS:-${SLURM_CPUS_PER_TASK:-1}}"
 export OMP_NUM_THREADS="$THREADS"
 export MKL_NUM_THREADS="$THREADS"
 export OPENBLAS_NUM_THREADS="$THREADS"
 export NUMEXPR_NUM_THREADS="$THREADS"
+export THREADS   # predict_block.py reads this for torch.set_num_threads
+echo "THREADS=$THREADS  (cpus-per-task=${SLURM_CPUS_PER_TASK:-unset})"
 
 : "${SLURM_ARRAY_TASK_ID:?Must be invoked as an array task}"
 : "${N_COLS:?N_COLS must be exported by submit_tile.sh}"
