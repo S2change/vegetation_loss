@@ -1,3 +1,9 @@
+Recent models and environments:
+- Planaura: (HLS and S2) foundation model designed for bi-temporal land-cover <https://www.youtube.com/watch?v=sunEss2OKEA>
+- TerraTorch (IBM);
+- TerraMind
+- Google's AlphaEarth: annual embeddings
+
 Overview:
 - [Awesome Remote Sensing Foundation Models](https://github.com/Jack-bo1220/Awesome-Remote-Sensing-Foundation-Models?tab=readme-ov-file#relevant-projects). Links to many foundation models for RS, and in particular *Remote Sensing Vision Foundation Models*.
 
