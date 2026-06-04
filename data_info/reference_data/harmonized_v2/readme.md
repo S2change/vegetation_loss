@@ -1,3 +1,6 @@
+Processo de interpretação e geração das máscaras dos VChips, no âmbito do contrato DGT/ISA 3044-D (Jesús Céspedes, junho 2026). 
+See scripts at <https://github.com/S2change/vegetation_loss/tree/main/scripts/ref_datasets>
+
 # Visual Chip Mask Generation Workflow
 
 ## 1. Purpose
