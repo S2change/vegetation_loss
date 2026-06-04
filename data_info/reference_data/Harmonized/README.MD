@@ -7,5 +7,4 @@ This reference data base for Portugal encompasses and harmonizes the following i
 3. DGT-300-TNE
 4. BDR_extended (mudar nome?)
 
-Temporary versions available in this [folder]()
 
