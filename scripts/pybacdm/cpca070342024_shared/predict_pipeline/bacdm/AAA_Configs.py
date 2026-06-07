@@ -27,7 +27,14 @@ else:
 
 # ── Post-processing ────────────────────────────────────────────────────────────
 MIN_PATCH_SIZE = 25   # minimum viable patch in pixels
-CLOSING_RADIUS = 3    # morphological closing radius
+CLOSING_RADIUS = 3    # morphological closing radius (fallback for unlisted classes)
+
+# Per-class morphological closing radius. Closing runs at two stages — per
+# chip (predict.postprocess_prediction) and per block, post-vote
+# (polygonize.close_labels) — and BOTH read this dict so the rule can't drift.
+# Keys are grouped class IDs (see CLASS_GROUPING_NAMES): 1 = Cuts, 2 = Fires.
+# Classes absent from this dict fall back to CLOSING_RADIUS.
+CLOSING_RADII = {1: 3, 2: 1}   # Cuts → 3, Fires → 1
 
 # ── Per-class inference threshold ──────────────────────────────────────────────
 # Pixels where P(Cuts) exceeds this value are labelled Cuts even if not argmax.

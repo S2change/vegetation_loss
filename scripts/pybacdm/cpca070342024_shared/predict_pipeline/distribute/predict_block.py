@@ -38,15 +38,11 @@ import numpy as np
 import psutil
 import torch
 
-# Make the bacdm/ subpackage importable. The INCD layout places
-# prediction_model/ as a sibling of distribute/ (under shared/), so we
-# point sys.path at `<shared>/prediction_model/` rather than
-# `<distribute>/prediction_model/`. The bacdm/ subpackage's own modules
-# use `from bacdm.X import ...` internally, so we point at the *parent*
-# of bacdm/, not at bacdm/ itself.
+# Make the bacdm/ subpackage importable. bacdm/ sits next to distribute/
+# under <shared>/, and its modules use `from bacdm.X import ...` internally,
+# so we put <shared>/ (the parent of bacdm/) on the path.
 _HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(_HERE.parent))                          # shared/
-sys.path.insert(0, str(_HERE.parent / "prediction_model"))     # for bacdm.*
+sys.path.insert(0, str(_HERE.parent))                          # shared/ (for bacdm.*)
 
 from input_setup import read_block, get_block_grid_shape
 from composite_shift_chips import (
@@ -60,7 +56,6 @@ from postprocess import (
 )
 from polygonize import (
     labels_to_polygons, polygons_to_records, close_labels,
-    DEFAULT_CLOSING_RADIUS,
 )
 from bacdm.predict import load_model, predict_before_after_chips
 
@@ -113,9 +108,12 @@ def main() -> None:
     batch_size    = int(os.environ.get("BATCH_SIZE", "8"))
     vote_classes  = _classes_env()
     vote_threshold = int(os.environ.get("VOTE_THRESHOLD", "2"))
-    # Post-vote morphological close radius (disk). 0 disables closing.
-    closing_radius = int(os.environ.get("CLOSING_RADIUS",
-                                        str(DEFAULT_CLOSING_RADIUS)))
+    # Post-vote morphological close radius (disk). Per-class radii come from
+    # AAA_Configs.CLOSING_RADII (Cuts → 3, Fires → 1); leaving CLOSING_RADIUS
+    # unset uses those. Setting CLOSING_RADIUS forces one radius for every
+    # class (override); CLOSING_RADIUS=0 disables closing entirely.
+    _cr_env = os.environ.get("CLOSING_RADIUS")
+    closing_radius = int(_cr_env) if _cr_env is not None else None
     # Block-level patch-area floor (m^2). Dropped at this stage; the master
     # applies a second, larger floor after cross-block merge.
     min_patch_m2 = float(os.environ.get("MIN_PATCH_M2", "2500"))
@@ -140,7 +138,8 @@ def main() -> None:
     print(f"Batch size:     {batch_size}")
     print(f"Vote classes:   {vote_classes}")
     print(f"Vote threshold: {vote_threshold}")
-    print(f"Closing radius: {closing_radius}")
+    print(f"Closing radius: "
+          f"{'per-class (AAA_Configs.CLOSING_RADII)' if closing_radius is None else closing_radius}")
     print(f"Min patch m^2:  {min_patch_m2}")
     print(f"\n[RSS] After imports:                   {rss_mb():7.1f} MB")
 
@@ -344,9 +343,10 @@ def main() -> None:
     classes_t = tuple(int(c) for c in vote_classes)
     rows: list = []
     for i, d in enumerate(target_dates):
-        closed = (close_labels(voted_labels[i], classes_t,
-                               closing_radius=closing_radius)
-                  if closing_radius > 0 else voted_labels[i])
+        closed = (voted_labels[i]
+                  if closing_radius == 0
+                  else close_labels(voted_labels[i], classes_t,
+                                    closing_radius=closing_radius))
         patches = labels_to_polygons(
             closed, date_ordinal=int(d),
             classes=classes_t,

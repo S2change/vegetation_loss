@@ -34,8 +34,18 @@ BACKGROUND_CLASS = 0
 CONNECTIVITY = 4
 # Morphological closing radius for the post-vote close (disk structuring
 # element). Mirrors AAA_Configs.CLOSING_RADIUS default used by the old
-# per-chip postprocess_prediction.
+# per-chip postprocess_prediction. Used as the fallback for classes absent
+# from CLOSING_RADII.
 DEFAULT_CLOSING_RADIUS = 3
+# Per-class closing radii, shared with the chip-level close in
+# predict.postprocess_prediction so the two stages can't drift. AAA_Configs
+# lives in the sibling bacdm/ package (<shared>/bacdm/), so add that to the
+# path here — polygonize is imported before bacdm.predict, so bacdm/ isn't on
+# the path yet at this point.
+import sys as _sys
+from pathlib import Path
+_sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bacdm"))
+from AAA_Configs import CLOSING_RADII as DEFAULT_CLOSING_RADII
 # Block-level minimum patch area (m^2). Patches smaller than this are
 # dropped at the per-block stage. 2500 m^2 = 25 px at 10 m/px, matching
 # the old per-chip MIN_PATCH_SIZE=25 floor.
@@ -45,7 +55,7 @@ DEFAULT_MIN_AREA_M2 = 2500.0
 def close_labels(labels_2d: np.ndarray,
                  classes,
                  *,
-                 closing_radius: int = DEFAULT_CLOSING_RADIUS,
+                 closing_radius=None,
                  ) -> np.ndarray:
     """Morphological-close a voted label map, per non-background class.
 
@@ -55,29 +65,57 @@ def close_labels(labels_2d: np.ndarray,
     the close half of the old `postprocess_prediction`, but applied once
     to the voted block result instead of per chip.
 
+    Each class is closed with its own radius (Cuts → 3, Fires → 1), drawn
+    from `AAA_Configs.CLOSING_RADII` (shared with the chip-level close so
+    the two stages can't drift). Classes absent from that dict fall back to
+    `DEFAULT_CLOSING_RADIUS`.
+
     Parameters
     ----------
     labels_2d : (H, W) uint8
         Voted class labels (0 = background).
     classes : iterable of int
         Non-background class IDs to close. 0 is ignored.
-    closing_radius : int
-        Disk radius for the structuring element.
+    closing_radius : int, dict, or None
+        Per-class radius control:
+          - None (default): use DEFAULT_CLOSING_RADII, falling back to
+            DEFAULT_CLOSING_RADIUS for unlisted classes.
+          - dict {class_id: radius}: explicit per-class radii (same
+            fallback for unlisted classes).
+          - int: force one radius for every class (legacy behaviour).
 
     Returns
     -------
-    (H, W) uint8 — closed labels (a copy; input is not mutated).
+    (H, W) uint8 — closed labels (a copy; input is not mutated). A radius
+    of 0 for a class skips closing that class.
     """
     if labels_2d.ndim != 2:
         raise ValueError(f"labels_2d must be 2-D, got {labels_2d.shape}")
-    r = int(closing_radius)
-    gy, gx = np.ogrid[-r:r + 1, -r:r + 1]
-    disk = (gx ** 2 + gy ** 2) <= r ** 2
+
+    # Resolve the per-class radius lookup once.
+    if isinstance(closing_radius, dict):
+        radii = closing_radius
+        fixed = None
+    elif closing_radius is None:
+        radii = DEFAULT_CLOSING_RADII
+        fixed = None
+    else:
+        radii = None
+        fixed = int(closing_radius)
+
+    def _disk(r: int) -> np.ndarray:
+        gy, gx = np.ogrid[-r:r + 1, -r:r + 1]
+        return (gx ** 2 + gy ** 2) <= r ** 2
 
     out = labels_2d.copy()
     for cls in classes:
         cls_int = int(cls)
         if cls_int == BACKGROUND_CLASS:
+            continue
+        r = fixed if fixed is not None else int(
+            radii.get(cls_int, DEFAULT_CLOSING_RADIUS))
+        if r <= 0:
+            # Radius 0 disables closing for this class.
             continue
         cls_mask = labels_2d == cls_int
         if not cls_mask.any():
@@ -86,7 +124,7 @@ def close_labels(labels_2d: np.ndarray,
             # Common on corner/edge blocks whose detections were all in the
             # NODATA ghost and got clipped out by voting.
             continue
-        closed = binary_closing(cls_mask, structure=disk)
+        closed = binary_closing(cls_mask, structure=_disk(r))
         # Only fill pixels that are currently background, so we never
         # clobber a different class's votes.
         out[closed & (out == BACKGROUND_CLASS)] = cls_int
