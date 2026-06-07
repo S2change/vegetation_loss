@@ -74,10 +74,10 @@ def _chip_to_tensor(arr):
     """Convert one (H, W, C) chip (uint8 or uint16) to a normalised float tensor.
 
     Applies _to_uint8 (no-op if already uint8), selects/reorders bands via
-    AAA_Configs.selected_nums, then applies ToTensor + Normalize.
+    AAA_Configs, then applies ToTensor + Normalize.
     """
     arr = _to_uint8(arr)                        # (H, W, C) uint8
-    arr = arr[:, :, AAA_Configs.selected_nums]  # band selection / reorder
+    arr = arr[:, :, AAA_Configs.reversed_nums]  # band selection / reorder
     return _TRANSFORM(arr)                      # (C, H, W) float32
 
 

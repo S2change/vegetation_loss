@@ -15,11 +15,13 @@ channel_nums = 10
 if channel_nums == 6:
     normalization_mean = (0.485, 0.456, 0.406, 0.456, 0.406, 0.485)
     normalization_std  = (0.229, 0.224, 0.225, 0.224, 0.225, 0.229)
-    selected_nums      = [0, 1, 2, 3, 4, 5]
+    selected_nums      = [0, 1, 2, 3, 4, 5] # Training data was reversed before input
+    reversed_nums      = [5, 4, 3, 2, 1, 0] # predict_pipeline ingests S2 data with standard ordering, needs to be reversed
 elif channel_nums == 10:
     normalization_mean = (0.485, 0.456, 0.406, 0.485, 0.456, 0.406, 0.485, 0.456, 0.406, 0.485)
     normalization_std  = (0.229, 0.224, 0.225, 0.229, 0.224, 0.225, 0.229, 0.224, 0.225, 0.229)
-    selected_nums      = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    selected_nums      = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] # Training data was reversed before input
+    reversed_nums      = [9, 8, 7, 6, 5, 4, 3, 2, 1, 0] # predict_pipeline ingests S2 data with standard ordering, needs to be reversed
 else:
     sys.exit('channel_nums is wrong')
 
