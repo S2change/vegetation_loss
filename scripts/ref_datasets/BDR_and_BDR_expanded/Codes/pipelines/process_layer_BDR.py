@@ -42,15 +42,34 @@ def harmonize_bdr_layer(
     report_path = Path(report_xlsx)
 
     def _support_path(explicit_path: str | None, *relative_parts: str) -> Path:
+        """
+        Resuelve capas auxiliares dentro de la carpeta BDR_organizado.
+
+        Estructura esperada:
+          BDR_organizado/
+          ├── Codes/
+          ├── Data/
+          │   ├── NUTS/
+          │   └── S2_tiles/
+          └── Results/
+
+        Si se proporciona una ruta explícita, esta tiene prioridad.
+        """
         if explicit_path is not None:
             return Path(explicit_path)
 
-        project_root = Path(__file__).resolve().parents[3]
+        # process_layer_BDR.py está en:
+        # BDR_organizado/Codes/pipelines/process_layer_BDR.py
+        project_root = Path(__file__).resolve().parents[2]
+
         project_candidate = project_root.joinpath(*relative_parts)
         if project_candidate.exists():
             return project_candidate
 
-        return input_path.parents[2].joinpath(*relative_parts)
+        # Fallback equivalente cuando el input está en:
+        # BDR_organizado/Data/<archivo>
+        input_root = input_path.parents[1]
+        return input_root.joinpath(*relative_parts)
 
     if not input_path.exists():
         raise FileNotFoundError(f"Input file not found: {input_path}")
@@ -476,7 +495,7 @@ def harmonize_bdr_layer(
     # ----------------------------------------------------------
     # 6) Pi_dicofre
     # ----------------------------------------------------------
-    admin_path = _support_path(admin_areas_shp, "NUTS", "areas_administrativas.shp")
+    admin_path = _support_path(admin_areas_shp, "Data", "NUTS", "areas_administrativas.shp")
     if not admin_path.exists():
         raise FileNotFoundError(f"Administrative layer not found: {admin_path}")
 
@@ -504,7 +523,7 @@ def harmonize_bdr_layer(
     # ----------------------------------------------------------
     # 6b) S2 tile
     # ----------------------------------------------------------
-    tiles_path = _support_path(sentinel2_tiles_shp, "S2_tiles", "sentinel2_tiles_PT_terra_tm06.shp")
+    tiles_path = _support_path(sentinel2_tiles_shp, "Data", "S2_tiles", "sentinel2_tiles_PT_terra_tm06.shp")
     if not tiles_path.exists():
         raise FileNotFoundError(f"Sentinel-2 tiles layer not found: {tiles_path}")
 

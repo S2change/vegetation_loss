@@ -1,19 +1,20 @@
-# BDR-TNE-300-Expanded – Detailed Processing and Photointerpretation Workflow
+## BDR-TNE-300-Expanded – Detailed Processing and Photointerpretation Workflow
 
-This document describes the methodology and workflow applied to the **BDR-TNE-300-Expanded** dataset. This layer constitutes an expert-based photointerpretation product designed to complement and contextualize the automated disturbance detection results derived from `BDR_CCDC_TNE_v3`.
+This document describes the methodology and workflow applied to the **BDR-TNE-300-Expanded** dataset. This layer constitutes an expert-based photointerpretation product designed to complement and contextualize the automated disturbance-detection results derived from `BDR_CCDC_TNE_v3`.
 
-The dataset is used as a qualitative reference and validation-support layer within the harmonization framework. Unlike the standard BDR layer, BDR-TNE-300-Expanded includes a central manual photointerpretation stage followed by a separate automated harmonization runner.
+The dataset is used as a qualitative reference and validation-support layer within the harmonization framework. Unlike the standard BDR layer, BDR-TNE-300-Expanded includes a central manual photointerpretation and geometry-revision stage followed by an independent automated harmonization runner.
 
-Main interpreted and revised layer:
+Main interpreted and manually revised input:
 
 ```text
-Results/Topologia_revisado/Cleaned_1.shp
+Data/BDR_CCDC_TNE_v3_topologia_revisado_manualmente.shp
 ```
 
-Final harmonized output:
+Final harmonized outputs:
 
 ```text
-Results/Harmonizacion_datos/BDR_expanded.gpkg
+Results/Harmonizacion_datos/BDR_expanded_v1.gpkg
+Results/Harmonizacion_datos/BDR_expanded_v1.xlsx
 ```
 
 ---
@@ -28,122 +29,117 @@ While `BDR_CCDC_TNE_v3` provides algorithm-based change detection, BDR-TNE-300-E
 - validate ambiguous cases;
 - refine disturbance timing;
 - classify the disturbance process;
-- attribute pre-change and post-change land-cover classes;
+- attribute pre-disturbance and post-disturbance land-cover classes;
 - document limitations of automated approaches.
 
 This dataset is not intended to function as a standalone wall-to-wall disturbance map. Instead, it provides qualitative validation, temporal refinement, and interpretative support for the harmonized reference data used in the project.
 
 ---
 
-## 2. Repository organization
+## 2. Current repository organization
 
-Within the current `BDR_DGT_300` structure, the main components relevant to BDR expanded are:
+The current organization is:
 
 ```text
-BDR_DGT_300/
-├── Codes/
+BDR_organizado/
+├── Codes(https://github.com/S2change/vegetation_loss/tree/main/scripts/ref_datasets/BDR_and_BDR_expanded/Codes)/
+│   ├── core/
+│   │   ├── reproject_layer.py
+│   │   └── topology.py
 │   ├── pipelines/
-│   │   ├── BDR_expanded_proposal_extra.py
 │   │   └── process_layer_BDR.py
 │   ├── runners/
-│   │   └── run_process_layer_BDR_expanded.py
+│   │   ├── run_normalize_string.py
+│   │   ├── run_process_layer_BDR.py
+│   │   ├── run_process_layer_BDR_expanded.py
+│   │   └── run_topology.py
 │   └── utils/
 │       └── normalize_string.py
-├── DataIntermediate/
-│   ├── cuadros_seleccionados.gpkg
-│   └── cuadros_seleccionados_solo_cuadro.gpkg
-├── Results/
-│   ├── Revisado.shp
-│   ├── Topologia_revisado/
-│   │   └── Cleaned_1.shp
-│   └── Harmonizacion_datos/
-│       ├── BDR_expanded.gpkg
-│       └── BDR_expanded.xlsx
-└── Docs/
-    ├── BDR_300.md
-    └── BDR_expanded.md
+├── Data(DGT-S2CHANGE_2023/partihaldo/ref__datasets/harmonized/BDR_and_BDR_expanded/Data)/
+│   ├── NUTS/
+│   ├── S2_tiles/
+│   ├── BDR_CCDC_TNE_v3.shp
+│   └── BDR_CCDC_TNE_v3_topologia_revisado_manualmente.shp
+├── Docs/
+│   ├── BDR_300.md
+│   ├── BDR_expanded.md
+│   └── Images/
+│       └── Images_BDR_expanded/
+└── Results(DGT-S2CHANGE_2023/partihaldo/ref__datasets/harmonized/BDR_and_BDR_expanded/Results)/
+    ├── Harmonizacion_datos/
+    │   ├── BDR_CCDC_TNE_v1.gpkg
+    │   ├── BDR_CCDC_TNE_v1.xlsx
+    │   ├── BDR_expanded_v1.gpkg
+    │   └── BDR_expanded_v1.xlsx
+    ├── Normalized_text_columns/
+    └── Topologia_revisado/
 ```
 
-The BDR expanded runner determines the project root from its own location. Therefore, it does not depend on an absolute path such as `C:\Users\...` or on the current working directory.
+The standard BDR and BDR expanded layers share the harmonization pipeline:
+
+```text
+Codes/pipelines/process_layer_BDR.py
+```
+
+However, they are executed through separate runners:
+
+```text
+Codes/runners/run_process_layer_BDR.py
+Codes/runners/run_process_layer_BDR_expanded.py
+```
+
+The BDR expanded runner determines the repository root from its own file location and adds that root to `sys.path` before importing the shared pipeline. This allows the runner to be executed through an absolute path or from another working directory without producing a `ModuleNotFoundError` for the `Codes` package.
+
+The pipeline file:
+
+```text
+Codes/pipelines/process_layer_BDR.py
+```
+
+contains the shared processing function and is not the execution entry point. It should be called through the corresponding runner.
 
 ---
 
 ## 3. Processing order and execution sequence
 
-The complete BDR-TNE-300-Expanded workflow combines preparatory processing, manual expert interpretation, topology review, and automated harmonization.
-
-The processing order is:
+The current BDR-TNE-300-Expanded workflow consists of a completed manual interpretation and topology-revision stage followed by one automated harmonization stage.
 
 ```text
-1. Selection and generation of expanded interpretation units
-   BDR_expanded_proposal_extra.py
+1. Expert photointerpretation and manual topology revision
+   Data/BDR_CCDC_TNE_v3_topologia_revisado_manualmente.shp
             ↓
-2. Manual expert photointerpretation and attribute revision
-   Results/Revisado.shp
+2. Automated harmonization
+   Codes/runners/run_process_layer_BDR_expanded.py
             ↓
-3. Geometry and topology review
-   Results/Topologia_revisado/Cleaned_1.shp
-            ↓
-4. Automated harmonization and final export
-   run_process_layer_BDR_expanded.py
+3. Final harmonized outputs
+   Results/Harmonizacion_datos/BDR_expanded_v1.gpkg
+   Results/Harmonizacion_datos/BDR_expanded_v1.xlsx
 ```
 
-### 3.1 Stage 1 — Selection and generation of expanded interpretation units
+### 3.1 Stage 1 — Expert photointerpretation and manual topology revision
 
-**Pipeline:**
+The expert interpretation and manual geometry/topology revision are completed before the automated runner is executed.
+
+The prepared input layer is:
 
 ```text
-Codes/pipelines/BDR_expanded_proposal_extra.py
+Data/BDR_CCDC_TNE_v3_topologia_revisado_manualmente.shp
 ```
 
-This stage supports the selection of BDR-TNE-300 buffers and the generation of the 1 km × 1 km analysis squares used for expanded photointerpretation.
+This layer contains the expert-reviewed disturbance polygons and their associated attributes, including:
 
-Main intermediate outputs include:
-
-```text
-DataIntermediate/cuadros_seleccionados.gpkg
-DataIntermediate/cuadros_seleccionados_solo_cuadro.gpkg
-```
-
-These outputs define the spatial units used in the expert visual-analysis stage.
-
-### 3.2 Stage 2 — Manual expert photointerpretation
-
-The expanded analysis units are reviewed manually using multi-source imagery and ancillary information.
-
-Main working layer:
-
-```text
-Results/Revisado.shp
-```
-
-This stage defines or revises:
-
-- disturbance presence;
+- disturbance occurrence;
 - disturbance type;
-- pre-change and post-change dates;
+- `Data_0` and `Data_1`;
 - agreement or disagreement with CCDC;
 - interpretation notes;
 - orthophoto references;
-- pre-change and post-change land-cover classes.
+- pre-disturbance and post-disturbance land-cover classes;
+- manually reviewed geometries and topology.
 
-This stage is expert-driven and is not automatically reproduced by the harmonization code.
+The automated runner does not reproduce the photointerpretation or manual topology-revision process. It assumes that this input layer has already been reviewed and is ready for harmonization.
 
-### 3.3 Stage 3 — Geometry and topology review
-
-Before harmonization, the interpreted layer is geometrically reviewed and cleaned.
-
-Input to the automated harmonization runner:
-
-```text
-Results/Topologia_revisado/Cleaned_1.shp
-```
-
-This reviewed layer is the authoritative input used by the current BDR expanded runner.
-
-The current BDR expanded automation does not independently regenerate the manual photointerpretation or the topology-cleaned layer. Those stages must be completed before the harmonization runner is executed.
-
-### 3.4 Stage 4 — Harmonization and final export
+### 3.2 Stage 2 — Automated harmonization
 
 **Runner:**
 
@@ -157,33 +153,48 @@ Codes/runners/run_process_layer_BDR_expanded.py
 Codes/pipelines/process_layer_BDR.py
 ```
 
-Command:
+From the `BDR_organizado` directory, execute:
 
 ```bash
 python Codes/runners/run_process_layer_BDR_expanded.py
 ```
 
-Input:
+The runner processes:
 
 ```text
-Results/Topologia_revisado/Cleaned_1.shp
+Data/BDR_CCDC_TNE_v3_topologia_revisado_manualmente.shp
 ```
 
-Outputs:
+and creates:
 
 ```text
-Results/Harmonizacion_datos/BDR_expanded.gpkg
-Results/Harmonizacion_datos/BDR_expanded.xlsx
+Results/Harmonizacion_datos/BDR_expanded_v1.gpkg
+Results/Harmonizacion_datos/BDR_expanded_v1.xlsx
 ```
 
-The runner calls the shared `harmonize_bdr_layer()` function using the BDR expanded layer name. This causes the output to receive:
+During harmonization, the workflow:
+
+- validates the required class and buffer fields;
+- standardizes `Data0` and `Data1`;
+- creates `Id`, `Src`, and `Uid`;
+- derives `Chg_type`;
+- recalculates `Area_ha`;
+- calculates `Validation_flag`;
+- assigns `Pi_dicofre`;
+- assigns `S2_tile` when the complete polygon lies within one unique tile;
+- retains the harmonized output schema;
+- normalizes final text values;
+- reprojects and writes the final layer in `EPSG:3763`;
+- exports the field-mapping report.
+
+Because this is the BDR expanded runner, the output records receive:
 
 ```text
 Src = bdr_expanded
 Uid = bdr_expanded_XXXXXXX
 ```
 
-Although BDR and BDR expanded share the same harmonization function, they have separate runners, separate inputs, separate outputs, and different source identifiers.
+BDR and BDR expanded share `process_layer_BDR.py`, but they use separate runners, separate input layers, separate outputs, and different source identifiers.
 
 ---
 
@@ -193,7 +204,7 @@ Although BDR and BDR expanded share the same harmonization function, they have s
 
 BDR-TNE-300-Expanded is derived from the original **BDR-TNE-300** dataset.
 
-The base layer did not originally include explicit temporal interval fields (`Data_0`, `Data_1`) for all features. This motivated further expert interpretation using all available image sources.
+The base layer did not originally include explicit temporal interval fields (`Data_0`, `Data_1`) for all features. This motivated further expert interpretation using the available image sources.
 
 ### 4.2 Spatial expansion
 
@@ -233,7 +244,7 @@ For each interpretation unit, the following steps were performed:
 - identification of the first image after the change (`Data_1`);
 - refinement of the temporal interval using all available imagery;
 - interpretation of the disturbance process;
-- attribution of pre-change and post-change land-cover classes.
+- attribution of pre-disturbance and post-disturbance land-cover classes.
 
 ### 5.3 Comparison with CCDC results
 
@@ -241,7 +252,7 @@ The photointerpretation explicitly assessed the correspondence between visually 
 
 Each case was flagged to indicate whether the CCDC result was considered consistent with the visual evidence.
 
-It is important to note that BDR-TNE-300-Expanded is not generated exclusively through automated processing. The core interpretation stage is manual and expert-driven. The code-based workflow supports the generation of candidate units and the final harmonization and export of the interpreted layer.
+It is important to note that BDR-TNE-300-Expanded is not generated exclusively through automated processing. The core interpretation stage is manual and expert-driven. The code-based workflow supports the final harmonization and export of the interpreted layer.
 
 ---
 
@@ -264,8 +275,8 @@ This section describes the principal fields found in the manually reviewed BDR-T
 ### buffer_ID
 
 - **Type:** integer or string
-- **Description:** Identifier of the original 300 m buffer from which the expanded square was generated.
-- **Purpose:** Maintains traceability to the original BDR-TNE-300 reference unit.
+- **Description:** Identifier of the original 300 m buffer associated with the interpreted unit.
+- **Purpose:** Maintains traceability to the original BDR-TNE-300 reference framework.
 
 ### Notas
 
@@ -336,9 +347,68 @@ This section describes the principal fields found in the manually reviewed BDR-T
 
 ---
 
-## 7. Harmonization rules and final output fields
+## 7. Auxiliary spatial layers
 
-The current BDR expanded runner uses the same harmonization function as the standard BDR workflow, but identifies the layer as `bdr_expanded`.
+The harmonization pipeline uses two auxiliary spatial datasets stored directly within `Data/`.
+
+### 7.1 Administrative layer
+
+Path:
+
+```text
+Data/NUTS/areas_administrativas.shp
+```
+
+Required field:
+
+```text
+dtmnfr
+```
+
+Purpose:
+
+- assign the administrative code `Pi_dicofre`;
+- use the centroid of each BDR expanded polygon for the spatial join.
+
+The code first applies the `within` predicate. If no match is found, it uses `intersects` as a fallback.
+
+### 7.2 Sentinel-2 tile layer
+
+Path:
+
+```text
+Data/S2_tiles/sentinel2_tiles_PT_terra_tm06.shp
+```
+
+Purpose:
+
+- assign the Sentinel-2 tile code to `S2_tile`.
+
+The complete polygon must be contained within exactly one tile:
+
+- one complete `within` match → tile assigned;
+- no complete match → NULL;
+- more than one complete match → NULL.
+
+The pipeline searches common tile-code fields such as:
+
+```text
+Name
+Tile
+Tile_id
+Tile_name
+MGRS_TILE
+S2_TILE
+Id
+```
+
+Both auxiliary layers are reprojected to the input CRS when necessary before the spatial operations.
+
+---
+
+## 8. Harmonization rules and final output fields
+
+The current BDR expanded runner uses the same harmonization function as the standard BDR workflow but identifies the layer as `bdr_expanded`.
 
 The final harmonized schema is:
 
@@ -361,24 +431,24 @@ Buffer_id
 geometry
 ```
 
-### 7.1 Src
+### 8.1 Src
 
 - **Type:** string
 - **Value:** `bdr_expanded`
 - **Purpose:** Distinguishes BDR expanded from BDR, ICNF and NVG.
 
-### 7.2 Id
+### 8.2 Id
 
 - **Type:** integer
 - **Description:** Sequential identifier created during harmonization.
 
-### 7.3 Uid
+### 8.3 Uid
 
 - **Type:** string
 - **Format:** `bdr_expanded_XXXXXXX`
 - **Purpose:** Provides a source-specific unique identifier.
 
-### 7.4 Data0
+### 8.4 Data0
 
 - **Type:** date string (`YYYY-MM-DD`) or NULL
 - **Description:** Standardized start date of the interpreted disturbance interval.
@@ -392,7 +462,7 @@ Data0
 DATA0
 ```
 
-### 7.5 Data1
+### 8.5 Data1
 
 - **Type:** date string (`YYYY-MM-DD`) or NULL
 - **Description:** Standardized end date of the interpreted disturbance interval.
@@ -406,28 +476,28 @@ Data1
 DATA1
 ```
 
-The date parser supports date, datetime, Pandas Timestamp, `YYYY-MM-DD`, datetime strings, and `YYYYMMDD` values.
+The parser supports Python date and datetime objects, Pandas timestamps, `YYYY-MM-DD` strings, datetime strings, and `YYYYMMDD` values.
 
-### 7.6 Temp_eval_start
+### 8.6 Temp_eval_start
 
 - **Type:** date string (`YYYY-MM-DD`)
 - **Current value:** `2018-09-01`
 - **Description:** Fixed start of the project-wide evaluation period.
 
-### 7.7 Temp_eval_end
+### 8.7 Temp_eval_end
 
 - **Type:** date string (`YYYY-MM-DD`)
 - **Current value:** `2021-09-30`
 - **Description:** Fixed end of the project-wide evaluation period.
 
-In the current implementation, these two fields are constants assigned to every record. They are not calculated as `max(Data0, global start)` or `min(Data1, global end)`.
+In the current implementation, these fields are constant values assigned to every record. They are not calculated from `Data0` and `Data1`.
 
-### 7.8 Chg_type
+### 8.8 Chg_type
 
 - **Type:** string or NULL
 - **Description:** Harmonized disturbance type derived from `tipo_1` and the available change indicator.
 
-For BDR expanded, the pipeline normally evaluates `Change` when `altera` is not available.
+For BDR expanded, the pipeline normally evaluates `Change` when `altera` is unavailable.
 
 Values containing `change` are treated as disturbance records, except those containing:
 
@@ -437,7 +507,7 @@ not aplicable
 not applicable
 ```
 
-### 7.9 Area_ha
+### 8.9 Area_ha
 
 - **Type:** float
 - **Description:** Polygon area recalculated from geometry.
@@ -446,7 +516,9 @@ not applicable
 Area_ha = geometry area / 10,000
 ```
 
-### 7.10 Validation_flag
+The input layer must use a projected CRS appropriate for area calculations.
+
+### 8.10 Validation_flag
 
 - **Type:** string
 - **Final values:**
@@ -460,35 +532,27 @@ A feature is flagged when it:
 - participates in an overlap; or
 - touches an internal gap.
 
-The calculation does not modify the geometry.
+This validation does not modify the geometries.
 
-### 7.11 Pi_dicofre
+### 8.11 Pi_dicofre
 
 - **Type:** string or NULL
-- **Description:** Administrative code derived from `dtmnfr`.
-- **Reference layer:**
+- **Description:** Administrative code derived from the `dtmnfr` field in:
 
 ```text
-NUTS/areas_administrativas.shp
+Data/NUTS/areas_administrativas.shp
 ```
 
 The assignment is performed using polygon centroids.
 
-### 7.12 S2_tile
+### 8.12 S2_tile
 
 - **Type:** string or NULL
-- **Description:** Sentinel-2 tile assigned only when the complete polygon falls within one unique tile.
-- **Reference layer:**
+- **Description:** Sentinel-2 tile assigned from:
 
 ```text
-S2_tiles/sentinel2_tiles_PT_terra_tm06.shp
+Data/S2_tiles/sentinel2_tiles_PT_terra_tm06.shp
 ```
-
-Rules:
-
-- exactly one complete `within` match → tile assigned;
-- no complete match → NULL;
-- more than one match → NULL.
 
 Final tile values are normalized to lowercase:
 
@@ -496,7 +560,7 @@ Final tile values are normalized to lowercase:
 T29TNE → t29tne
 ```
 
-### 7.13 Classe_0
+### 8.13 Classe_0
 
 - **Type:** string or NULL
 - **Description:** Harmonized pre-disturbance class.
@@ -511,7 +575,7 @@ Clase_0
 
 Final values are converted to lowercase and accents are removed.
 
-### 7.14 Classe_1
+### 8.14 Classe_1
 
 - **Type:** string or NULL
 - **Description:** Harmonized post-disturbance class.
@@ -526,7 +590,7 @@ Clase_1
 
 Final values are converted to lowercase and accents are removed.
 
-### 7.15 Buffer_id
+### 8.15 Buffer_id
 
 - **Type:** string or NULL
 - **Description:** Cleaned identifier of the original BDR buffer.
@@ -539,11 +603,11 @@ Cleaning rules include:
 
 ---
 
-## 8. Final text normalization
+## 9. Final text normalization
 
-The harmonization pipeline applies final text normalization after constructing the harmonized fields.
+The harmonization pipeline applies final text normalization after constructing and renaming the harmonized fields.
 
-The corrected implementation recognizes:
+The current implementation recognizes:
 
 ```text
 object
@@ -570,13 +634,13 @@ Temp_eval_end
 Examples:
 
 ```text
-T29TNE               → t29tne
-Eucalipto            → eucalipto
-Pinheiro bravo       → pinheiro bravo
-Superfície sem ...   → superficie sem ...
+T29TNE                  → t29tne
+Eucalipto               → eucalipto
+Pinheiro bravo          → pinheiro bravo
+Superfície sem vegetação → superficie sem vegetacao
 ```
 
-The field names themselves retain the harmonized naming convention, including `S2_tile`, `Classe_0`, and `Classe_1`.
+The harmonized field names retain the defined naming convention, including `S2_tile`, `Classe_0`, and `Classe_1`. The normalization applies to their values, not to the capitalization of the field names.
 
 Relevant code:
 
@@ -587,7 +651,7 @@ Codes/utils/normalize_string.py
 
 ---
 
-## 9. Relationship with BDR and the harmonization framework
+## 10. Relationship with BDR and the harmonization framework
 
 BDR-TNE-300-Expanded complements `BDR_CCDC_TNE_v3` by providing expert-based validation and temporal refinement.
 
@@ -604,17 +668,17 @@ Although BDR and BDR expanded use the same shared harmonization pipeline, they r
 
 | Component | BDR | BDR expanded |
 |---|---|---|
-| Main source | Automated/reference BDR layer | Expert-interpreted expanded layer |
+| Main source | Standard BDR layer | Expert-interpreted and manually revised layer |
 | Runner | `run_process_layer_BDR.py` | `run_process_layer_BDR_expanded.py` |
 | Source value | `bdr` | `bdr_expanded` |
 | UID prefix | `bdr_` | `bdr_expanded_` |
-| Final GeoPackage | `BDR_CCDC_TNE_v3_harmonized.gpkg` | `BDR_expanded.gpkg` |
+| Final GeoPackage | `BDR_CCDC_TNE_v1.gpkg` | `BDR_expanded_v1.gpkg` |
 
 ---
 
-## 10. Design decisions and limitations
+## 11. Design decisions and limitations
 
-### 10.1 Example of photointerpretation for land-cover class attribution
+### 11.1 Example of photointerpretation for land-cover class attribution
 
 ![Example of photointerpretation showing eucalyptus and pinheiro bravo](Images/Images_BDR_expanded/Fig1.png)
 
@@ -651,7 +715,7 @@ Classe_0
 Classe_1
 ```
 
-### 10.2 Example of photointerpretation for burned-area classification
+### 11.2 Example of photointerpretation for burned-area classification
 
 ![Example of burned-area photointerpretation using multiple image sources](Images/Images_BDR_expanded/Fig2.png)
 
@@ -675,7 +739,7 @@ The integration of these sources enabled:
 - validation or correction of CCDC;
 - documentation of the interpretation in `CCD` and `Notas`.
 
-### 10.3 Main limitations
+### 11.3 Main limitations
 
 The principal limitations are:
 
@@ -688,18 +752,18 @@ The principal limitations are:
 
 ---
 
-## 11. Special case — Buffer ID 94
+## 12. Special case — Buffer ID 94
 
 - **Location:** Benfeita, Arganil, Coimbra
 - **Coordinates:** EPSG:3763 — `14985.9 E, 63676.9 N`
 
-### 11.1 Change timing: CCDC vs. visual interpretation
+### 12.1 Change timing: CCDC vs. visual interpretation
 
 Buffer ID **94** is representative of several similar cases, including buffer **132**.
 
 The CCDC output indicates that the disturbance occurs in **September**, while visual inspection shows that the actual onset occurs earlier, between **March and April**.
 
-### 11.2 Evidence from imagery
+### 12.2 Evidence from imagery
 
 ![Baseline condition before change (Buffer 94 — March)](Images/Images_BDR_expanded/Fig3.PNG)
 
@@ -709,7 +773,7 @@ The CCDC output indicates that the disturbance occurs in **September**, while vi
 
 *Figure 4. Early change observed between March and April. The figure supports that the disturbance onset precedes the CCDC break date.*
 
-### 11.3 Strong disturbance after land preparation
+### 12.3 Strong disturbance after land preparation
 
 After the initial change, the area was ploughed, cleared, or otherwise prepared, producing a stronger signal later in the year.
 
@@ -721,13 +785,13 @@ After the initial change, the area was ploughed, cleared, or otherwise prepared,
 
 *Figure 6. Post-preparation condition in October, showing a consolidated post-disturbance state.*
 
-### 11.4 Why the CCDC date can be misleading
+### 12.4 Why the CCDC date can be misleading
 
 Because CCDC may report the last or strongest detected break, the apparent date can shift to September.
 
 If this date is interpreted as the start of the disturbance, it produces a temporal interpretation error, because the initial onset is visible earlier, between March and April.
 
-### 11.5 Independent validation with Google Earth
+### 12.5 Independent validation with Google Earth
 
 Google Earth imagery independently confirms that the transition occurred before September.
 
@@ -741,13 +805,13 @@ Google Earth imagery independently confirms that the transition occurred before 
 
 ---
 
-## 12. Final outputs
+## 13. Final outputs
 
 The current BDR expanded harmonization stage produces:
 
 ```text
-Results/Harmonizacion_datos/BDR_expanded.gpkg
-Results/Harmonizacion_datos/BDR_expanded.xlsx
+Results/Harmonizacion_datos/BDR_expanded_v1.gpkg
+Results/Harmonizacion_datos/BDR_expanded_v1.xlsx
 ```
 
 The GeoPackage is the final harmonized spatial product.
@@ -768,22 +832,31 @@ dropped
 added
 ```
 
+The Excel file is a field-mapping report and does not contain the spatial dataset.
+
 ---
 
-## 13. Status
+## 14. Status
 
-The BDR-TNE-300-Expanded dataset has been:
+The current BDR-TNE-300-Expanded workflow is organized as follows:
 
-1. spatially expanded from selected BDR-TNE-300 units;
-2. manually photointerpreted;
-3. revised and topologically cleaned;
-4. harmonized through its independent runner;
-5. exported as a source-specific GeoPackage and field-mapping report.
+1. expert photointerpretation;
+2. manual geometry and topology revision;
+3. preparation of `Data/BDR_CCDC_TNE_v3_topologia_revisado_manualmente.shp`;
+4. automated harmonization using `run_process_layer_BDR_expanded.py`;
+5. export of the final GeoPackage and field-mapping report.
 
-The final harmonized product is:
+The processing command is:
 
-```text
-Results/Harmonizacion_datos/BDR_expanded.gpkg
+```bash
+python Codes/runners/run_process_layer_BDR_expanded.py
 ```
 
-The harmonized field definitions and shared transformation rules should be read together with `BDR_300.md`, while the present document records the layer-specific spatial design, manual photointerpretation process, execution order, examples, and limitations.
+The final harmonized products are:
+
+```text
+Results/Harmonizacion_datos/BDR_expanded_v1.gpkg
+Results/Harmonizacion_datos/BDR_expanded_v1.xlsx
+```
+
+The harmonized field definitions and shared transformation rules should be read together with `BDR_300.md`. The present document records the BDR expanded photointerpretation methodology, current repository organization, execution order, auxiliary-data structure, examples, limitations, and layer-specific outputs.
