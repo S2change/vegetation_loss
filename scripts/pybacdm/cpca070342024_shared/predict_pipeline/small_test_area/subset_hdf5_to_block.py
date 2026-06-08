@@ -417,7 +417,7 @@ def main() -> None:
                          "NODATA on top/left)")
     args = ap.parse_args()
 
-    out = args.out or args.src.with_name(args.src.stem + "_testblock.h5")
+    out = args.out or _HERE / (args.src.stem + "_testblock.h5")
     change_paths = [p for p in (args.fires, args.cuts) if p and p.exists()]
     subset(args.src, args.gpkg, out, change_paths,
            pad_blocks=args.pad_blocks)
