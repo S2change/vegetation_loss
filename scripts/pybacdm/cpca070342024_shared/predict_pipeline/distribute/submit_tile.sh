@@ -6,9 +6,16 @@
 #   1. Read the tile's chip-chunked HDF5 to discover the block grid shape
 #      (N_BLOCK_ROWS x N_BLOCK_COLS).
 #   2. Submit an array job — one task per (block_row, block_col) — that
-#      runs `predict_block.py` and writes one .npz per block.
-#   3. Submit an aggregator job with `--dependency=afterok:<array_job>`
-#      that stitches the per-block .npzes into one tile-level .npz.
+#      runs `predict_block.py` and writes one .npz + .gpkg per block into
+#      OUTPUT_DIR/block_outputs/.
+#   3. Submit an aggregator job with `--dependency=afterok:<array_job>` that
+#      stitches the per-block shards into tile-level outputs in
+#      OUTPUT_DIR/final_outputs/ (.gpkg .parquet .npz .tif).
+#
+# OUTPUT_DIR layout:
+#   OUTPUT_DIR/logs/          SLURM .out/.err
+#   OUTPUT_DIR/block_outputs/ per-block .npz + .gpkg
+#   OUTPUT_DIR/final_outputs/ tile-level .gpkg/.parquet/.npz/.tif
 #
 # Run on the login node:
 #   ./submit_tile.sh \
@@ -78,9 +85,14 @@ export THREADS="${THREADS:-2}"
 # Step-1 read storm. Set >= N_BLOCKS to effectively disable the cap.
 MAX_CONCURRENT="${MAX_CONCURRENT:-8}"
 
-# Each array task and the aggregator log to its own file under LOG_DIR.
+# Output layout under OUTPUT_DIR:
+#   logs/          SLURM .out/.err per block + the aggregator
+#   block_outputs/ per-block .npz + .gpkg (predict_block.py writes here)
+#   final_outputs/ tile-level .gpkg/.parquet/.npz/.tif (aggregate_tile.py)
 export LOG_DIR="${LOG_DIR:-${OUTPUT_DIR}/logs}"
-mkdir -p "$OUTPUT_DIR" "$LOG_DIR"
+export BLOCK_OUTPUT_DIR="${BLOCK_OUTPUT_DIR:-${OUTPUT_DIR}/block_outputs}"
+export FINAL_OUTPUT_DIR="${FINAL_OUTPUT_DIR:-${OUTPUT_DIR}/final_outputs}"
+mkdir -p "$OUTPUT_DIR" "$LOG_DIR" "$BLOCK_OUTPUT_DIR" "$FINAL_OUTPUT_DIR"
 
 # ── Discover block grid shape via a quick venv invocation ─────────────────
 # (Reads the HDF5 once on the login node; cheap — just opens attrs and
@@ -103,7 +115,9 @@ echo "Tile:           $TILE_ID"
 echo "HDF5:           $TILE_HDF5_PATH"
 echo "Block grid:     ${N_ROWS} x ${N_COLS}  ($N_BLOCKS blocks)"
 echo "Output dir:     $OUTPUT_DIR"
-echo "Log dir:        $LOG_DIR"
+echo "  logs:         $LOG_DIR"
+echo "  block out:    $BLOCK_OUTPUT_DIR"
+echo "  final out:    $FINAL_OUTPUT_DIR"
 echo "Target dates:   $TARGET_DATES"
 echo "Batch size:     $BATCH_SIZE"
 echo "Vote classes:   $VOTE_CLASSES"
@@ -151,5 +165,7 @@ AGGR_JOB_ID=$(
 echo "Submitted aggregator job: $AGGR_JOB_ID  (afterok:$ARRAY_JOB_ID)"
 echo
 echo "Watch with:  squeue -u \$USER"
-echo "Per-block logs: $LOG_DIR/predict_block_<task_id>.out"
-echo "Aggregator log: $LOG_DIR/aggregate.out"
+echo "Per-block logs:    $LOG_DIR/predict_block_<task_id>.out"
+echo "Aggregator log:    $LOG_DIR/aggregate.out"
+echo "Per-block outputs: $BLOCK_OUTPUT_DIR/  (.npz + .gpkg)"
+echo "Final outputs:     $FINAL_OUTPUT_DIR/  (.gpkg .parquet .npz .tif)"

@@ -3,7 +3,9 @@
 Runs once after all array tasks for a tile complete (gated by the SLURM
 `afterok` dependency in submit_tile.sh). Reads every
 `{TILE_ID}_block_*.gpkg` (per-block polygons) and `{TILE_ID}_block_*.npz`
-(per-block voted label maps) in `OUTPUT_DIR`, and writes:
+(per-block voted label maps) from `BLOCK_OUTPUT_DIR` (defaults to
+`OUTPUT_DIR`), and writes the tile-level outputs below into
+`FINAL_OUTPUT_DIR` (defaults to `OUTPUT_DIR`):
 
   - `{TILE_ID}_tile.gpkg` (PRIMARY) — one polygon per detected patch,
     class > 0. Patches straddling block boundaries are dissolved into a
@@ -260,22 +262,26 @@ def _write_dense_npz(out_path: str, *,
 
 def main() -> None:
     tile_id    = _required_env("TILE_ID")
-    output_dir = _required_env("OUTPUT_DIR")
-    # Master-level patch-area floor (m^2), applied after the cross-block
-    # merge. Larger than the per-block floor so a patch that cleared the
-    # block floor in pieces but is still small overall is pruned here.
+    # Read from BLOCK_OUTPUT_DIR, write to FINAL_OUTPUT_DIR
+    base_dir   = _required_env("OUTPUT_DIR")
+    block_dir  = os.environ.get("BLOCK_OUTPUT_DIR") or base_dir
+    output_dir = os.environ.get("FINAL_OUTPUT_DIR") or base_dir
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Master-level patch-area floor (m^2)
     min_tile_patch_m2 = float(os.environ.get("MIN_TILE_PATCH_M2", "5000"))
 
     t_total = time.perf_counter()
 
     # ── Discover all block shards for this tile ───────────────────────────
     pattern = f"{tile_id}_block_*.npz"
-    paths = sorted(Path(output_dir).glob(pattern))
+    paths = sorted(Path(block_dir).glob(pattern))
     if not paths:
         raise SystemExit(
-            f"[aggregate_tile] No shards matching {pattern} in {output_dir}"
+            f"[aggregate_tile] No shards matching {pattern} in {block_dir}"
         )
     print(f"Tile:        {tile_id}")
+    print(f"Block dir:   {block_dir}")
     print(f"Output dir:  {output_dir}")
     print(f"Found {len(paths)} block shards.")
 
@@ -391,11 +397,11 @@ def main() -> None:
     print("\nReading per-block polygons (.gpkg)...")
     t0 = time.perf_counter()
     gpkg_pattern = f"{tile_id}_block_*.gpkg"
-    gpkg_paths = sorted(Path(output_dir).glob(gpkg_pattern))
+    gpkg_paths = sorted(Path(block_dir).glob(gpkg_pattern))
     if not gpkg_paths:
         raise SystemExit(
             f"[aggregate_tile] No per-block polygons matching {gpkg_pattern} "
-            f"in {output_dir}. Did predict_block write .gpkg files?"
+            f"in {block_dir}. Did predict_block write .gpkg files?"
         )
     block_gdfs = [gpd.read_file(str(p), layer="detections") for p in gpkg_paths]
     # Concatenate; preserve CRS from the first non-empty frame.

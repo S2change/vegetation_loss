@@ -12,8 +12,12 @@ set them without re-templating Python source):
   Required
     TILE_HDF5_PATH    Path to the chip-chunked HDF5 for one tile.
     WEIGHTS_PATH      Path to the BACDM .pth checkpoint.
-    OUTPUT_DIR        Directory to write the voted .npz into.
+    OUTPUT_DIR        Base run directory (used as a fallback output location).
     TILE_ID           Tile name (e.g. T29TPG). Used in the .npz filename.
+  Optional
+    BLOCK_OUTPUT_DIR  Where to write the per-block .npz + .gpkg. Defaults to
+                      OUTPUT_DIR (submit_tile.sh sets it to
+                      OUTPUT_DIR/block_outputs).
     BLOCK_ROW         Block row index (0..N_BLOCK_ROWS-1).
     BLOCK_COL         Block col index (0..N_BLOCK_COLS-1).
     TARGET_DATES      Comma-separated YYYY-MM-DD list, e.g.
@@ -100,7 +104,9 @@ def _dates_env() -> np.ndarray:
 def main() -> None:
     hdf5_path     = _required_env("TILE_HDF5_PATH")
     weights_path  = _required_env("WEIGHTS_PATH")
-    output_dir    = _required_env("OUTPUT_DIR")
+    # Per-block .npz/.gpkg go to BLOCK_OUTPUT_DIR (submit_tile.sh sets this to
+    # OUTPUT_DIR/block_outputs); fall back to OUTPUT_DIR for standalone runs.
+    output_dir    = os.environ.get("BLOCK_OUTPUT_DIR") or _required_env("OUTPUT_DIR")
     tile_id       = _required_env("TILE_ID")
     block_row     = _int_env("BLOCK_ROW")
     block_col     = _int_env("BLOCK_COL")
@@ -127,6 +133,8 @@ def main() -> None:
             f"[predict_block] block=({block_row}, {block_col}) is out of "
             f"range for grid shape ({n_rows}, {n_cols}) of {hdf5_path}"
         )
+
+    os.makedirs(output_dir, exist_ok=True)
 
     print(f"Tile:           {tile_id}")
     print(f"HDF5:           {hdf5_path}")
