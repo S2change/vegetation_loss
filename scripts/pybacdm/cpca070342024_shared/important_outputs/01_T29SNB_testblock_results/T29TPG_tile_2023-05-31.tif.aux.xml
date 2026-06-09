@@ -1,0 +1,13 @@
+<PAMDataset>
+  <PAMRasterBand band="1">
+    <Description>voted_labels_2023-05-31</Description>
+    <Metadata>
+      <MDI key="STATISTICS_APPROXIMATE">YES</MDI>
+      <MDI key="STATISTICS_MAXIMUM">2</MDI>
+      <MDI key="STATISTICS_MEAN">1.759748427673</MDI>
+      <MDI key="STATISTICS_MINIMUM">1</MDI>
+      <MDI key="STATISTICS_STDDEV">0.42723618096017</MDI>
+      <MDI key="STATISTICS_VALID_PERCENT">0.1516</MDI>
+    </Metadata>
+  </PAMRasterBand>
+</PAMDataset>
