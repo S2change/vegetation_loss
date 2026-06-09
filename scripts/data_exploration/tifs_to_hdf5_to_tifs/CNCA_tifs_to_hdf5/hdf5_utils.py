@@ -23,6 +23,8 @@ FOLDER_PT_MASKS = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testes_cnca_fil
 FOLDER_HDF5 = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testes_cnca_filtar_hdf5_nuvems\exemplos_geotiff_CNCA\hdf5"
 
 # Date filters
+# create_hdf5.py uses MIN_DATE and MAX_DATE to create the original hdf5 file 
+# append_hdf5.py overwrites MIN_DATE as the most recent date in the existing hdf5 file
 MIN_DATE = None #date(2025, 1, 1) 
 MAX_DATE = None #date(2025,6,30)
 
