@@ -14,7 +14,7 @@
 
 - File to edit if constants need to be changed: `hdf5_utils.py`. It includes configuration constants (e.g. `TILE_NAMES`, `MIN_DATE`, `MAX_DATE`, `MAX_CLOUD_COVER_PT`), folders, etc. It also contains function `parse_filter_sort_files` that estimates `pt_cloud_cover` for each timestamp and applies the (by default 60%) maximum cloud cover filter (over the portuguese territory) and the date filter.
 - File to be executed but **not to be edited**: `create_hdf5.py`. This script imports `hdf5_utils.py` and  uses `parse_filter_sort_files` to filter images to include in hdf5 file. Then, it aggregates geotiff files with identical timestamps and creates one hdf5 file for each tile.
-- File to be executed but **not to be edited**: `append_hdf5.py`. The goal is to add new (later) timestamps to an existing `hdf5` file. This script imports `hdf5_utils.py` and  uses `parse_filter_sort_files` to filter images to include in hdf5 file. Then, it aggregates geotiff files with identical timestamps and creates one hdf5 file for each tile.
+- File to be executed but **not to be edited**: `append_hdf5.py`. The goal is to add new (later) timestamps to an existing `hdf5` file. This script imports `hdf5_utils.py` and  uses `parse_filter_sort_files` to filter images to include in hdf5 file. Then, it aggregates geotiff files with identical timestamps and appends those timestamps to the existing hdf5 file for each tile.
 
 
 # File Structure
