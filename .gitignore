@@ -15,3 +15,5 @@ scripts/chips/first_draft_chip.py
 scripts/chips/copy_chips_S2_dates.py
 
 smallfile_T29TQG_6bands.h5
+
+scripts/pybacdm/cpca070342024_shared/predict_pipeline/small_test_area/T29SNB_testblock.h5
