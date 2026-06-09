@@ -1,4 +1,4 @@
-# version June 3, 2026
+# version June 9, 2026
 
 - Geotiff files for the same day (yyyy-mm-dd) are aggregated into a single timestamp. Multiple files can correspont to distinct `geotiff` subfiles (same acquisition date and distinct processing date) and/or to `geotiff` files for the same day (e.g. S2A and S2B separated by ~10 minutes);
 - Output hdf5 files have fields: xs, ys, ts, original_timestamps, S2_filename, S2_original_filenames (all aggregated files), cloud_cover_pt, pixel_count_pt, clear_pixel_count_pt, count_orbit_pixels_pt,  with `cloud_cover_pt = (1-clear_pixel_count_pt/count_orbit_pixels_pt)`, where `clear_pixel_count_pt` is the number of pixels that satisfy 3 conditions: within the orbit, within the territory (pt), and not masked as clouds:
@@ -14,6 +14,8 @@
 
 - File to edit if constants need to be changed: `hdf5_utils.py`. It includes configuration constants (e.g. `TILE_NAMES`, `MIN_DATE`, `MAX_DATE`, `MAX_CLOUD_COVER_PT`), folders, etc. It also contains function `parse_filter_sort_files` that estimates `pt_cloud_cover` for each timestamp and applies the (by default 60%) maximum cloud cover filter (over the portuguese territory) and the date filter.
 - File to be executed but **not to be edited**: `create_hdf5.py`. This script imports `hdf5_utils.py` and  uses `parse_filter_sort_files` to filter images to include in hdf5 file. Then, it aggregates geotiff files with identical timestamps and creates one hdf5 file for each tile.
+- File to be executed but **not to be edited**: `append_hdf5.py`. The goal is to add new (later) timestamps to an existing `hdf5` file. This script imports `hdf5_utils.py` and  uses `parse_filter_sort_files` to filter images to include in hdf5 file. Then, it aggregates geotiff files with identical timestamps and creates one hdf5 file for each tile.
+
 
 # File Structure
 
