@@ -51,8 +51,11 @@ def append_tile(tile, h5_filename):
     valid = sort_order >= 0
 
     # ── Find new timestamps ────────────────────────────────────────────────────
+    # Use the day after the last stored timestamp so the scan only returns
+    # strictly newer acquisitions, keeping the time axis chronologically ordered.
+    tile_min_date = date.fromordinal(last_ordinal + 1) if last_ordinal > 0 else MIN_DATE
     all_metadata = parse_filter_sort_files(
-        FOLDER_S2, FOLDER_PT_MASKS, tile, MIN_DATE, MAX_DATE
+        FOLDER_S2, FOLDER_PT_MASKS, tile, tile_min_date, MAX_DATE
     )
     if not all_metadata:
         print(f"  No files found for tile {tile}.")
@@ -66,15 +69,6 @@ def append_tile(tile, h5_filename):
     # new_metadata is already sorted by timestamp_ms (from parse_filter_sort_files)
     n_new = len(new_metadata)
     print(f"  {n_new} new timestamp(s) to append")
-
-    first_new_ordinal = new_metadata[0]['ordinal']
-    if first_new_ordinal < last_ordinal:
-        print(
-            f"  WARNING: earliest new timestamp ({date.fromordinal(first_new_ordinal)}) "
-            f"predates last existing timestamp ({date.fromordinal(last_ordinal)}). "
-            f"Appending anyway — the ts array will not be strictly sorted. "
-            f"Consider recreating the file with create_hdf5.py."
-        )
 
     # ── Prepare PT mask window (same as create_hdf5.py) ───────────────────────
     m0 = all_metadata[0]
