@@ -53,6 +53,9 @@ from composite_shift_chips import (
     create_before_after_composites,
     generate_shifted_chips,
 )
+# Imported from the submodule (not the package __init__) so rasterio stays off
+# the core composite import path; only pulled in when actually writing TIFs.
+from composite_shift_chips.write_composite_tifs import write_block_composite_tifs
 from postprocess import (
     chip_nw_pixel_offset,
     VoteAccumulator,
@@ -174,6 +177,31 @@ def main() -> None:
     print(f"  valid dates: {n_valid} / {len(target_dates)}")
     print(f"  Step 3 time: {time.perf_counter() - t0:.2f} s")
     print(f"[RSS] After composites:                {rss_mb():7.1f} MB")
+
+    # ── Optional: dump before/after composite GeoTIFFs for inspection ──────
+    # Gated by WRITE_COMPOSITE_TIFS (default off) — these are 10-band 1280x1280
+    # rasters per (date, side), not needed for the production pipeline. Written
+    # to a dedicated composite_tifs/ dir so they never collide with the
+    # aggregator's block_outputs glob.
+    if os.environ.get("WRITE_COMPOSITE_TIFS", "0") not in ("0", "", "false", "False"):
+        comp_dir = os.environ.get(
+            "COMPOSITE_TIF_DIR",
+            os.path.join(os.environ.get("OUTPUT_DIR", output_dir),
+                         "composite_tifs"),
+        )
+        print(f"\nWriting composite GeoTIFFs -> {comp_dir} ...")
+        t0 = time.perf_counter()
+        comp_paths = write_block_composite_tifs(
+            composites, target_dates, valid_dates_mask,
+            out_dir=comp_dir, tile_id=tile_id,
+            block_row=block_row, block_col=block_col,
+            world_origin_x=position.world_origin_x,
+            world_origin_y=position.world_origin_y,
+            pixel_res=position.pixel_res,
+            crs=_read_hdf5_crs(hdf5_path),
+        )
+        print(f"  wrote {len(comp_paths)} composite TIF(s) "
+              f"in {time.perf_counter() - t0:.2f} s")
 
     if n_valid == 0:
         # Empty output is still useful: aggregator can detect missing/empty
