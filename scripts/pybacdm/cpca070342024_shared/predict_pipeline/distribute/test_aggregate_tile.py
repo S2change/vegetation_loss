@@ -435,6 +435,52 @@ def test_geotiff_per_date_written():
     print("  GeoTIFF: per-date file, dims, transform, NoData, descriptions — OK")
 
 
+def test_block_grid_outline_written():
+    """The debug block-grid layer has one rectangle per block, correctly
+    placed and attributed, and does NOT collide with the per-block glob."""
+    with tempfile.TemporaryDirectory() as tmpd:
+        tmpd = Path(tmpd)
+        n_rows, n_cols, n_dates = 2, 3, 1
+        target_dates = np.array([738887], dtype=np.int64)
+        for r in range(n_rows):
+            for c in range(n_cols):
+                _write_block(tmpd, r, c, _empty_block_labels(n_dates=n_dates),
+                             target_dates)
+
+        # Run twice: the second run proves the grid file isn't swept into the
+        # per-block glob (the bug the *_blockgrid name avoids).
+        assert _run_aggregator(tmpd).returncode == 0
+        res = _run_aggregator(tmpd)
+        assert res.returncode == 0, res.stderr
+
+        grid_path = tmpd / f"{TILE_ID}_blockgrid.gpkg"
+        assert grid_path.exists(), "block-grid .gpkg not written"
+        grid = gpd.read_file(str(grid_path), layer="block_grid")
+
+        # One rectangle per block.
+        assert len(grid) == n_rows * n_cols
+        assert set(grid["block_label"]) == {
+            f"{r:03d}_{c:03d}" for r in range(n_rows) for c in range(n_cols)
+        }
+        # All origins on-grid (fixtures use exact grid origins).
+        assert bool(grid["origin_ok"].all())
+        assert (grid["origin_drift_m"] == 0).all()
+
+        # Geometry of block (1,2) matches its LIVE extent in world coords.
+        row = grid[grid["block_label"] == "001_002"].iloc[0]
+        ox, oy = _block_origin(1, 2)
+        side = CHIP_SIZE * PIXEL_RES
+        minx, miny, maxx, maxy = row.geometry.bounds
+        assert abs(minx - ox) < 1e-6 and abs(maxy - oy) < 1e-6
+        assert abs(maxx - (ox + side)) < 1e-6
+        assert abs(miny - (oy - side)) < 1e-6
+
+        # The grid file must NOT be picked up as a per-block detections file.
+        block_glob = sorted(tmpd.glob(f"{TILE_ID}_block_*.gpkg"))
+        assert grid_path not in block_glob
+    print("  block-grid: one rectangle per block, placed + attributed — OK")
+
+
 def main():
     print("Running aggregate_tile tests...")
     test_full_grid_stitches_into_dense_npz()
@@ -447,6 +493,7 @@ def main():
     test_master_size_filter_prunes_small_patch()
     test_master_filter_measures_boundary_patch_at_full_size()
     test_geotiff_per_date_written()
+    test_block_grid_outline_written()
     print("All aggregate_tile tests passed.")
 
 

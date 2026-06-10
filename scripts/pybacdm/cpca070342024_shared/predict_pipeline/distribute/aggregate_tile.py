@@ -18,6 +18,10 @@ Runs once after all array tasks for a tile complete (gated by the SLURM
     uint8 label map (blocks stitched into one canvas) + metadata.
   - `{TILE_ID}_tile_{YYYY-MM-DD}.tif` (GIS raster) — one LZW GeoTIFF per
     date, class 0 as NoData.
+  - `{TILE_ID}_block_grid.gpkg` (DEBUG) — one rectangle per block's LIVE
+    extent (layer `block_grid`), drawn from each block's recorded
+    world_origin. Overlay on the detections in QGIS to inspect block seams;
+    `origin_drift_m` / `origin_ok` flag any block whose origin left the grid.
 
 Boundary merge: LIVE areas tile with no gap, so a patch crossing a block
 seam yields two edge-touching polygons in adjacent blocks. unary_union
@@ -237,6 +241,63 @@ def _write_geotiffs_per_date(output_dir: str,
             dst.set_band_description(1, f"voted_labels_{iso}")
         paths.append(out_path)
     return paths
+
+
+def _write_block_grid(out_path: str,
+                      blocks: list[dict],
+                      tile_id: str,
+                      block_h: int,
+                      block_w: int,
+                      pixel_res: float,
+                      tile_origin_x: float,
+                      tile_origin_y: float,
+                      crs: CRS | None) -> int:
+    """Write a debug vector layer outlining each block's LIVE extent.
+
+    One rectangle polygon per block, so you can overlay it on the tile
+    detections in QGIS and eyeball where blocks meet — handy for spotting
+    aggregation seams, gaps, or a misplaced block.
+
+    The rectangle is drawn from each block's OWN recorded world_origin (not
+    just the computed grid), so a block whose origin drifted shows up as a
+    rectangle that doesn't line up with its neighbours — exactly the "is
+    anything strange" check. `origin_drift_m` records the offset from the
+    expected grid position; `expected_*` flags whether the recorded origin
+    matched the grid (within 0.5 m).
+
+    Returns the number of block outlines written.
+    """
+    from shapely.geometry import box
+
+    block_w_m = block_w * pixel_res
+    block_h_m = block_h * pixel_res
+
+    rows: list[dict] = []
+    for b in blocks:
+        r = int(b["block_row"])
+        c = int(b["block_col"])
+        ox = float(b["world_origin_x"])
+        oy = float(b["world_origin_y"])
+        expected_x = tile_origin_x + c * block_w_m
+        expected_y = tile_origin_y - r * block_h_m
+        drift = float(np.hypot(ox - expected_x, oy - expected_y))
+        # LIVE rectangle: NW corner (ox, oy), extends east + south.
+        geom = box(ox, oy - block_h_m, ox + block_w_m, oy)
+        rows.append({
+            "tile_id": tile_id,
+            "block_row": r,
+            "block_col": c,
+            "block_label": f"{r:03d}_{c:03d}",
+            "world_origin_x": ox,
+            "world_origin_y": oy,
+            "origin_drift_m": round(drift, 3),
+            "origin_ok": bool(drift <= 0.5),
+            "geometry": geom,
+        })
+
+    grid_gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=crs)
+    grid_gdf.to_file(out_path, layer="block_grid", driver="GPKG")
+    return len(rows)
 
 
 def _write_dense_npz(out_path: str, *,
@@ -475,6 +536,29 @@ def main() -> None:
           f"(total {total_tif_bytes / 1024:.1f} KB):")
     for p in tif_paths:
         print(f"    {p}  ({os.path.getsize(p) / 1024:.1f} KB)")
+
+    # ── Step D: block-grid outline (debug overlay) ────────────────────────
+    # One rectangle per block's LIVE extent so you can overlay it on the
+    # detections in QGIS and check where blocks meet / spot a misplaced block.
+    # Note: NOT named "*_block_*" — that pattern is the per-block-polygon glob
+    # (f"{tile_id}_block_*.gpkg"); a name collision would make a rerun read
+    # this debug layer as if it were block detections.
+    grid_path = os.path.join(output_dir, f"{tile_id}_blockgrid.gpkg")
+    n_grid = _write_block_grid(
+        grid_path, blocks, tile_id, block_h, block_w, ref_pres,
+        tile_origin_x, tile_origin_y, crs,
+    )
+    n_drift = sum(1 for b in blocks
+                  if np.hypot(
+                      float(b["world_origin_x"])
+                      - (tile_origin_x + int(b["block_col"]) * block_w * ref_pres),
+                      float(b["world_origin_y"])
+                      - (tile_origin_y - int(b["block_row"]) * block_h * ref_pres),
+                  ) > 0.5)
+    print(f"\nWrote {grid_path}")
+    print(f"  ({n_grid} block outlines, layer 'block_grid'"
+          + (f"; {n_drift} with origin drift > 0.5 m — check those seams"
+             if n_drift else "; all origins on-grid") + ")")
 
     print(f"\nTotal aggregate time: {time.perf_counter() - t_total:.2f} s")
 
