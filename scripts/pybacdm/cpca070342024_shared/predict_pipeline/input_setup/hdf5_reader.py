@@ -121,59 +121,58 @@ def _compute_block_world_origin(h5f: h5py.File,
     """Compute UTM (x, y) of the LIVE area's NW corner (chip (chip_y_start,
     chip_x_start) pixel (0, 0)).
 
-    Strategy: find any present chip near the live area, read one valid pixel
-    from its xs_new/ys_new, and extrapolate back to the live area's NW
-    corner using chip-grid offsets + pixel_res. Robust to whichever
-    anchoring the rechunker chose.
+    Primary strategy: the tile is a regular UTM chip grid, so the origin is
+    fully determined by the tile's `bounds_left`/`bounds_top` attributes and
+    the chip-grid index:
+
+        x = bounds_left + chip_x_start * chip_size * pixel_res
+        y = bounds_top  - chip_y_start * chip_size * pixel_res   (north -> +y)
+
+    This is exact and drift-proof. The previous approach extrapolated from the
+    "first valid pixel" of a present chip, which silently broke on partial
+    chips whose NODATA (-9999) pixels are scattered *within* rows: argmax(valid)
+    then lands on a pixel whose flat index doesn't map to its true (row, col)
+    under the row-major assumption, producing per-block origin drift of up to
+    several km. (Verified: full chips spread 0 m, ragged partial chips spread
+    ~4-5 km.) Using the bounds attrs avoids touching individual pixels at all.
+
+    Fallback: if the tile lacks bounds_left/bounds_top (older files), fall back
+    to the legacy pixel-extrapolation — but only off a FULL chip (chip_pixel_
+    count == CHIP_PIXELS) so the scattered-NODATA bug can't bite, walking from
+    that chip's grid position to the live NW corner.
     """
+    left = h5f.attrs.get("bounds_left")
+    top = h5f.attrs.get("bounds_top")
+    if left is not None and top is not None:
+        block_origin_x = float(left) + chip_x_start * chip_size * pixel_res
+        block_origin_y = float(top) - chip_y_start * chip_size * pixel_res
+        return block_origin_x, block_origin_y
+
+    # ── Fallback for files without bounds attrs ───────────────────────────
+    # Use a FULL chip only, so the row-major (local_row, local_col) mapping is
+    # exact (no scattered NODATA). Read chip_pixel_count to find one.
+    if not chip_lookup:
+        raise ValueError("HDF5 has no chips; cannot derive a world origin.")
     xs_new = h5f["xs_new"]   # type: ignore[index]
     ys_new = h5f["ys_new"]   # type: ignore[index]
+    cpc = h5f["chip_pixel_count"][:] if "chip_pixel_count" in h5f else None  # type: ignore[index]
 
-    # Try to find a present chip inside the live 4x4 first.
-    anchor_chip_idx = None
-    anchor_chip_y = anchor_chip_x = None
-    for r in range(LIVE_ROWS):
-        for c in range(LIVE_COLS):
-            cy, cx = chip_y_start + r, chip_x_start + c
-            if (cy, cx) in chip_lookup:
-                anchor_chip_idx = chip_lookup[(cy, cx)]
-                anchor_chip_y, anchor_chip_x = cy, cx
-                break
-        if anchor_chip_idx is not None:
+    anchor = None  # (chip_y, chip_x, flat_idx)
+    for (cy, cx), idx in chip_lookup.items():
+        if cpc is None or int(cpc[idx]) == CHIP_PIXELS:
+            anchor = (cy, cx, idx)
             break
-
-    # Fall back to any chip in the file (live area was entirely off-tile).
-    if anchor_chip_idx is None:
-        if not chip_lookup:
-            raise ValueError("HDF5 has no chips; cannot derive a world origin.")
-        (anchor_chip_y, anchor_chip_x), anchor_chip_idx = next(iter(chip_lookup.items()))
-    assert anchor_chip_y is not None and anchor_chip_x is not None
-
-    # Read just this chip's xs/ys slab; find the first valid pixel.
-    pix_start = anchor_chip_idx * CHIP_PIXELS
-    pix_end = pix_start + CHIP_PIXELS
-    xs_slab: np.ndarray = xs_new[pix_start:pix_end]   # type: ignore[assignment]
-    ys_slab: np.ndarray = ys_new[pix_start:pix_end]   # type: ignore[assignment]
-    valid = (xs_slab != -9999) & (ys_slab != -9999)
-    if not valid.any():
+    if anchor is None:
         raise ValueError(
-            f"Anchor chip ({anchor_chip_y},{anchor_chip_x}) has no valid "
-            f"xs_new/ys_new pixels; cannot derive a world origin."
+            "No bounds_left/bounds_top attrs and no full chip to anchor a "
+            "world origin from; cannot place this block. Re-export the tile "
+            "with bounds attributes."
         )
-    first_valid = int(np.argmax(valid))
-    anchor_x = float(xs_slab[first_valid])
-    anchor_y = float(ys_slab[first_valid])
-
-    # Local pixel offsets inside the anchor chip (row-major, like reshape(H, W)).
-    local_row = first_valid // chip_size
-    local_col = first_valid %  chip_size
-
-    # Walk back to the NW corner of the anchor chip.
-    anchor_chip_origin_x = anchor_x - local_col * pixel_res
-    anchor_chip_origin_y = anchor_y + local_row * pixel_res   # UTM north -> +y
-
-    # Walk from the anchor chip's NW corner to the live area's NW corner
-    # (chip at chip_y_start, chip_x_start).
+    anchor_chip_y, anchor_chip_x, anchor_chip_idx = anchor
+    pix_start = anchor_chip_idx * CHIP_PIXELS
+    # Full chip -> pixel (0,0) is flat index 0 and is valid.
+    anchor_chip_origin_x = float(xs_new[pix_start])       # type: ignore[index]
+    anchor_chip_origin_y = float(ys_new[pix_start])       # type: ignore[index]
     block_origin_x = anchor_chip_origin_x - (anchor_chip_x - chip_x_start) * chip_size * pixel_res
     block_origin_y = anchor_chip_origin_y + (anchor_chip_y - chip_y_start) * chip_size * pixel_res
     return block_origin_x, block_origin_y
