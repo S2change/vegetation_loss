@@ -38,6 +38,8 @@
 #   CLOSING_RADIUS=3    post-vote morphological close disk radius (0 = off).
 #   MIN_PATCH_M2=2500   block-level patch-area floor (m^2), firm.
 #   MIN_TILE_PATCH_M2=5000  master patch-area floor (m^2), post cross-block merge.
+#   MAX_COMPOSITE_DAYS  symmetric day-window around each break date for
+#                       before/after compositing (unset = unbounded).
 #
 # All KEY=VALUE pairs become env vars that the array tasks and aggregator
 # inherit (sbatch --export=ALL is the default — we use that).
@@ -69,6 +71,13 @@ export VOTE_THRESHOLD="${VOTE_THRESHOLD:-2}"
 export CLOSING_RADIUS="${CLOSING_RADIUS:-3}"
 export MIN_PATCH_M2="${MIN_PATCH_M2:-2500}"
 export MIN_TILE_PATCH_M2="${MIN_TILE_PATCH_M2:-5000}"
+
+# Symmetric day-window (days) around each break date for before/after
+# compositing. Unset = unbounded (any timestep before/after the target). Only
+# exported when the caller sets it, so predict_block sees None when unset.
+if [[ -n "${MAX_COMPOSITE_DAYS:-}" ]]; then
+    export MAX_COMPOSITE_DAYS
+fi
 
 # CPU threads per task. Exported so the array wrapper sizes its thread pools
 # to this; also passed as --cpus-per-task below so the SLURM allocation has
@@ -125,6 +134,7 @@ echo "Vote threshold: $VOTE_THRESHOLD"
 echo "Closing radius: $CLOSING_RADIUS"
 echo "Block floor:    $MIN_PATCH_M2 m^2"
 echo "Tile floor:     $MIN_TILE_PATCH_M2 m^2"
+echo "Max comp. days: ${MAX_COMPOSITE_DAYS:-unbounded}"
 echo "Threads/task:   $THREADS  (= --cpus-per-task)"
 echo "Max concurrent: $MAX_CONCURRENT  (cores in use <= THREADS*MAX_CONCURRENT = $((THREADS * MAX_CONCURRENT)))"
 echo "Weights:        $WEIGHTS_PATH"

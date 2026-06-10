@@ -117,6 +117,11 @@ def main() -> None:
     batch_size    = int(os.environ.get("BATCH_SIZE", "8"))
     vote_classes  = _classes_env()
     vote_threshold = int(os.environ.get("VOTE_THRESHOLD", "2"))
+    # Symmetric day-window around the break date for before/after compositing.
+    # Unset/empty = unbounded (use any timestep before/after the target).
+    _mcd_env = os.environ.get("MAX_COMPOSITE_DAYS")
+    max_composite_days = (int(_mcd_env)
+                          if _mcd_env not in (None, "") else None)
     # Post-vote morphological close radius (disk). Per-class radii come from
     # AAA_Configs.CLOSING_RADII (Cuts → 3, Fires → 1); leaving CLOSING_RADIUS
     # unset uses those. Setting CLOSING_RADIUS forces one radius for every
@@ -146,6 +151,7 @@ def main() -> None:
     print(f"Weights:        {weights_path}")
     print(f"Output dir:     {output_dir}")
     print(f"Target dates:   {[date.fromordinal(int(d)).isoformat() for d in target_dates]}")
+    print(f"Max comp. days: {max_composite_days if max_composite_days is not None else 'unbounded'}")
     print(f"Batch size:     {batch_size}")
     print(f"Vote classes:   {vote_classes}")
     print(f"Vote threshold: {vote_threshold}")
@@ -170,6 +176,7 @@ def main() -> None:
     t0 = time.perf_counter()
     composites, valid_dates_mask = create_before_after_composites(
         block, ts, target_dates, verbose=True,
+        max_days_from_break=max_composite_days,
     )
     n_valid = int(valid_dates_mask.sum())
     print(f"  composites: shape={composites.shape}  dtype={composites.dtype}  "
