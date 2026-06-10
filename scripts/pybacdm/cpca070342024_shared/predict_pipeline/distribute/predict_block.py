@@ -14,19 +14,28 @@ set them without re-templating Python source):
     WEIGHTS_PATH      Path to the BACDM .pth checkpoint.
     OUTPUT_DIR        Base run directory (used as a fallback output location).
     TILE_ID           Tile name (e.g. T29TPG). Used in the .npz filename.
-  Optional
-    BLOCK_OUTPUT_DIR  Where to write the per-block .npz + .gpkg. Defaults to
-                      OUTPUT_DIR (submit_tile.sh sets it to
-                      OUTPUT_DIR/block_outputs).
     BLOCK_ROW         Block row index (0..N_BLOCK_ROWS-1).
     BLOCK_COL         Block col index (0..N_BLOCK_COLS-1).
     TARGET_DATES      Comma-separated YYYY-MM-DD list, e.g.
                       "2025-11-15,2025-12-01".
 
   Optional
-    BATCH_SIZE         Model batch size (default 8).
-    VOTE_CLASSES       Comma-separated non-bg class IDs (default "1,2").
-    VOTE_THRESHOLD     Min votes per pixel to keep a detection (default 2).
+    BLOCK_OUTPUT_DIR  Where to write the per-block .npz + .gpkg. Defaults to
+                      OUTPUT_DIR (submit_tile.sh sets it to
+                      OUTPUT_DIR/block_outputs).
+    BATCH_SIZE        Model batch size (default 8).
+    VOTE_CLASSES      Comma-separated non-bg class IDs (default "1,2").
+    VOTE_THRESHOLD    Min votes per pixel to keep a detection (default 2).
+    CLOSING_RADIUS    Post-vote close radius; unset = per-class
+                      AAA_Configs.CLOSING_RADII, 0 = off (default unset).
+    MIN_PATCH_M2      Block-level patch-area floor in m^2 (default 2500).
+    MAX_COMPOSITE_DAYS  Symmetric day-window around the break date for
+                      before/after compositing (unset = unbounded).
+
+  Optional — debug composite GeoTIFFs
+    WRITE_COMPOSITE_TIFS    Set to 1 to create the before & after time-
+                      composites for each valid target date. Off by default.
+    COMPOSITE_TIF_DIR       Defaults to OUTPUT_DIR/composite_tifs
 
 Everything else (model architecture, ghost geometry, etc.) is fixed by
 the modules being imported.

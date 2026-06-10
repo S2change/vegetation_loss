@@ -40,6 +40,9 @@
 #   MIN_TILE_PATCH_M2=5000  master patch-area floor (m^2), post cross-block merge.
 #   MAX_COMPOSITE_DAYS  symmetric day-window around each break date for
 #                       before/after compositing (unset = unbounded).
+#   WRITE_COMPOSITE_TIFS=1  dump per-block before/after time-composites as
+#                       10-band GeoTIFFs (debug/inspection only; off by
+#                       default).
 #
 # All KEY=VALUE pairs become env vars that the array tasks and aggregator
 # inherit (sbatch --export=ALL is the default — we use that).
