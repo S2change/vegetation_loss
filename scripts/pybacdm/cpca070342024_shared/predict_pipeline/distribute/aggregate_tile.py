@@ -75,24 +75,32 @@ def _required_env(name: str) -> str:
 def _stitch_blocks(blocks: list[dict], n_rows: int, n_cols: int,
                    block_h: int, block_w: int, n_dates: int,
                    tile_origin_x: float, tile_origin_y: float,
-                   pixel_res: float) -> np.ndarray:
-    """Place each block's labels at its (block_row, block_col) cell in
-    the tile canvas. Warns on per-block world-origin drift > 0.5 m."""
+                   pixel_res: float,
+                   row_offset: int = 0, col_offset: int = 0) -> np.ndarray:
+    """Place each block's labels at its cell in the (cropped) tile canvas.
+
+    `row_offset`/`col_offset` are the block-grid coords of the canvas's
+    top-left cell (the NW-most processed block) when only a sub-rectangle of
+    the tile was processed; a block at grid (r, c) lands at canvas cell
+    (r - row_offset, c - col_offset). For a full-tile run both offsets are 0.
+    tile_origin_x/y is the world NW corner of that top-left cell. Warns on
+    per-block world-origin drift > 0.5 m.
+    """
     labels = np.zeros(
         (n_dates, n_rows * block_h, n_cols * block_w), dtype=np.uint8,
     )
     block_w_m = block_w * pixel_res
     block_h_m = block_h * pixel_res
     for b in blocks:
-        r = int(b["block_row"])
-        c = int(b["block_col"])
+        r = int(b["block_row"]) - row_offset
+        c = int(b["block_col"]) - col_offset
         expected_x = tile_origin_x + c * block_w_m
         expected_y = tile_origin_y - r * block_h_m
         got_x = float(b["world_origin_x"])
         got_y = float(b["world_origin_y"])
         if abs(got_x - expected_x) > 0.5 or abs(got_y - expected_y) > 0.5:
-            print(f"  [warn] block ({r},{c}) world origin off: "
-                  f"expected ({expected_x}, {expected_y}), "
+            print(f"  [warn] block ({b['block_row']},{b['block_col']}) world "
+                  f"origin off: expected ({expected_x}, {expected_y}), "
                   f"got ({got_x}, {got_y})")
         y0 = r * block_h
         x0 = c * block_w
@@ -251,7 +259,9 @@ def _write_block_grid(out_path: str,
                       pixel_res: float,
                       tile_origin_x: float,
                       tile_origin_y: float,
-                      crs: CRS | None) -> int:
+                      crs: CRS | None,
+                      row_offset: int = 0,
+                      col_offset: int = 0) -> int:
     """Write a debug vector layer outlining each block's LIVE extent.
 
     One rectangle polygon per block, so you can overlay it on the tile
@@ -278,8 +288,9 @@ def _write_block_grid(out_path: str,
         c = int(b["block_col"])
         ox = float(b["world_origin_x"])
         oy = float(b["world_origin_y"])
-        expected_x = tile_origin_x + c * block_w_m
-        expected_y = tile_origin_y - r * block_h_m
+        # tile_origin is the NW-most processed block's corner; offset r/c to it.
+        expected_x = tile_origin_x + (c - col_offset) * block_w_m
+        expected_y = tile_origin_y - (r - row_offset) * block_h_m
         drift = float(np.hypot(ox - expected_x, oy - expected_y))
         # LIVE rectangle: NW corner (ox, oy), extends east + south.
         geom = box(ox, oy - block_h_m, ox + block_w_m, oy)
@@ -347,30 +358,53 @@ def main() -> None:
     print(f"Found {len(paths)} block shards.")
 
     # ── First pass: read all, validate consistency, infer grid extent ─────
+    # The processed region may be a SUB-RECTANGLE of the tile (submit_tile.sh's
+    # BLOCK_ROWS/BLOCK_COLS), so the grid we stitch spans the MIN..MAX of the
+    # present blocks — not 0..max. Outputs are cropped to that sub-rectangle.
     blocks: list[dict] = []
-    max_row = -1
-    max_col = -1
+    rows_seen: list[int] = []
+    cols_seen: list[int] = []
     for p in paths:
         d = read_voted_block(str(p))
         blocks.append(d)
-        max_row = max(max_row, int(d["block_row"]))
-        max_col = max(max_col, int(d["block_col"]))
+        rows_seen.append(int(d["block_row"]))
+        cols_seen.append(int(d["block_col"]))
 
-    n_rows = max_row + 1
-    n_cols = max_col + 1
+    min_row, max_row = min(rows_seen), max(rows_seen)
+    min_col, max_col = min(cols_seen), max(cols_seen)
+
+    # If submit_tile.sh selected a sub-region, cross-check it matches what we
+    # actually found, so a half-finished selection fails loudly.
+    def _env_int(name):
+        v = os.environ.get(name)
+        return int(v) if v not in (None, "") else None
+    e_rlo = _env_int("PROCESS_ROW_LO"); e_rhi = _env_int("PROCESS_ROW_HI")
+    e_clo = _env_int("PROCESS_COL_LO"); e_chi = _env_int("PROCESS_COL_HI")
+    if None not in (e_rlo, e_rhi, e_clo, e_chi):
+        if (min_row, max_row, min_col, max_col) != (e_rlo, e_rhi, e_clo, e_chi):
+            raise SystemExit(
+                f"[aggregate_tile] Processed blocks span rows "
+                f"{min_row}-{max_row} cols {min_col}-{max_col}, but the "
+                f"selection requested rows {e_rlo}-{e_rhi} cols {e_clo}-{e_chi}."
+                f" Some selected blocks are missing — re-run them."
+            )
+
+    n_rows = max_row - min_row + 1
+    n_cols = max_col - min_col + 1
     expected_n = n_rows * n_cols
     if len(blocks) != expected_n:
         present = {(int(b["block_row"]), int(b["block_col"])) for b in blocks}
         missing = [
             (r, c)
-            for r in range(n_rows) for c in range(n_cols)
+            for r in range(min_row, max_row + 1)
+            for c in range(min_col, max_col + 1)
             if (r, c) not in present
         ]
         raise SystemExit(
             f"[aggregate_tile] Block grid is incomplete: found "
-            f"{len(blocks)} shards, expected {expected_n} for a "
-            f"{n_rows}x{n_cols} grid.\nMissing: {missing}\n"
-            f"Re-run those tasks before aggregating."
+            f"{len(blocks)} shards, expected {expected_n} for the processed "
+            f"rectangle rows {min_row}-{max_row} cols {min_col}-{max_col}.\n"
+            f"Missing: {missing}\nRe-run those tasks before aggregating."
         )
 
     # Consistency: same target_dates / classes / threshold / pixel_res /
@@ -418,21 +452,28 @@ def main() -> None:
     tile_h = n_rows * block_h
     tile_w = n_cols * block_w
 
-    print(f"Block grid:  {n_rows} x {n_cols}  (each block {block_h}x{block_w})")
+    sub = "" if (min_row, min_col) == (0, 0) and (n_rows, n_cols) == \
+        (max_row + 1, max_col + 1) else \
+        f"  [sub-region rows {min_row}-{max_row} cols {min_col}-{max_col}]"
+    print(f"Block grid:  {n_rows} x {n_cols}  (each block {block_h}x{block_w}){sub}")
     print(f"Tile size:   {tile_h} x {tile_w}  ({n_dates} target date(s))")
     print(f"Classes:     {ref_classes.tolist()}")
     print(f"Threshold:   {ref_threshold}")
     print(f"Pixel res:   {ref_pres} m")
 
     # ── Stitch ────────────────────────────────────────────────────────────
+    # Origin = the NW-most processed block (min_row, min_col), not (0,0): the
+    # processed region may be a sub-rectangle, and the canvas is cropped to it.
     origin_block = next(
-        (b for b in blocks if int(b["block_row"]) == 0 and int(b["block_col"]) == 0),
+        (b for b in blocks
+         if int(b["block_row"]) == min_row and int(b["block_col"]) == min_col),
         None,
     )
     if origin_block is None:
         raise SystemExit(
-            "[aggregate_tile] No (0, 0) shard found — required to fix the "
-            "tile's world origin. Re-run that block."
+            f"[aggregate_tile] No ({min_row}, {min_col}) shard found — the "
+            f"NW-most processed block is required to fix the canvas world "
+            f"origin. Re-run that block."
         )
     tile_origin_x = float(origin_block["world_origin_x"])
     tile_origin_y = float(origin_block["world_origin_y"])
@@ -443,6 +484,7 @@ def main() -> None:
     labels = _stitch_blocks(
         blocks, n_rows, n_cols, block_h, block_w, n_dates,
         tile_origin_x, tile_origin_y, ref_pres,
+        row_offset=min_row, col_offset=min_col,
     )
     print(f"  Stitch time: {time.perf_counter() - t0:.2f} s")
 
@@ -547,13 +589,14 @@ def main() -> None:
     n_grid = _write_block_grid(
         grid_path, blocks, tile_id, block_h, block_w, ref_pres,
         tile_origin_x, tile_origin_y, crs,
+        row_offset=min_row, col_offset=min_col,
     )
     n_drift = sum(1 for b in blocks
                   if np.hypot(
                       float(b["world_origin_x"])
-                      - (tile_origin_x + int(b["block_col"]) * block_w * ref_pres),
+                      - (tile_origin_x + (int(b["block_col"]) - min_col) * block_w * ref_pres),
                       float(b["world_origin_y"])
-                      - (tile_origin_y - int(b["block_row"]) * block_h * ref_pres),
+                      - (tile_origin_y - (int(b["block_row"]) - min_row) * block_h * ref_pres),
                   ) > 0.5)
     print(f"\nWrote {grid_path}")
     print(f"  ({n_grid} block outlines, layer 'block_grid'"

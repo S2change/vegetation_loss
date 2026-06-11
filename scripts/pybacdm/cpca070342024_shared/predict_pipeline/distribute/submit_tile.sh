@@ -40,6 +40,12 @@
 #   MIN_TILE_PATCH_M2=5000  master patch-area floor (m^2), post cross-block merge.
 #   MAX_COMPOSITE_DAYS  symmetric day-window around each break date for
 #                       before/after compositing (unset = unbounded).
+#   BLOCK_ROWS / BLOCK_COLS  process only a rectangular sub-grid of blocks
+#                       (inclusive 0-based ranges) instead of the whole tile.
+#                       e.g. BLOCK_ROWS=1-2 BLOCK_COLS=1-2 processes the middle
+#                       2x2 of a 4x4 grid; a bare number selects one index.
+#                       Unset = whole tile. The aggregator crops its outputs to
+#                       the selected sub-region.
 #   WRITE_COMPOSITE_TIFS=1  dump per-block before/after time-composites as
 #                       10-band GeoTIFFs (debug/inspection only; off by
 #                       default).
@@ -123,9 +129,64 @@ print(r, c)
 N_BLOCKS=$((N_ROWS * N_COLS))
 LAST_IDX=$((N_BLOCKS - 1))
 
+# ── Optional sub-region selection ─────────────────────────────────────────
+# Process only a rectangular sub-grid of blocks instead of the whole tile.
+# Useful when the HDF5 has a ghost margin of blocks you don't want in the
+# output (e.g. a 4x4 tile where only the middle 2x2 is real). Specify inclusive
+# 0-based ranges:
+#     BLOCK_ROWS=1-2 BLOCK_COLS=1-2     # the middle 2x2 of a 4x4 grid
+#     BLOCK_ROWS=2   BLOCK_COLS=0-3     # a single row
+# Unset = whole tile. The selected blocks must form a rectangle (they always
+# do with the lo-hi range form). The same selection is exported to the
+# aggregator so it expects exactly these blocks and crops the output to them.
+_parse_range() {  # "$1"=range string like "1-2" or "3"; "$2"=upper bound (N-1)
+    local spec="$1" hi_bound="$2" lo hi
+    if [[ "$spec" == *-* ]]; then
+        lo="${spec%%-*}"; hi="${spec##*-}"
+    else
+        lo="$spec"; hi="$spec"
+    fi
+    if ! [[ "$lo" =~ ^[0-9]+$ && "$hi" =~ ^[0-9]+$ ]]; then
+        echo "Bad range '$spec' (expected N or LO-HI)" >&2; exit 1
+    fi
+    if (( lo > hi || hi > hi_bound )); then
+        echo "Range '$spec' out of bounds (grid max index $hi_bound)" >&2
+        exit 1
+    fi
+    echo "$lo $hi"
+}
+
+if [[ -n "${BLOCK_ROWS:-}" || -n "${BLOCK_COLS:-}" ]]; then
+    # Capture into a var first and check status: an `exit 1` inside $( ) only
+    # kills the subshell, so `read <<<"$(...)"` would otherwise swallow the
+    # failure and proceed with empty ranges. Fail the parent explicitly.
+    _rows="$(_parse_range "${BLOCK_ROWS:-0-$((N_ROWS-1))}" $((N_ROWS-1)))" || exit 1
+    _cols="$(_parse_range "${BLOCK_COLS:-0-$((N_COLS-1))}" $((N_COLS-1)))" || exit 1
+    read ROW_LO ROW_HI <<<"$_rows"
+    read COL_LO COL_HI <<<"$_cols"
+    # Build the explicit list of linear array indices = row*N_COLS + col.
+    ARRAY_IDS=""
+    for ((r=ROW_LO; r<=ROW_HI; r++)); do
+        for ((c=COL_LO; c<=COL_HI; c++)); do
+            ARRAY_IDS+="$((r * N_COLS + c)),"
+        done
+    done
+    ARRAY_SPEC="${ARRAY_IDS%,}"           # strip trailing comma
+    N_SELECTED=$(( (ROW_HI-ROW_LO+1) * (COL_HI-COL_LO+1) ))
+    # Tell the aggregator which sub-rectangle to expect + crop to.
+    export PROCESS_ROW_LO="$ROW_LO" PROCESS_ROW_HI="$ROW_HI"
+    export PROCESS_COL_LO="$COL_LO" PROCESS_COL_HI="$COL_HI"
+    SELECT_DESC="rows ${ROW_LO}-${ROW_HI} cols ${COL_LO}-${COL_HI} (${N_SELECTED} blocks)"
+else
+    ARRAY_SPEC="0-${LAST_IDX}"
+    N_SELECTED=$N_BLOCKS
+    SELECT_DESC="all ${N_BLOCKS} blocks"
+fi
+
 echo "Tile:           $TILE_ID"
 echo "HDF5:           $TILE_HDF5_PATH"
 echo "Block grid:     ${N_ROWS} x ${N_COLS}  ($N_BLOCKS blocks)"
+echo "Processing:     ${SELECT_DESC}"
 echo "Output dir:     $OUTPUT_DIR"
 echo "  logs:         $LOG_DIR"
 echo "  block out:    $BLOCK_OUTPUT_DIR"
@@ -155,7 +216,7 @@ export DISTRIBUTE_DIR
 # ── Submit array job (one task per block) ─────────────────────────────────
 ARRAY_JOB_ID=$(
     sbatch --parsable \
-        --array=0-${LAST_IDX}%${MAX_CONCURRENT} \
+        --array=${ARRAY_SPEC}%${MAX_CONCURRENT} \
         --cpus-per-task="${THREADS}" \
         --export=ALL \
         --output="$LOG_DIR/predict_block_%a.out" \
@@ -163,7 +224,7 @@ ARRAY_JOB_ID=$(
         --job-name="predict_${TILE_ID}" \
         "$DISTRIBUTE_DIR/run_block_slurm.sh"
 )
-echo "Submitted array job:      $ARRAY_JOB_ID  (array 0-${LAST_IDX}%${MAX_CONCURRENT}, ${THREADS} cpu/task)"
+echo "Submitted array job:      $ARRAY_JOB_ID  (array ${ARRAY_SPEC}%${MAX_CONCURRENT}, ${THREADS} cpu/task)"
 
 # ── Submit aggregator (depends on array success) ──────────────────────────
 AGGR_JOB_ID=$(

@@ -110,7 +110,8 @@ def _write_synthetic_grid_empty(tmpd: Path, n_rows: int, n_cols: int,
 
 
 def _run_aggregator(tmpd: Path,
-                    min_tile_patch_m2: float = 0.0) -> subprocess.CompletedProcess:
+                    min_tile_patch_m2: float = 0.0,
+                    extra_env: dict | None = None) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env["TILE_ID"] = TILE_ID
     env["OUTPUT_DIR"] = str(tmpd)
@@ -118,6 +119,8 @@ def _run_aggregator(tmpd: Path,
     # Default the master floor to 0 so the small synthetic patches most
     # tests use aren't pruned; the dedicated filter test overrides it.
     env["MIN_TILE_PATCH_M2"] = str(min_tile_patch_m2)
+    if extra_env:
+        env.update({k: str(v) for k, v in extra_env.items()})
     return subprocess.run(
         [sys.executable, str(_HERE / "aggregate_tile.py")],
         env=env, capture_output=True, text=True,
@@ -481,6 +484,71 @@ def test_block_grid_outline_written():
     print("  block-grid: one rectangle per block, placed + attributed — OK")
 
 
+def test_subregion_crops_canvas_and_georef():
+    """Processing only a sub-rectangle of blocks crops the stitched canvas to
+    that sub-region and georeferences it at the NW-most processed block."""
+    with tempfile.TemporaryDirectory() as tmpd:
+        tmpd = Path(tmpd)
+        target_dates = np.array([738887], dtype=np.int64)
+        # Only write the middle 2x2 (rows 1-2, cols 1-2) of a notional 4x4.
+        # Put a detection in block (1,1) so we can check placement.
+        for r in (1, 2):
+            for c in (1, 2):
+                if (r, c) == (1, 1):
+                    lab = _block_labels_with_square(r, c, date_idx=0,
+                                                    class_id=1, y0=10, x0=10,
+                                                    side=8, n_dates=1)
+                else:
+                    lab = _empty_block_labels(n_dates=1)
+                _write_block(tmpd, r, c, lab, target_dates)
+
+        res = _run_aggregator(tmpd, extra_env={
+            "PROCESS_ROW_LO": 1, "PROCESS_ROW_HI": 2,
+            "PROCESS_COL_LO": 1, "PROCESS_COL_HI": 2,
+        })
+        assert res.returncode == 0, res.stderr
+
+        # Canvas cropped to 2x2 blocks, NOT the full 0..2 = 3x3.
+        with np.load(tmpd / f"{TILE_ID}_tile.npz") as npz:
+            labels = npz["labels"]
+            assert labels.shape == (1, 2 * CHIP_SIZE, 2 * CHIP_SIZE), labels.shape
+            assert int(npz["n_block_rows"]) == 2
+            assert int(npz["n_block_cols"]) == 2
+            # npz world origin = block (1,1)'s NW corner.
+            ox, oy = _block_origin(1, 1)
+            assert float(npz["world_origin_x"]) == ox
+            assert float(npz["world_origin_y"]) == oy
+            # The detection (in block (1,1) = canvas cell (0,0)) lands in the
+            # top-left block of the cropped canvas.
+            assert (labels[0, 10:18, 10:18] == 1).all()
+
+        # GeoTIFF NW corner matches block (1,1), not (0,0).
+        import rasterio
+        with rasterio.open(tmpd / f"{TILE_ID}_tile_2024-01-02.tif") as src:
+            assert src.transform.c == ox
+            assert src.transform.f == oy
+            assert src.width == 2 * CHIP_SIZE and src.height == 2 * CHIP_SIZE
+    print("  sub-region: canvas cropped + georeferenced at NW block — OK")
+
+
+def test_subregion_missing_block_rejected():
+    """A selected sub-region with a missing block fails loudly."""
+    with tempfile.TemporaryDirectory() as tmpd:
+        tmpd = Path(tmpd)
+        target_dates = np.array([738887], dtype=np.int64)
+        # Selection says rows 1-2 cols 1-2, but only write 3 of the 4.
+        for (r, c) in [(1, 1), (1, 2), (2, 1)]:
+            _write_block(tmpd, r, c, _empty_block_labels(n_dates=1),
+                         target_dates)
+        res = _run_aggregator(tmpd, extra_env={
+            "PROCESS_ROW_LO": 1, "PROCESS_ROW_HI": 2,
+            "PROCESS_COL_LO": 1, "PROCESS_COL_HI": 2,
+        })
+        assert res.returncode != 0
+        assert "missing" in res.stderr.lower() or "incomplete" in res.stderr.lower()
+    print("  sub-region: missing selected block rejected — OK")
+
+
 def main():
     print("Running aggregate_tile tests...")
     test_full_grid_stitches_into_dense_npz()
@@ -494,6 +562,8 @@ def main():
     test_master_filter_measures_boundary_patch_at_full_size()
     test_geotiff_per_date_written()
     test_block_grid_outline_written()
+    test_subregion_crops_canvas_and_georef()
+    test_subregion_missing_block_rejected()
     print("All aggregate_tile tests passed.")
 
 
