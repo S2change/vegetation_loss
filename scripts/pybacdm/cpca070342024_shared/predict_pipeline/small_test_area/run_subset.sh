@@ -13,15 +13,12 @@
 # Args are KEY=VALUE (all optional — the Python script has defaults):
 #   SRC         full-tile chip-chunked HDF5      (default: T29TME.h5)
 #   GPKG        test-cell polygon                (default: fire_cut_test_block.gpkg)
-#   FIRES       fire reference .gpkg (fogo)      (default: Data_ref_2023_icnf.gpkg)
-#   CUTS        cut reference .gpkg (corte)      (default: Data_ref_2023_nvg_v2.gpkg)
 #   OUT         output HDF5                      (default: <SRC stem>_testblock.h5)
 #   PAD_BLOCKS  whole-block ghost rings to keep  (default: 1 -> LIVE at block (1,1))
 #   VENV        virtualenv to activate (cluster only)
 #
-# FIRES/CUTS are the change layers — the LIVE area is snapped to the source
-# blocks that actually contain change inside the cell (guarantees single-block
-# alignment without cutting any change).
+# The LIVE area is the bounding rectangle of the source blocks the GPKG polygon
+# overlaps (block-aligned, nothing the polygon touches is cut at a block edge).
 
 #SBATCH --job-name=subset_hdf5
 #SBATCH --time=00:30:00
@@ -62,8 +59,6 @@ fi
 ARGS=()
 [ -n "${SRC:-}" ]        && ARGS+=(--src        "$SRC")
 [ -n "${GPKG:-}" ]       && ARGS+=(--gpkg       "$GPKG")
-[ -n "${FIRES:-}" ]      && ARGS+=(--fires      "$FIRES")
-[ -n "${CUTS:-}" ]       && ARGS+=(--cuts       "$CUTS")
 [ -n "${OUT:-}" ]        && ARGS+=(--out        "$OUT")
 [ -n "${PAD_BLOCKS:-}" ] && ARGS+=(--pad-blocks "$PAD_BLOCKS")
 

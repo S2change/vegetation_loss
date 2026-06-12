@@ -1,29 +1,27 @@
 """Carve a small chip-chunked HDF5 out of a full-tile one, by a .gpkg area.
 
 Given a full-tile chip-chunked HDF5 (the format the prediction pipeline
-reads — see input_setup/hdf5_reader.py), a test-cell polygon .gpkg, and the
-fire/cut change-reference layers, write a new HDF5 cropped to the SOURCE
-block(s) that actually contain change inside the cell, keeping ALL timesteps
-and ALL bands. The output is byte-for-byte the same schema as the input, so
-the pipeline reads it with no changes — it's just a spatially cropped tile.
+reads — see input_setup/hdf5_reader.py) and a test-cell polygon .gpkg, write a
+new HDF5 cropped to the SOURCE block(s) the polygon touches, keeping ALL
+timesteps and ALL bands. The output is byte-for-byte the same schema as the
+input, so the pipeline reads it with no changes — it's just a spatially
+cropped tile.
 
 Why
 ---
 Lets you build a tiny test tile (one block + a ghost-feeding ring) to exercise
 pipeline changes without processing a whole S2 tile.
 
-Change-aware, block-aligned selection
---------------------------------------
+Block-aligned selection
+-----------------------
 The pipeline reads a block's LIVE area ONLY at SOURCE chip rows/cols that are
 multiples of LIVE_ROWS/LIVE_COLS (chip_y_start = block_row * 4). So a cell that
 isn't aligned to the source's 4-chip block lattice can't be a single clean
-block. To guarantee single-block alignment WITHOUT cutting off any change, we
-don't crop to the cell polygon directly — instead we find which SOURCE blocks
-contain fire/cut change geometry (clipped to the cell) and keep exactly the
-union of those blocks as the LIVE area. Blocks with no change are excluded, so
-the LIVE area is the tightest block-aligned region that still holds all the
-change (usually 1x1; grows to 2x1 / 2x2 only if change straddles the source
-block lattice).
+block. We therefore keep every SOURCE block the cell polygon overlaps and use
+their bounding rectangle as the LIVE area — block-aligned by construction, and
+nothing the polygon touches is cut off at a block edge. A polygon that fits in
+one block gives a 1x1 LIVE area; one that straddles the lattice grows to
+2x1 / 2x2 etc.
 
 Chip geometry (from the input's attrs)
 --------------------------------------
@@ -72,8 +70,6 @@ Usage
     python subset_hdf5_to_block.py \
         --src T29TME.h5 \
         --gpkg fire_cut_test_block.gpkg \
-        --fires Data_ref_2023_icnf.gpkg \
-        --cuts Data_ref_2023_nvg_v2.gpkg \
         --out T29TME_testblock.h5
 """
 from __future__ import annotations
@@ -88,13 +84,11 @@ import numpy as np
 _HERE = Path(__file__).resolve().parent
 
 # ── Default input paths ──────────────────────────────────────────────────────
-# The cell polygon and change-reference layers live alongside this script
-# (same dir on the cluster), so derive them from _HERE. The source tile is on
-# the cluster's shared storage; override with --src to point elsewhere.
+# The cell polygon lives alongside this script (same dir on the cluster), so
+# derive it from _HERE. The source tile is on the cluster's shared storage;
+# override with --src to point elsewhere.
 DEFAULT_SRC = Path("/users1/dgt/hdf5_2023/T29SNB.h5")
 DEFAULT_GPKG = _HERE / "fire_cut_test_block.gpkg"
-DEFAULT_FIRES = _HERE / "Data_ref_2023_icnf.gpkg"
-DEFAULT_CUTS = _HERE / "Data_ref_2023_nvg_v2.gpkg"
 
 CHIP_PIXELS = 65536  # 256 * 256; one chunk along the pixel axis.
 
@@ -105,19 +99,16 @@ PER_PIXEL_DATASETS = ("xs_new", "ys_new", "sort_order")
 PER_CHIP_DATASETS = ("chip_x_bin", "chip_y_bin", "chip_pixel_count")
 
 
-def _change_source_blocks(change_geoms, cell_poly,
-                          bounds_left, bounds_top, step,
-                          live_rows, live_cols):
-    """Source-tile block (row, col) indices that contain change in the cell.
+def _cell_source_blocks(cell_poly,
+                        bounds_left, bounds_top, step,
+                        live_rows, live_cols):
+    """Source-tile block (row, col) indices the cell polygon overlaps.
 
     A "source block" is the 4x4-chip group the pipeline reads at chip rows/cols
     [4k .. 4k+3] of the SOURCE tile grid (chip_y_start = block_row*LIVE_ROWS).
-    For each change geometry (fire/cut), intersected with the test cell so only
-    change inside the cell counts, we find which source block(s) it falls in
-    and collect them. The LIVE area is exactly the union of these blocks, so
-    every change-bearing block is kept and nothing is cut at a block edge — and
-    blocks with no change are excluded (the tightest LIVE area that still holds
-    all the change).
+    We take the cell polygon's bounding box and return every source block it
+    touches; their bounding rectangle becomes the LIVE area — block-aligned by
+    construction, so nothing the polygon covers is cut at a block edge.
 
     block_size_m = live_rows * step (one block = live_rows chips of `step` m).
 
@@ -125,21 +116,17 @@ def _change_source_blocks(change_geoms, cell_poly,
     """
     block_h = live_rows * step
     block_w = live_cols * step
+    gminx, gminy, gmaxx, gmaxy = cell_poly.bounds
+    # Block col from world x: col = floor((x - bounds_left) / block_w).
+    col_lo = int((gminx - bounds_left) // block_w)
+    col_hi = int((gmaxx - bounds_left) // block_w)
+    # Block row from world y: y decreases southward from bounds_top.
+    row_lo = int((bounds_top - gmaxy) // block_h)
+    row_hi = int((bounds_top - gminy) // block_h)
     blocks: set[tuple[int, int]] = set()
-    for geom in change_geoms:
-        clipped = geom.intersection(cell_poly)
-        if clipped.is_empty:
-            continue
-        gminx, gminy, gmaxx, gmaxy = clipped.bounds
-        # Block col from world x: col = floor((x - bounds_left) / block_w).
-        col_lo = int((gminx - bounds_left) // block_w)
-        col_hi = int((gmaxx - bounds_left) // block_w)
-        # Block row from world y: y decreases southward from bounds_top.
-        row_lo = int((bounds_top - gmaxy) // block_h)
-        row_hi = int((bounds_top - gminy) // block_h)
-        for br in range(row_lo, row_hi + 1):
-            for bc in range(col_lo, col_hi + 1):
-                blocks.add((br, bc))
+    for br in range(row_lo, row_hi + 1):
+        for bc in range(col_lo, col_hi + 1):
+            blocks.add((br, bc))
     return blocks
 
 
@@ -151,7 +138,7 @@ def _pad_block_ring(live_block_rows, live_block_cols,
     The pipeline reads each block's LIVE area only at chip rows/cols that are
     multiples of LIVE_ROWS/LIVE_COLS (chip_y_start = block_row * LIVE_ROWS),
     and pulls a 128-px ghost from the chips bordering it. So we keep the
-    change-bearing source blocks (given as block-grid row/col ranges) plus a
+    cell's source blocks (given as block-grid row/col ranges) plus a
     ring `pad_blocks` blocks thick, then rebase the kept region's NW corner to
     chip (0,0). The LIVE area then starts at chip (pad_blocks*live_rows,
     pad_blocks*live_cols) — i.e. block (pad_blocks, pad_blocks).
@@ -159,7 +146,7 @@ def _pad_block_ring(live_block_rows, live_block_cols,
     Parameters
     ----------
     live_block_rows, live_block_cols : (lo, hi) inclusive SOURCE block ranges
-        spanning the change-bearing blocks.
+        spanning the blocks the cell polygon overlaps.
 
     Returns
     -------
@@ -173,7 +160,7 @@ def _pad_block_ring(live_block_rows, live_block_cols,
     brow_lo, brow_hi = live_block_rows
     bcol_lo, bcol_hi = live_block_cols
 
-    # LIVE chip span = the change-bearing source blocks, in source chip coords.
+    # LIVE chip span = the cell's source blocks, in source chip coords.
     live_y0 = brow_lo * live_rows
     live_x0 = bcol_lo * live_cols
     live_y1 = (brow_hi + 1) * live_rows - 1   # inclusive
@@ -201,31 +188,12 @@ def _pad_block_ring(live_block_rows, live_block_cols,
             live_n_block_rows, live_n_block_cols)
 
 
-def _load_change_geoms(paths, tile_crs):
-    """Read change-reference .gpkg(s), reproject to tile CRS, return geoms."""
-    geoms = []
-    for p in paths:
-        g = gpd.read_file(p)
-        if tile_crs is not None and g.crs is not None:
-            try:
-                g = g.to_crs(tile_crs)
-            except Exception:
-                pass
-        geoms.extend(list(g.geometry.values))
-    return geoms
-
-
 def subset(src_path: Path, gpkg_path: Path, out_path: Path,
-           change_paths, pad_blocks: int = 1,
+           pad_blocks: int = 1,
            live_rows: int = 4, live_cols: int = 4):
     gdf = gpd.read_file(gpkg_path)
     if gdf.empty:
         raise SystemExit(f"{gpkg_path} has no features")
-    if not change_paths:
-        raise SystemExit(
-            "No change layers given. Pass --fires / --cuts (the reference "
-            "fire/cut .gpkg files) so the LIVE area can be snapped to the "
-            "source blocks that actually contain change.")
 
     with h5py.File(src_path, "r") as src:
         attrs = dict(src.attrs)
@@ -251,18 +219,15 @@ def subset(src_path: Path, gpkg_path: Path, out_path: Path,
         cell_poly = gdf.geometry.union_all()
         poly_bounds = tuple(gdf.total_bounds)  # (minx, miny, maxx, maxy)
 
-        # ── Find the SOURCE blocks that actually contain change in the cell ──
-        change_geoms = _load_change_geoms(change_paths, tile_crs)
-        change_blocks = _change_source_blocks(
-            change_geoms, cell_poly, bounds_left, bounds_top, step,
-            live_rows, live_cols)
-        if not change_blocks:
+        # ── Find the SOURCE blocks the cell polygon overlaps ──────────────────
+        cell_blocks = _cell_source_blocks(
+            cell_poly, bounds_left, bounds_top, step, live_rows, live_cols)
+        if not cell_blocks:
             raise SystemExit(
-                "No fire/cut change geometry falls inside the cell polygon, "
-                "so there is no change-bearing block to keep. Check that the "
-                "change layers and the cell polygon overlap.")
-        brows = sorted({br for br, _ in change_blocks})
-        bcols = sorted({bc for _, bc in change_blocks})
+                "The cell polygon overlaps no source blocks. Check that the "
+                "polygon and the source tile overlap (same CRS / extent).")
+        brows = sorted({br for br, _ in cell_blocks})
+        bcols = sorted({bc for _, bc in cell_blocks})
         live_block_rows = (brows[0], brows[-1])
         live_block_cols = (bcols[0], bcols[-1])
 
@@ -277,10 +242,9 @@ def subset(src_path: Path, gpkg_path: Path, out_path: Path,
 
         if len(keep) == 0:
             raise SystemExit(
-                "No source chips fall in the change-bearing block region "
+                "No source chips fall in the cell's block region "
                 f"(source blocks rows {live_block_rows} cols {live_block_cols})."
-                " The cell's change may be over a part of the tile with no "
-                "imagery.")
+                " The cell may cover a part of the tile with no imagery.")
 
         kept_y = chip_y[keep]
         kept_x = chip_x[keep]
@@ -300,7 +264,7 @@ def subset(src_path: Path, gpkg_path: Path, out_path: Path,
         print(f"  polygon bounds: "
               f"({poly_bounds[0]:.0f}, {poly_bounds[1]:.0f}, "
               f"{poly_bounds[2]:.0f}, {poly_bounds[3]:.0f})")
-        print(f"  change-bearing source blocks: rows {live_block_rows[0]}.."
+        print(f"  cell source blocks: rows {live_block_rows[0]}.."
               f"{live_block_rows[1]} cols {live_block_cols[0]}.."
               f"{live_block_cols[1]}  ({live_nbr}x{live_nbc} = LIVE area)")
         print(f"  pad: {pad_blocks} block ring(s)")
@@ -405,10 +369,6 @@ def main() -> None:
                     help="polygon .gpkg defining the area to keep")
     ap.add_argument("--out", type=Path, default=None,
                     help="output HDF5 (default: <src stem>_testblock.h5)")
-    ap.add_argument("--fires", type=Path, default=DEFAULT_FIRES,
-                    help="fire reference .gpkg (Chg_type fogo)")
-    ap.add_argument("--cuts", type=Path, default=DEFAULT_CUTS,
-                    help="cut reference .gpkg (Chg_type corte)")
     ap.add_argument("--pad-blocks", type=int, default=1,
                     help="rings of whole blocks (4 chips each) to keep around "
                          "the polygon's LIVE area so it lands on a clean block "
@@ -418,9 +378,7 @@ def main() -> None:
     args = ap.parse_args()
 
     out = args.out or _HERE / (args.src.stem + "_testblock.h5")
-    change_paths = [p for p in (args.fires, args.cuts) if p and p.exists()]
-    subset(args.src, args.gpkg, out, change_paths,
-           pad_blocks=args.pad_blocks)
+    subset(args.src, args.gpkg, out, pad_blocks=args.pad_blocks)
 
 
 if __name__ == "__main__":
