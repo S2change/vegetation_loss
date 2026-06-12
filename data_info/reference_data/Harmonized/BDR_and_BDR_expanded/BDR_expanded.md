@@ -36,9 +36,9 @@ This dataset is not intended to function as a standalone wall-to-wall disturbanc
 
 ---
 
-## 2. Current repository organization
+## 2. Repository organization
 
-The current organization is:
+The BDR expanded workflow and the suggested folder organization is next:
 
 ```text
 BDR_organizado/
