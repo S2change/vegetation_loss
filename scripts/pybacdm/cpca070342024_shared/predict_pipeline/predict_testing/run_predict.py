@@ -73,7 +73,7 @@ def rss_mb():
 # ============================================================================
 
 # edit before running
-WEIGHTS_PATH = "/users1/cpca070342024/shared/model_weights/teste20260429163505_best.pth"
+WEIGHTS_PATH = "/users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/bacdm/model_weights/teste20260429163505_best.pth"
 
 # Step-1 input source:
 #   True  -> read one 5x5 block from a chip-chunked HDF5 via input_setup.read_block

@@ -72,7 +72,7 @@ done
 : "${OUTPUT_DIR:?OUTPUT_DIR is required}"
 
 # ── Optional (with defaults) ──────────────────────────────────────────────
-export WEIGHTS_PATH="${WEIGHTS_PATH:-/users1/cpca070342024/shared/model_weights/teste20260429163505_best.pth}"
+export WEIGHTS_PATH="${WEIGHTS_PATH:-/users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/bacdm/model_weights/teste20260429163505_best.pth}"
 export BATCH_SIZE="${BATCH_SIZE:-8}"
 export VOTE_CLASSES="${VOTE_CLASSES:-1,2}"
 export VOTE_THRESHOLD="${VOTE_THRESHOLD:-2}"
