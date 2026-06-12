@@ -12,7 +12,7 @@ set them without re-templating Python source):
   Required
     TILE_HDF5_PATH    Path to the chip-chunked HDF5 for one tile.
     WEIGHTS_PATH      Path to the BACDM .pth checkpoint.
-    OUTPUT_DIR        Directory to write the voted .npz into.
+    OUTPUT_DIR        Base run directory (used as a fallback output location).
     TILE_ID           Tile name (e.g. T29TPG). Used in the .npz filename.
     BLOCK_ROW         Block row index (0..N_BLOCK_ROWS-1).
     BLOCK_COL         Block col index (0..N_BLOCK_COLS-1).
@@ -20,9 +20,22 @@ set them without re-templating Python source):
                       "2025-11-15,2025-12-01".
 
   Optional
-    BATCH_SIZE         Model batch size (default 8).
-    VOTE_CLASSES       Comma-separated non-bg class IDs (default "1,2").
-    VOTE_THRESHOLD     Min votes per pixel to keep a detection (default 2).
+    BLOCK_OUTPUT_DIR  Where to write the per-block .npz + .gpkg. Defaults to
+                      OUTPUT_DIR (submit_tile.sh sets it to
+                      OUTPUT_DIR/block_outputs).
+    BATCH_SIZE        Model batch size (default 8).
+    VOTE_CLASSES      Comma-separated non-bg class IDs (default "1,2").
+    VOTE_THRESHOLD    Min votes per pixel to keep a detection (default 2).
+    CLOSING_RADIUS    Post-vote close radius; unset = per-class
+                      AAA_Configs.CLOSING_RADII, 0 = off (default unset).
+    MIN_PATCH_M2      Block-level patch-area floor in m^2 (default 2500).
+    MAX_COMPOSITE_DAYS  Symmetric day-window around the break date for
+                      before/after compositing (unset = unbounded).
+
+  Optional — debug composite GeoTIFFs
+    WRITE_COMPOSITE_TIFS    Set to 1 to create the before & after time-
+                      composites for each valid target date. Off by default.
+    COMPOSITE_TIF_DIR       Defaults to OUTPUT_DIR/composite_tifs
 
 Everything else (model architecture, ghost geometry, etc.) is fixed by
 the modules being imported.
@@ -38,21 +51,20 @@ import numpy as np
 import psutil
 import torch
 
-# Make the bacdm/ subpackage importable. The INCD layout places
-# prediction_model/ as a sibling of distribute/ (under shared/), so we
-# point sys.path at `<shared>/prediction_model/` rather than
-# `<distribute>/prediction_model/`. The bacdm/ subpackage's own modules
-# use `from bacdm.X import ...` internally, so we point at the *parent*
-# of bacdm/, not at bacdm/ itself.
+# Make the bacdm/ subpackage importable. bacdm/ sits next to distribute/
+# under <shared>/, and its modules use `from bacdm.X import ...` internally,
+# so we put <shared>/ (the parent of bacdm/) on the path.
 _HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(_HERE.parent))                          # shared/
-sys.path.insert(0, str(_HERE.parent / "prediction_model"))     # for bacdm.*
+sys.path.insert(0, str(_HERE.parent))                          # shared/ (for bacdm.*)
 
 from input_setup import read_block, get_block_grid_shape
 from composite_shift_chips import (
     create_before_after_composites,
     generate_shifted_chips,
 )
+# Imported from the submodule (not the package __init__) so rasterio stays off
+# the core composite import path; only pulled in when actually writing TIFs.
+from composite_shift_chips.write_composite_tifs import write_block_composite_tifs
 from postprocess import (
     chip_nw_pixel_offset,
     VoteAccumulator,
@@ -60,7 +72,6 @@ from postprocess import (
 )
 from polygonize import (
     labels_to_polygons, polygons_to_records, close_labels,
-    DEFAULT_CLOSING_RADIUS,
 )
 from bacdm.predict import load_model, predict_before_after_chips
 
@@ -105,7 +116,9 @@ def _dates_env() -> np.ndarray:
 def main() -> None:
     hdf5_path     = _required_env("TILE_HDF5_PATH")
     weights_path  = _required_env("WEIGHTS_PATH")
-    output_dir    = _required_env("OUTPUT_DIR")
+    # Per-block .npz/.gpkg go to BLOCK_OUTPUT_DIR (submit_tile.sh sets this to
+    # OUTPUT_DIR/block_outputs); fall back to OUTPUT_DIR for standalone runs.
+    output_dir    = os.environ.get("BLOCK_OUTPUT_DIR") or _required_env("OUTPUT_DIR")
     tile_id       = _required_env("TILE_ID")
     block_row     = _int_env("BLOCK_ROW")
     block_col     = _int_env("BLOCK_COL")
@@ -113,9 +126,17 @@ def main() -> None:
     batch_size    = int(os.environ.get("BATCH_SIZE", "8"))
     vote_classes  = _classes_env()
     vote_threshold = int(os.environ.get("VOTE_THRESHOLD", "2"))
-    # Post-vote morphological close radius (disk). 0 disables closing.
-    closing_radius = int(os.environ.get("CLOSING_RADIUS",
-                                        str(DEFAULT_CLOSING_RADIUS)))
+    # Symmetric day-window around the break date for before/after compositing.
+    # Unset/empty = unbounded (use any timestep before/after the target).
+    _mcd_env = os.environ.get("MAX_COMPOSITE_DAYS")
+    max_composite_days = (int(_mcd_env)
+                          if _mcd_env not in (None, "") else None)
+    # Post-vote morphological close radius (disk). Per-class radii come from
+    # AAA_Configs.CLOSING_RADII (Cuts → 3, Fires → 1); leaving CLOSING_RADIUS
+    # unset uses those. Setting CLOSING_RADIUS forces one radius for every
+    # class (override); CLOSING_RADIUS=0 disables closing entirely.
+    _cr_env = os.environ.get("CLOSING_RADIUS")
+    closing_radius = int(_cr_env) if _cr_env is not None else None
     # Block-level patch-area floor (m^2). Dropped at this stage; the master
     # applies a second, larger floor after cross-block merge.
     min_patch_m2 = float(os.environ.get("MIN_PATCH_M2", "2500"))
@@ -130,6 +151,8 @@ def main() -> None:
             f"range for grid shape ({n_rows}, {n_cols}) of {hdf5_path}"
         )
 
+    os.makedirs(output_dir, exist_ok=True)
+
     print(f"Tile:           {tile_id}")
     print(f"HDF5:           {hdf5_path}")
     print(f"Block:          ({block_row}, {block_col}) of grid "
@@ -137,10 +160,12 @@ def main() -> None:
     print(f"Weights:        {weights_path}")
     print(f"Output dir:     {output_dir}")
     print(f"Target dates:   {[date.fromordinal(int(d)).isoformat() for d in target_dates]}")
+    print(f"Max comp. days: {max_composite_days if max_composite_days is not None else 'unbounded'}")
     print(f"Batch size:     {batch_size}")
     print(f"Vote classes:   {vote_classes}")
     print(f"Vote threshold: {vote_threshold}")
-    print(f"Closing radius: {closing_radius}")
+    print(f"Closing radius: "
+          f"{'per-class (AAA_Configs.CLOSING_RADII)' if closing_radius is None else closing_radius}")
     print(f"Min patch m^2:  {min_patch_m2}")
     print(f"\n[RSS] After imports:                   {rss_mb():7.1f} MB")
 
@@ -160,6 +185,7 @@ def main() -> None:
     t0 = time.perf_counter()
     composites, valid_dates_mask = create_before_after_composites(
         block, ts, target_dates, verbose=True,
+        max_days_from_break=max_composite_days,
     )
     n_valid = int(valid_dates_mask.sum())
     print(f"  composites: shape={composites.shape}  dtype={composites.dtype}  "
@@ -167,6 +193,31 @@ def main() -> None:
     print(f"  valid dates: {n_valid} / {len(target_dates)}")
     print(f"  Step 3 time: {time.perf_counter() - t0:.2f} s")
     print(f"[RSS] After composites:                {rss_mb():7.1f} MB")
+
+    # ── Optional: dump before/after composite GeoTIFFs for inspection ──────
+    # Gated by WRITE_COMPOSITE_TIFS (default off) — these are 10-band 1280x1280
+    # rasters per (date, side), not needed for the production pipeline. Written
+    # to a dedicated composite_tifs/ dir so they never collide with the
+    # aggregator's block_outputs glob.
+    if os.environ.get("WRITE_COMPOSITE_TIFS", "0") not in ("0", "", "false", "False"):
+        comp_dir = os.environ.get(
+            "COMPOSITE_TIF_DIR",
+            os.path.join(os.environ.get("OUTPUT_DIR", output_dir),
+                         "composite_tifs"),
+        )
+        print(f"\nWriting composite GeoTIFFs -> {comp_dir} ...")
+        t0 = time.perf_counter()
+        comp_paths = write_block_composite_tifs(
+            composites, target_dates, valid_dates_mask,
+            out_dir=comp_dir, tile_id=tile_id,
+            block_row=block_row, block_col=block_col,
+            world_origin_x=position.world_origin_x,
+            world_origin_y=position.world_origin_y,
+            pixel_res=position.pixel_res,
+            crs=_read_hdf5_crs(hdf5_path),
+        )
+        print(f"  wrote {len(comp_paths)} composite TIF(s) "
+              f"in {time.perf_counter() - t0:.2f} s")
 
     if n_valid == 0:
         # Empty output is still useful: aggregator can detect missing/empty
@@ -344,9 +395,10 @@ def main() -> None:
     classes_t = tuple(int(c) for c in vote_classes)
     rows: list = []
     for i, d in enumerate(target_dates):
-        closed = (close_labels(voted_labels[i], classes_t,
-                               closing_radius=closing_radius)
-                  if closing_radius > 0 else voted_labels[i])
+        closed = (voted_labels[i]
+                  if closing_radius == 0
+                  else close_labels(voted_labels[i], classes_t,
+                                    closing_radius=closing_radius))
         patches = labels_to_polygons(
             closed, date_ordinal=int(d),
             classes=classes_t,

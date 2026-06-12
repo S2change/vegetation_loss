@@ -235,6 +235,51 @@ def test_min_area_zero_keeps_all():
     print("  min_area_m2=0 keeps all patches — OK")
 
 
+# ============================================================================
+# per-class closing radius
+# ============================================================================
+
+def test_close_per_class_radius_dict():
+    """A dict closing_radius applies a different radius per class. A 4-px
+    gap is bridged for a class with radius 3 but NOT for one with radius 1
+    (a radius-1 disk can only span a 2-px gap)."""
+    lab = _empty()
+    # class 1: two blocks with a 4-px gap (cols 18..21)
+    lab[10:20, 10:18] = 1
+    lab[10:20, 22:30] = 1
+    # class 2: two blocks with the same 4-px gap (cols 48..51)
+    lab[10:20, 40:48] = 2
+    lab[10:20, 52:60] = 2
+    out = close_labels(lab, classes=(1, 2), closing_radius={1: 3, 2: 1})
+    # class 1 (radius 3) bridges the interior of its 4-px gap...
+    assert (out[11:19, 18:22] == 1).all(), "radius-3 class should bridge 4-px gap"
+    # ...class 2 (radius 1) cannot — the gap centre stays background.
+    assert (out[11:19, 49:51] == 0).any(), "radius-1 class should NOT bridge 4-px gap"
+    print("  close_labels per-class radius dict — OK")
+
+
+def test_close_radius_zero_skips_class():
+    """A radius of 0 for a class disables closing for it (gap stays open)."""
+    lab = _empty()
+    lab[10:20, 10:18] = 1
+    lab[10:20, 20:28] = 1   # 2-px gap
+    out = close_labels(lab, classes=(1,), closing_radius={1: 0})
+    assert (out[11:19, 18:20] == 0).all(), "radius-0 class should not close"
+    print("  close_labels radius 0 skips class — OK")
+
+
+def test_close_radius_default_fallback():
+    """Classes absent from the radii dict fall back to DEFAULT_CLOSING_RADIUS
+    (3), which bridges a 2-px gap."""
+    lab = _empty()
+    lab[10:20, 10:18] = 1
+    lab[10:20, 20:28] = 1
+    # class 1 not in the dict -> falls back to DEFAULT_CLOSING_RADIUS=3
+    out = close_labels(lab, classes=(1,), closing_radius={2: 1})
+    assert (out[11:19, 18:20] == 1).all(), "unlisted class should use default radius"
+    print("  close_labels default-radius fallback — OK")
+
+
 def main():
     print("Running polygonize tests...")
     test_single_square_polygon_geometry()
@@ -251,6 +296,9 @@ def main():
     test_close_all_background_returns_unchanged()
     test_min_area_drops_small_patch()
     test_min_area_zero_keeps_all()
+    test_close_per_class_radius_dict()
+    test_close_radius_zero_skips_class()
+    test_close_radius_default_fallback()
     print("All polygonize tests passed.")
 
 

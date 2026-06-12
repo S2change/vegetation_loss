@@ -105,6 +105,7 @@ def create_before_after_composites(block: np.ndarray,
                                    selection_band_idx: int = SELECTION_BAND_IDX_DEFAULT,
                                    nodata: int = NODATA_U8,
                                    verbose: bool = True,
+                                   max_days_from_break: int | None = None,
                                    ) -> tuple[np.ndarray, np.ndarray]:
     """Build before/after composites for each requested target date.
 
@@ -122,6 +123,13 @@ def create_before_after_composites(block: np.ndarray,
         uint8 nodata sentinel. Default 255.
     verbose : bool
         Print a one-line warning per skipped target date.
+    max_days_from_break : int or None
+        Symmetric temporal window (in days) around each target/break date.
+        When set, the before composite only considers timesteps in
+        [target - max_days_from_break, target), and the after composite only
+        timesteps in (target, target + max_days_from_break]. A target with no
+        valid timestep inside the window on either side is skipped. None
+        (default) leaves both sides unbounded (any timestep before/after).
 
     Returns
     -------
@@ -162,18 +170,30 @@ def create_before_after_composites(block: np.ndarray,
         pre_mask  = ts < target
         post_mask = ts > target
 
+        # Optional symmetric day-window around the break date: drop timesteps
+        # further than max_days_from_break on either side.
+        if max_days_from_break is not None:
+            pre_mask  &= ts >= target - max_days_from_break
+            post_mask &= ts <= target + max_days_from_break
+
         if not pre_mask.any():
             if verbose:
+                win = (f" within {max_days_from_break} days"
+                       if max_days_from_break is not None else "")
                 print(
                     f"[warn] Target date {date.fromordinal(target)} skipped: "
-                    f"no valid pre-date timesteps (need ts < target_date strictly)."
+                    f"no valid pre-date timesteps (need ts < target_date "
+                    f"strictly{win})."
                 )
             continue
         if not post_mask.any():
             if verbose:
+                win = (f" within {max_days_from_break} days"
+                       if max_days_from_break is not None else "")
                 print(
                     f"[warn] Target date {date.fromordinal(target)} skipped: "
-                    f"no valid post-date timesteps (need ts > target_date strictly)."
+                    f"no valid post-date timesteps (need ts > target_date "
+                    f"strictly{win})."
                 )
             continue
 

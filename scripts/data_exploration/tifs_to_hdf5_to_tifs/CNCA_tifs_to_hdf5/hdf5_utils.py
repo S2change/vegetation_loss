@@ -2,10 +2,13 @@ import os
 import re
 import numpy as np
 import rasterio
+import rasterio.windows
+from rasterio.transform import xy
 from datetime import date, datetime, timezone
 
 BAND_NAMES= ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8a", "B11", "B12"]
 TILE_NAMES = ['T29SMC', 'T29TQF', 'T29SMD', 'T29TQG', 'T29SNB', 'T29TME', 'T29SNC', 'T29SND', 'T29SPB', 'T29SPC', 'T29TNE', 'T29SPD', 'T29TNF', 'T29TNG', 'T29TPE', 'T29TPF', 'T29TPG']
+TILE_NAMES = ['T29TPG']
 
 INPUT_NODATA_VAL = 65535
 OUTPUT_NODATA_VAL = 65535
@@ -15,18 +18,21 @@ COORD_NODATA_VAL = -9999   # nodata sentinel for int32 coordinate arrays (xs_new
 MAX_CLOUD_COVER_PT = 0.6 # (proportion: 0.6=60%) file_metadata only stores timestamps where cloud_cover_PT is below 60% and date is between MIN_DATE and MAX_DATE
 
 # S2 geotiff files
-FOLDER_S2 = r"" # 2025/S2B_MSIL2A_.../S2B_MSIL2A_...tif+S2B_MSIL1C_..._mask_omni.tif
-FOLDER_PT_MASKS = r"...\Mascara_PT_S2" # mask_T29SMC.tif, etc
-FOLDER_HDF5 = r"/users1/dgt/hdf5_2023"
+FOLDER_S2 = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testes_cnca_filtar_hdf5_nuvems\exemplos_geotiff_CNCA" # 2025/S2B_MSIL2A_.../S2B_MSIL2A_...tif+S2B_MSIL1C_..._mask_omni.tif
+FOLDER_PT_MASKS = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testes_cnca_filtar_hdf5_nuvems\exemplos_geotiff_CNCA\Mascara_PT_S2" # mask_T29SMC.tif, etc
+FOLDER_HDF5 = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testes_cnca_filtar_hdf5_nuvems\exemplos_geotiff_CNCA\hdf5"
 
 # Date filters
-MIN_DATE = date(2023, 1, 1) 
-MAX_DATE = date(2023,12,31)
+# create_hdf5.py uses MIN_DATE and MAX_DATE to create the original hdf5 file 
+# append_hdf5.py overwrites MIN_DATE as the most recent date in the existing hdf5 file
+MIN_DATE = None #date(2025, 1, 1) 
+MAX_DATE = None #date(2025,6,30)
 
 # hdf5 chunck size
 N_TS_CHUNK = 12       # number of timestamps per chunk
-CHIP_SIDE = 256   # pixels per chip side (256 × 256 = 65 536 px/chip)
-PIXEL_RES = 10    # Sentinel-2 native resolution, metres
+CHIP_SIZE = 256 * 256  # spatial pixels per chunk (one 256×256 chip flattened)
+CHIP_SIDE = 256        # pixels per chip side
+PIXEL_RES = 10         # Sentinel-2 native resolution, metres
 ####################################################
 """
     File structure:
@@ -51,6 +57,66 @@ PIXEL_RES = 10    # Sentinel-2 native resolution, metres
     ...
 """
 #############################################
+
+def read_pt_mask_pixels(m):
+    """Return (mask_rows, mask_cols, xs_flat, ys_flat) for value-0 pixels in the tight bbox.
+
+    Row/col indices are relative to the tight bbox origin. xs/ys are upper-left pixel corners
+    in the CRS of the PT mask, stored as int32 (valid for UTM coordinates in Portugal).
+    """
+    window = rasterio.windows.Window(m['col_off_pt'], m['row_off_pt'], m['ncols_pt'], m['nrows_pt'])
+    with rasterio.open(m['path_pt_mask']) as src:
+        pt_tight = src.read(1, window=window)
+    mask_rows, mask_cols = np.where(pt_tight == 0)
+    xs, ys = xy(m['transform_pt'], mask_rows, mask_cols, offset='ul')
+    return mask_rows, mask_cols, np.array(xs, dtype=np.int32), np.array(ys, dtype=np.int32)
+
+
+def build_chip_layout(xs, ys):
+    """Sort pixels into chip grid cells, pad each to CHIP_SIDE² slots."""
+    n_slots = CHIP_SIDE ** 2
+    chip_m  = CHIP_SIDE * PIXEL_RES
+    x_bins  = ((xs.astype(np.int64) - int(xs.min())) // chip_m).astype(np.int32)
+    y_bins  = ((int(ys.max()) - ys.astype(np.int64)) // chip_m).astype(np.int32)
+    chip_id = x_bins.astype(np.int64) * 1_000_000 + y_bins.astype(np.int64)
+
+    unique_ids, pixel_chip = np.unique(chip_id, return_inverse=True)
+    n_chips     = len(unique_ids)
+    chip_counts = np.bincount(pixel_chip, minlength=n_chips).astype(np.int32)
+    order       = np.argsort(pixel_chip, kind='stable')
+
+    sort_order_padded = np.full(n_chips * n_slots, -1, dtype=np.int64)
+    chip_starts = np.zeros(n_chips + 1, dtype=np.int64)
+    np.cumsum(chip_counts, out=chip_starts[1:])
+    for c in range(n_chips):
+        s, e = chip_starts[c], chip_starts[c + 1]
+        sort_order_padded[c * n_slots : c * n_slots + (e - s)] = order[s:e]
+
+    xs_new = np.full(n_chips * n_slots, COORD_NODATA_VAL, dtype=np.int32)
+    ys_new = np.full(n_chips * n_slots, COORD_NODATA_VAL, dtype=np.int32)
+    real   = sort_order_padded >= 0
+    xs_new[real] = xs[sort_order_padded[real]]
+    ys_new[real] = ys[sort_order_padded[real]]
+
+    chip_x_bin = (unique_ids // 1_000_000).astype(np.int32)
+    chip_y_bin = (unique_ids %  1_000_000).astype(np.int32)
+
+    return sort_order_padded, xs_new, ys_new, chip_x_bin, chip_y_bin, chip_counts
+
+
+def read_and_combine_tifs(paths, window):
+    """Read the tight-bbox window from each path and combine by per-band minimum.
+    nodata=65535 is the uint16 maximum, so np.minimum naturally prefers valid data
+    over nodata: min(65535, valid_value) = valid_value.
+    """
+    combined = None
+    for path in paths:
+        print(path, window)
+        with rasterio.open(path) as src:
+            data = src.read(window=window)  # (nbands, nrows_pt, ncols_pt), uint16
+        combined = data if combined is None else np.minimum(combined, data)
+    return combined  # (nbands, nrows_pt, ncols_pt)
+
 
 # extract same acquisition exact time (to aggregate parts of geotiff)
 def extract_s2_prefix_from_s2_folder_name(f):

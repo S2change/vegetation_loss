@@ -53,8 +53,16 @@ def _write_synthetic_hdf5(
     nodata_val: int = DEFAULT_NODATA_U16,
     start_ordinal: int = 738887,
     ts_stride_days: int = 5,
+    set_bounds: bool = False,
+    scatter_nodata_positions: tuple[tuple[int, int], ...] = (),
 ):
     """Build a minimal chip-chunked HDF5 matching rechunker output.
+
+    set_bounds: write bounds_left/bounds_top attrs so the deterministic
+        origin path (not the pixel-extrapolation fallback) is exercised.
+    scatter_nodata_positions: chip grid positions whose xs_new/ys_new should
+        have -9999 NODATA scattered WITHIN rows (mimics ragged partial chips
+        that broke the old first-valid-pixel extrapolation).
 
     Each chip's 65_536 pixel slots are filled with a linspace base depending
     on (chip_idx, t, b) — easy to verify with hand calc, and gives
@@ -79,6 +87,14 @@ def _write_synthetic_hdf5(
                 slot = chip_idx * CHIP_PIXELS + row * CHIP_SIZE + col
                 xs_new[slot] = int(chip_x0 + col * PIXEL_RES)
                 ys_new[slot] = int(chip_y0 - row * PIXEL_RES)
+        if (cy, cx) in scatter_nodata_positions:
+            # Punch -9999 into scattered pixels (incl. pixel (0,0) and an
+            # interior block) so argmax(valid) lands on a non-(0,0) pixel —
+            # the case the old row-major extrapolation got wrong.
+            s = chip_idx * CHIP_PIXELS
+            xs_new[s] = ys_new[s] = -9999            # kill pixel (0,0)
+            xs_new[s + 5] = ys_new[s + 5] = -9999    # scattered within row 0
+            chip_pixel_count[chip_idx] = CHIP_PIXELS - 2
 
     with h5py.File(path, "w") as h5f:
         values = h5f.create_dataset(
@@ -114,6 +130,10 @@ def _write_synthetic_hdf5(
             dtype=h5py.special_dtype(vlen=bytes),
         )
         h5f.attrs["crs"] = "EPSG:32629"
+        if set_bounds:
+            # bounds_left/top = chip-grid (0,0) NW corner, matching xs/ys.
+            h5f.attrs["bounds_left"] = float(SYNTHETIC_TILE_X0)
+            h5f.attrs["bounds_top"] = float(SYNTHETIC_TILE_Y0)
 
 
 # ============================================================================
@@ -277,6 +297,37 @@ def test_block_world_origin():
         expected_y = SYNTHETIC_TILE_Y0 - 4 * CHIP_SIZE * PIXEL_RES
         assert pos11.world_origin_x == expected_x
         assert pos11.world_origin_y == expected_y
+
+        # Primary path: with bounds attrs, origin is deterministic and exact
+        # even when the anchor chip is a RAGGED partial chip (scattered NODATA
+        # within rows). This is the case that drifted by km under the old
+        # first-valid-pixel extrapolation — see _compute_block_world_origin.
+        path3 = os.path.join(tmpd, "fake3.h5")
+        positions3 = [(y, x) for y in range(5) for x in range(5)]
+        _write_synthetic_hdf5(
+            path3, positions3, set_bounds=True,
+            # Make the chips of block (0,0)'s live area ragged-partial.
+            scatter_nodata_positions=tuple((y, x) for y in range(4)
+                                           for x in range(4)),
+        )
+        _, _, pos_b = read_block(path3, 0, 0)
+        assert pos_b.world_origin_x == SYNTHETIC_TILE_X0, pos_b.world_origin_x
+        assert pos_b.world_origin_y == SYNTHETIC_TILE_Y0, pos_b.world_origin_y
+
+        # Fallback path (no bounds attrs): the live area's own chips are all
+        # ragged-partial, so the origin must be anchored off a FULL chip
+        # elsewhere in the grid and walked back — never off a partial chip's
+        # scattered pixels. Origin must still be exact.
+        path4 = os.path.join(tmpd, "fake4.h5")
+        positions4 = [(y, x) for y in range(5) for x in range(5)]
+        _write_synthetic_hdf5(
+            path4, positions4, set_bounds=False,
+            scatter_nodata_positions=tuple((y, x) for y in range(4)
+                                           for x in range(4)),
+        )
+        _, _, pos_f = read_block(path4, 0, 0)
+        assert pos_f.world_origin_x == SYNTHETIC_TILE_X0, pos_f.world_origin_x
+        assert pos_f.world_origin_y == SYNTHETIC_TILE_Y0, pos_f.world_origin_y
     print("  read_block (world_origin derivation) — OK")
 
 

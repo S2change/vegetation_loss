@@ -15,17 +15,26 @@ channel_nums = 10
 if channel_nums == 6:
     normalization_mean = (0.485, 0.456, 0.406, 0.456, 0.406, 0.485)
     normalization_std  = (0.229, 0.224, 0.225, 0.224, 0.225, 0.229)
-    selected_nums      = [0, 1, 2, 3, 4, 5]
+    selected_nums      = [0, 1, 2, 3, 4, 5] # Training data was reversed before input
+    reversed_nums      = [5, 4, 3, 2, 1, 0] # predict_pipeline ingests S2 data with standard ordering, needs to be reversed
 elif channel_nums == 10:
     normalization_mean = (0.485, 0.456, 0.406, 0.485, 0.456, 0.406, 0.485, 0.456, 0.406, 0.485)
     normalization_std  = (0.229, 0.224, 0.225, 0.229, 0.224, 0.225, 0.229, 0.224, 0.225, 0.229)
-    selected_nums      = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    selected_nums      = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] # Training data was reversed before input
+    reversed_nums      = [9, 8, 7, 6, 5, 4, 3, 2, 1, 0] # predict_pipeline ingests S2 data with standard ordering, needs to be reversed
 else:
     sys.exit('channel_nums is wrong')
 
 # ── Post-processing ────────────────────────────────────────────────────────────
 MIN_PATCH_SIZE = 25   # minimum viable patch in pixels
-CLOSING_RADIUS = 3    # morphological closing radius
+CLOSING_RADIUS = 3    # morphological closing radius (fallback for unlisted classes)
+
+# Per-class morphological closing radius. Closing runs at two stages — per
+# chip (predict.postprocess_prediction) and per block, post-vote
+# (polygonize.close_labels) — and BOTH read this dict so the rule can't drift.
+# Keys are grouped class IDs (see CLASS_GROUPING_NAMES): 1 = Cuts, 2 = Fires.
+# Classes absent from this dict fall back to CLOSING_RADIUS.
+CLOSING_RADII = {1: 3, 2: 1}   # Cuts → 3, Fires → 1
 
 # ── Per-class inference threshold ──────────────────────────────────────────────
 # Pixels where P(Cuts) exceeds this value are labelled Cuts even if not argmax.
