@@ -1,4 +1,5 @@
-Data available to download:
+## Data available to download
+
 - `MBPV_v1.7z` zipped file (open with `7-zip` and password). It includes 12 bimensal maps for 2023-2024 (see below), each one with predicted vegetation loss polygons for the whole Portugal with the following fields: 
 fid,
 date_value,
@@ -10,6 +11,7 @@ date_formatted,
 min_date_formatted,
 max_date_formatted.
 
+## Data sets description
 
 - CCD_RPV_v2: Raster product. Similarly to `MBPV_v1`, the Sentinel-2 series is processed up to a recent date (e.g. present), but the vector vegetation loss map is computed for some time interval I. For instance, S2 is processed by PyCCD up to 2025-11-17, but only breaks within ['2023-01-01','2023-02-28'] are extracted to create the vector product. Processing steps are similar to `MBVP_v1` with a few improvements.
 - CCD_MIPV_v2: (*mapa de perdas de vegetação v2*). Similarly to `MBPV_v1`, the Sentinel-2 series is processed up to a recent date (e.g. present), but the vector vegetation loss map is computed for some time interval I. For instance, S2 is processed by PyCCD up to 2025-11-17, but only breaks within ['2023-01-01','2023-02-28'] are extracted to create the vector product. Processing steps are similar to `MBVP_v1` with a few improvements.
