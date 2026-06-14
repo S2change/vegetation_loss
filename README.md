@@ -75,11 +75,12 @@ entregáveis:
   * E3.1 – Manual de utilização operacional da metodologia implementada na cadeia de produção da DGT. [Entregável 3.1 (pdf)](documents/deliverables/Entregavel_3.1_v3.pdf) (20 de outubro de 2024).
   * E3.2 – Demonstrador prático: mapas nacionais vetoriais a delimitar manchas de perda recente de floresta e mato superiores a 0.5 ha com uma frequência bimestral relativos a um período contínuo de dois anos entre 2023 e 2025. [Entregável 3.2 (pdf)](documents/deliverables/Entregavel_3_2_v1.pdf)
 
-  * E3.3 – Relatório de validação dos mapas nacionais.
+  * E3.3 – Relatório de validação dos mapas nacionais.[Entregável 3.3 (pdf), novembro 2025](documents/deliverables/Entregavel_3_3_AB_v1.pdf)
   
-    Foram feitos dois exercícios de validação descritos abaixo (revisto nov 2025):
-    - Usando [BDR_DGT_300](data_info/reference_data/BDR_DGT_300) e os mapas bimestrais de perdas de vegetação. Ver [script](scripts/validation/raster_avaliacao_exatidao.py) e [relatório E3.3A (pdf)](documents/deliverables/Entregavel_3_3_A.pdf)  ou [relatório E3.3A (markdown)](documents/deliverables/Entregavel_3_3A_validacao_ccd_mbpv_dgt300_report_v1.md)
-    - Fazendo uma comparação para os mapas bimestrais de perdas de vegetação para 2023-2024 com as áreas ardidas [ICNF](data_info/reference_data/ICNF) para Portugal Continental. Ver [script](scripts/validation/validate_ccd_against_icnf.py) e [relatório E3.3B](documents/deliverables/Entregavel_3_3B_validacao_ccd_mbpv_v1_icnf_v3.pdf).
+    Foram feitos dois exercícios de validação para o produto [MBPV_v1: mapa bimestral de perdas de vegetação v1](https://github.com/S2change/vegetation_loss/tree/main/data_info/vegetation_loss_products):
+    - Usando [BDR_DGT_300](data_info/reference_data/BDR_DGT_300) para a Tile T29TNDe e período setembro 2018 a outubro 2021;
+    - Fazendo uma comparação com as áreas ardidas [ICNF](data_info/reference_data/ICNF) para Portugal Continental.
+      
   * E3.4 – Aplicação informática que possa ser integrada na cadeia de produção da DGT:
 
     Os scripts (que foram desenvolvidos para serem compatíveis com o pipeline de processamento de dados Sentinel-2 em ambiente HPC) estão disponíveis neste repositório. Em particular, foi criado e testado o código para as  tarefas abaixo:
