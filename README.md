@@ -53,25 +53,25 @@ base em análise automática de imagens de satélite
 
 *Duração: Mês 1-6*
 
-entregáveis:
-  * E1.1 – [Relatório com a descrição do problema, condicionantes, dados de input e especificações técnicas dos outputs](documents/deliverables/Entregavel_1_1.pdf) (10 de dezembro de 2023).
-  * E1.2 – [Relatório com seleção e justificação das metodologias a operacionalizar](documents/deliverables/Entregavel_1_2.pdf) (1 de maio de 2024); [versão revista](documents/deliverables/Entregavel_1_2_v2.pdf) (14 de maio de 2024)
-  * E1.3 – [Relatório sobre potenciais adaptações tecnológicas a implementar na cadeia de produção da DGT](documents/deliverables/entregavel_1.3_v3.pdf) (5 de julho de 2024).
+Entregáveis:
+  * E1.1 – Relatório com a descrição do problema, condicionantes, dados de input e especificações técnicas dos outputs. [Entregável 1.1 (pdf), dezembro 2023](documents/deliverables/Entregavel_1_1.pdf)
+  * E1.2 – Relatório com seleção e justificação das metodologias a operacionalizar. [Entregável 1.2 (pdf), maio 2024](documents/deliverables/Entregavel_1_2_v2.pdf).
+  * E1.3 – Relatório sobre potenciais adaptações tecnológicas a implementar na cadeia de produção da DGT[Entregável 1.3 (pdf), julho 2024](documents/deliverables/entregavel_1.3_v3.pdf).
 
 **Tarefa 2** - Construção da uma base de dados de referência (BDR) para calibração e validação espacial e temporal das metodologias a operacionalizar com base em dados resultantes de interpretação de imagens aéreas e de satélite, do Instituto de Conservação da Natureza e Florestas (ICNF) e outras fontes consideradas relevantes.
 
 *Duração: Meses 2-18* 
 
-entregáveis:  
-  * E2.1 – [Relatório com metodologia de criação da BDR](documents/deliverables/Entregavel_2_1.pdf) (1 de maio de 2024); [versão revista](documents/deliverables/Entregavel_2_1_v2.pdf) (14 de maio de 2024)
-  * E2.2 – [Metadados da base de dados de referência em formato ESRI shapefile ou Geopackage para uma tile Sentinel-2 sobre Portugal Continental](documents/deliverables/Entregavel_2_2_BDR_navigator_sentinel2_metadados_v4.pdf) (7 de julho de 2024).
+Entregáveis:  
+  * E2.1 – Relatório com metodologia de criação da BDR. [Entregável 2.1 (pdf), maio 2024](documents/deliverables/Entregavel_2_1_v2.pdf) 
+  * E2.2 – Metadados da base de dados de referência em formato ESRI shapefile ou Geopackage para uma tile Sentinel-2 sobre Portugal Continental. [Entregável 2.2 (pdf), julho 2024](documents/deliverables/Entregavel_2_2_BDR_navigator_sentinel2_metadados_v4.pdf)
   * E2.3 – Extensão da base de dados para outras regiões de Portugal Continental. Ver [BRD_NVG](data_info/reference_data/NVG) para acesso aos dados (protegido) e à documentação.
 
 **Tarefa 3** – Adaptação e implementação operacional de uma metodologia automática com base em imagens de satélite para a criação sistemática de um produto nacional de delimitação de manchas vetoriais superiores a 0.5 ha de perda recente de floresta e mato, com uma periodicidade de pelo menos dois meses.
 
 *Duração: Meses 9-20*
 
-entregáveis:
+Entregáveis:
   * E3.1 – Manual de utilização operacional da metodologia implementada na cadeia de produção da DGT. [Entregável 3.1 (pdf)](documents/deliverables/Entregavel_3.1_v3.pdf) (20 de outubro de 2024).
   * E3.2 – Demonstrador prático: mapas nacionais vetoriais a delimitar manchas de perda recente de floresta e mato superiores a 0.5 ha com uma frequência bimestral relativos a um período contínuo de dois anos entre 2023 e 2025. [Entregável 3.2 (pdf)](documents/deliverables/Entregavel_3_2_v1.pdf)
   * E3.3 – Relatório de validação dos mapas nacionais. [Entregável 3.3 (pdf), novembro 2025](documents/deliverables/Entregavel_3_3_AB_v1.pdf)
@@ -88,7 +88,7 @@ entregáveis:
 
 *Duração: Meses 13-24*
 
-entregáveis:
+Entregáveis:
   * E4.1 – Manual de utilização operacional da metodologia implementada na cadeia de produção da DGT. [Entregável 4.1 (pdf), novembro 2025](documents/deliverables/Entregavel_41_nov_2025.pdf)
   * E4.2 – Demonstrador prático: mapas nacionais a identificar o agente causador das perdas recentes de floresta e mato superiores a 0.5 ha produzidas na tarefa 3.
   * E4.3 – Relatório de validação dos mapas nacionais.
