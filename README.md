@@ -26,32 +26,7 @@ base em análise automática de imagens de satélite
 * Centro de custos do ISA: 5207 (S2CHANGE)
 </details>
 
-## Apresentações e recursos HPC
-
-<details markdown="block">
-<summary> Reunião DGT 20 fevereiro de 2024</summary>
-
-* Apresentação Sara Caetano. Resultados que permitem comparar a aplicação da metodologia de deteção de alterações (CCD), com o algoritmo Python pyccd, a imagens Sentinel-2 obtidas no GEE (com máscara de nuvens produzida pelo algoritmo S2cloudness) com as imagens Sentinel-2 préprocessadas pela Theia: [ficheiro powerpoint](documents/presentations/PPT_CCD_20fev.pptx)
-* Apresentação Inês Silveira sobre a base de dados de referência Navigator; análise em particular da distribuição de datas de cortes dentro do mesmo talhão e da possibilidade de associar um sub-talhão a cada data de corte; análise preliminar sobre a possibilidade de associar uma alteração de sinal a operações de rechega e outras [ficheiro pdf](documents/presentations/Apresentacao_BD_NVG_IS_20fev.pdf)
-
-</details>
-
-<details markdown="block">
-<summary> Reunião DGT 23 de maio de 2024</summary>
-
-* Apresentação Sara Caetano [ficheiro pdf](documents/presentations/PPT_CCD_23maio2024.pdf)
-* Apresentação Inês Silveira [ficheiro pdf](documents/presentations/Apresentacao_DatasCorte_DGT_23maio2024.pdf)
-
-</details>
-
-<details markdown="block">
-<summary> Reuniões DGT/INCD/LIP</summary>
-
-* [Apresentação 4/7/2024](documents/presentations/reuniao_DGT_4_julho_2024.pdf)
-* [Apresentação 18/6/2025](documents/presentations/Reuniao_DGT_CNCA_ISA_18_junho_2025.pdf)
-
-</details>
-
+## Equipa e recursos HPC
 
 <details markdown="block">
 <summary> HPC resources</summary>
