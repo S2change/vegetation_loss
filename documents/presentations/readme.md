@@ -55,6 +55,7 @@
 
 ## 2025
 
+
 - (18 de junho de 2025) Reunião com DGT/CNCA: [Presentation (pdf)](https://github.com/S2change/vegetation_loss/tree/main/documents/presentations/2025)
 
     <details>
@@ -87,8 +88,22 @@
 
 -  (20 fev 2024) [Base Dados Referência NVG](https://github.com/S2change/vegetation_loss/tree/main/documents/presentations/2024). Descrição e organização das tabelas da BDR NVG original.
 - (20 fev 2024)  [Deteção de alterações com CCD, ficheiro PPT](https://github.com/S2change/vegetation_loss/tree/main/documents/presentations/2024)
+
+<details markdown="block">
+<summary> Reunião DGT 20 fevereiro de 2024</summary>
+
+* Apresentação Sara Caetano. Resultados que permitem comparar a aplicação da metodologia de deteção de alterações (CCD), com o algoritmo Python pyccd, a imagens Sentinel-2 obtidas no GEE (com máscara de nuvens produzida pelo algoritmo S2cloudness) com as imagens Sentinel-2 préprocessadas pela Theia: [ficheiro powerpoint](documents/presentations/PPT_CCD_20fev.pptx)
+* Apresentação Inês Silveira sobre a base de dados de referência Navigator; análise em particular da distribuição de datas de cortes dentro do mesmo talhão e da possibilidade de associar um sub-talhão a cada data de corte; análise preliminar sobre a possibilidade de associar uma alteração de sinal a operações de rechega e outras [ficheiro pdf](documents/presentations/Apresentacao_BD_NVG_IS_20fev.pdf)
+
+</details>
+
 - (23 maio 2024) [PyCCD: Análise do desempenho e dos tempos de computação](https://github.com/S2change/vegetation_loss/tree/main/documents/presentations/2024). Discussão de diferentes formatos de input/output para uma máquina local (**não HPC**). Componentes do pyCCD mais exigentes em recursos computacionais. Estratágias para reduzir o tempo de computação (leitura dados, LASSO, ...)
 - (23 de maio de 2024) [Melhoramento da BDR NVG usando informação espetral](https://github.com/S2change/vegetation_loss/tree/main/documents/presentations/2024)  Implementação de técnicas baseadas nas quedas médias de NVDI em cada sub-talhão (posteriormente, o trabalho evoluiu para análise ao nível do pixel).
 - (4 de julho de 2024) [Reunião DGT/INCD/LIP](https://github.com/S2change/vegetation_loss/tree/main/documents/presentations/2024). Descrição do problema de criação do produto de perdas de vegetação: dados de referência, dados de satélite, algoritmos (CCD, etapas de processamento), estimativa de recursos computacionais
+
+
+
+
+
 
 
