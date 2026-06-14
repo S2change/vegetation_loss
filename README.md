@@ -29,6 +29,19 @@ base em análise automática de imagens de satélite
 ## Equipa e recursos HPC
 
 <details markdown="block">
+<summary> Equipa </summary>
+
+- Sara Caetano
+- Manuel Campagnolo (coordenação)
+- Jesus Céspedes
+- Daniel Moraes
+- António Sequeira
+- Inês Silveira
+- Dominic Welsh
+
+</details>
+
+<details markdown="block">
 <summary> HPC resources</summary>
 
 * See [HPC resources](documents/HPC_resources) 
