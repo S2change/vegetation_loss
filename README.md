@@ -75,7 +75,7 @@ entregáveis:
   * E3.1 – Manual de utilização operacional da metodologia implementada na cadeia de produção da DGT. [Entregável 3.1 (pdf)](documents/deliverables/Entregavel_3.1_v3.pdf) (20 de outubro de 2024).
   * E3.2 – Demonstrador prático: mapas nacionais vetoriais a delimitar manchas de perda recente de floresta e mato superiores a 0.5 ha com uma frequência bimestral relativos a um período contínuo de dois anos entre 2023 e 2025. [Entregável 3.2 (pdf)](documents/deliverables/Entregavel_3_2_v1.pdf)
 
-  * E3.3 – Relatório de validação dos mapas nacionais.[Entregável 3.3 (pdf), novembro 2025](documents/deliverables/Entregavel_3_3_AB_v1.pdf)
+  * E3.3 – Relatório de validação dos mapas nacionais. [Entregável 3.3 (pdf), novembro 2025](documents/deliverables/Entregavel_3_3_AB_v1.pdf)
   
     Foram feitos dois exercícios de validação para o produto [MBPV_v1: mapa bimestral de perdas de vegetação v1](https://github.com/S2change/vegetation_loss/tree/main/data_info/vegetation_loss_products):
     - Usando [BDR_DGT_300](data_info/reference_data/BDR_DGT_300) para a Tile T29TNDe e período setembro 2018 a outubro 2021;
@@ -88,7 +88,7 @@ entregáveis:
     - Conversão dos resultado os formato `parquet` para mapas bimestrais em formato `geotiff`. Cada pixel agora possui quatro bandas: [Script](scripts/visualisations/ccd_to_raster.py): `last_tEnd`: data final do segmento antes da quebra; `last_tBreak`: data da quebra mais recente;  `is_break`: indicador booleano que sinaliza se ocorreu uma alteração: `1` se for uma quebra conhecida, `0` se não houve alteração, `-1` se não for possível determinar se ocorreu uma quebra ou um aumento (casos em que o segmento pós-quebra não foi formado); `ndvi_last_tEnd`: valor do NDVI calculado em last_tEnd.
     - Criação de mapas vectoriais bimestrais a partir dos mapas raster. [Script](scripts/visualisations/graph_raster_to_polygons.py)
     - Criação dos mapas nacionais bimestrais de perdas de vegetação. [Script](scripts/visualisations/ccd_polygons_to_national_maps.py)
-    - Validação: ver link em **E3.3**
+    - Validação: ver entregável em **E3.3** com links para scripts.
       
 **Tarefa 4** – Adaptação e implementação operacional na cadeia de produção da DGT de uma metodologia automática com base em imagens de satélite para a identificação sistemática do agente causador das perdas recentes de floresta e mato delimitadas no produto da tarefa 3, com uma periodicidade de pelo menos dois meses.
 
