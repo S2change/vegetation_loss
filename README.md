@@ -89,15 +89,15 @@ entregáveis:
 *Duração: Meses 13-24*
 
 entregáveis:
-  * E4.1 – Manual de utilização operacional da metodologia implementada na cadeia de produção da DGT [E4.1, nov 2025](documents/deliverables/Entregavel_41_nov_2025.pdf)
+  * E4.1 – Manual de utilização operacional da metodologia implementada na cadeia de produção da DGT. [Entregável 4.1 (pdf), novembro 2025](documents/deliverables/Entregavel_41_nov_2025.pdf)
   * E4.2 – Demonstrador prático: mapas nacionais a identificar o agente causador das perdas recentes de floresta e mato superiores a 0.5 ha produzidas na tarefa 3.
   * E4.3 – Relatório de validação dos mapas nacionais.
   * E4.4 – Aplicação informática que possa ser integrada na cadeia de produção da DGT. 
 
-## Aditamento (set 2025)
+## Aditamentos (setembro 2025 e março 2026)
 
 - Entregáveis E2.3, E3.2, E3.3 e E4.1; contrato 20/4/2025; aditamento: 20/11/2025 (10% do valor contratado)
-- Entregáveis E3.4, E4.2, E4.3 e E4.4; contrato 19/10/2025; aditamento: 19/03/2026 (10% do valor contratado)
+- Entregáveis E3.4, E4.2, E4.3 e E4.4; contrato 19/10/2025; aditamento: 30/06/2026 (10% do valor contratado)
 
 Ver [cronograma](cronograma_aditamento_contrato_set_2025.png).
 
