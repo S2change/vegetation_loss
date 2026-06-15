@@ -24,6 +24,12 @@
 #       TARGET_DATES=2025-11-15,2025-12-01 \
 #       OUTPUT_DIR=/users1/cpca070342024/shared/predict_outputs/T29TPG_run01
 #
+# Target dates — give EITHER an explicit TARGET_DATES, OR a START_DATE +
+# END_DATE span (the dates are then generated automatically, one every
+# TARGET_STEP_DAYS=45 days, starting one step after START_DATE):
+#   ./submit_tile.sh TILE_ID=... TILE_HDF5_PATH=... OUTPUT_DIR=... \
+#       START_DATE=2025-01-01 END_DATE=2025-06-01
+#
 # Optional knobs (KEY=VALUE):
 #   MODEL=bacdm         model package directory name under <shared>/ (the
 #                       parent of distribute/). Each model package exposes the
@@ -45,6 +51,9 @@
 #                       names are in the model package's config (e.g.
 #                       bacdm/AAA_Configs.py, efficientnet_b2/configs.py).
 #   VOTE_THRESHOLD=2    min votes per pixel to keep a detection.
+#   TARGET_STEP_DAYS=45 spacing (days) between generated dates when using the
+#                       START_DATE/END_DATE span form (ignored if TARGET_DATES
+#                       is given explicitly).
 #   CLOSING_RADIUS=3    post-vote morphological close disk radius (0 = off).
 #   MIN_PATCH_M2=2500   block-level patch-area floor (m^2), firm.
 #   MIN_TILE_PATCH_M2=5000  master patch-area floor (m^2), post cross-block merge.
@@ -78,8 +87,21 @@ done
 # ── Required ──────────────────────────────────────────────────────────────
 : "${TILE_ID:?TILE_ID is required}"
 : "${TILE_HDF5_PATH:?TILE_HDF5_PATH is required}"
-: "${TARGET_DATES:?TARGET_DATES is required (comma-separated YYYY-MM-DD)}"
 : "${OUTPUT_DIR:?OUTPUT_DIR is required}"
+
+# Target dates: either an explicit TARGET_DATES, or a START_DATE/END_DATE span
+# that we expand into TARGET_DATES below (once the venv Python is available).
+# Validate the inputs here; the actual generation needs Python so it happens
+# in the "Resolve TARGET_DATES" block further down.
+TARGET_STEP_DAYS="${TARGET_STEP_DAYS:-45}"
+if [[ -z "${TARGET_DATES:-}" ]]; then
+    if [[ -z "${START_DATE:-}" || -z "${END_DATE:-}" ]]; then
+        echo "Provide TARGET_DATES (comma-separated YYYY-MM-DD), OR both " \
+             "START_DATE and END_DATE (YYYY-MM-DD) to generate them every " \
+             "TARGET_STEP_DAYS days." >&2
+        exit 1
+    fi
+fi
 
 # ── Optional (with defaults) ──────────────────────────────────────────────
 # Model package (directory name under <shared>/). Validated — and the
@@ -131,6 +153,27 @@ mkdir -p "$OUTPUT_DIR" "$LOG_DIR" "$BLOCK_OUTPUT_DIR" "$FINAL_OUTPUT_DIR"
 DISTRIBUTE_DIR="$(cd "$(dirname "$0")" && pwd)"
 SHARED_DIR="$(dirname "$DISTRIBUTE_DIR")"
 VENV="${VENV:-/users1/cpca070342024/shared/vchips/venv}"
+
+# ── Resolve TARGET_DATES ──────────────────────────────────────────────────
+# If TARGET_DATES wasn't given explicitly, generate it from the
+# START_DATE/END_DATE span via target_dates_creation.py — one date every
+# TARGET_STEP_DAYS, starting one step after START_DATE. Captured into a var
+# first (not piped straight into export) so a generation error fails the
+# whole script instead of silently exporting an empty list.
+if [[ -z "${TARGET_DATES:-}" ]]; then
+    TARGET_DATES="$(
+        "$VENV/bin/python" "$DISTRIBUTE_DIR/target_dates_creation.py" \
+            "$START_DATE" "$END_DATE" --step-days "$TARGET_STEP_DAYS"
+    )" || exit 1
+    if [[ -z "$TARGET_DATES" ]]; then
+        echo "No target dates generated for $START_DATE..$END_DATE every " \
+             "$TARGET_STEP_DAYS days (span shorter than one step?)." >&2
+        exit 1
+    fi
+    echo "Generated TARGET_DATES from $START_DATE..$END_DATE " \
+         "(every $TARGET_STEP_DAYS days):"
+fi
+export TARGET_DATES
 
 # ── Validate the model package + resolve default weights ──────────────────
 # A model package is any <SHARED_DIR>/<name>/ with a predict.py. When
