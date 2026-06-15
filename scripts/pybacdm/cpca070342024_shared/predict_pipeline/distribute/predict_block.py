@@ -11,7 +11,6 @@ set them without re-templating Python source):
 
   Required
     TILE_HDF5_PATH    Path to the chip-chunked HDF5 for one tile.
-    WEIGHTS_PATH      Path to the BACDM .pth checkpoint.
     OUTPUT_DIR        Base run directory (used as a fallback output location).
     TILE_ID           Tile name (e.g. T29TPG). Used in the .npz filename.
     BLOCK_ROW         Block row index (0..N_BLOCK_ROWS-1).
@@ -20,14 +19,21 @@ set them without re-templating Python source):
                       "2025-11-15,2025-12-01".
 
   Optional
+    MODEL             Model package directory name under <shared>/ (default
+                      "bacdm"; e.g. "efficientnet_b2"). The package must
+                      expose predict.load_model / predict_before_after_chips
+                      and DEFAULT_WEIGHTS — see bacdm/__init__.py for the
+                      interface contract.
+    WEIGHTS_PATH      Path to the model's .pth checkpoint. Defaults to the
+                      model package's DEFAULT_WEIGHTS.
     BLOCK_OUTPUT_DIR  Where to write the per-block .npz + .gpkg. Defaults to
                       OUTPUT_DIR (submit_tile.sh sets it to
                       OUTPUT_DIR/block_outputs).
     BATCH_SIZE        Model batch size (default 8).
     VOTE_CLASSES      Comma-separated non-bg class IDs (default "1,2").
     VOTE_THRESHOLD    Min votes per pixel to keep a detection (default 2).
-    CLOSING_RADIUS    Post-vote close radius; unset = per-class
-                      AAA_Configs.CLOSING_RADII, 0 = off (default unset).
+    CLOSING_RADIUS    Post-vote close radius; unset = the model package's
+                      per-class CLOSING_RADII, 0 = off (default unset).
     MIN_PATCH_M2      Block-level patch-area floor in m^2 (default 2500).
     MAX_COMPOSITE_DAYS  Symmetric day-window around the break date for
                       before/after compositing (unset = unbounded).
@@ -40,6 +46,7 @@ set them without re-templating Python source):
 Everything else (model architecture, ghost geometry, etc.) is fixed by
 the modules being imported.
 """
+import importlib
 import os
 import sys
 import time
@@ -51,11 +58,10 @@ import numpy as np
 import psutil
 import torch
 
-# Make the bacdm/ subpackage importable. bacdm/ sits next to distribute/
-# under <shared>/, and its modules use `from bacdm.X import ...` internally,
-# so we put <shared>/ (the parent of bacdm/) on the path.
+# Make the model packages importable. They sit next to distribute/ under
+# <shared>/ (bacdm/, efficientnet_b2/, ...), so we put <shared>/ on the path.
 _HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(_HERE.parent))                          # shared/ (for bacdm.*)
+sys.path.insert(0, str(_HERE.parent))                          # shared/ (for <model>.*)
 
 from input_setup import read_block, get_block_grid_shape
 from composite_shift_chips import (
@@ -67,13 +73,34 @@ from composite_shift_chips import (
 from composite_shift_chips.write_composite_tifs import write_block_composite_tifs
 from postprocess import (
     chip_nw_pixel_offset,
+    postprocess_prediction,
     VoteAccumulator,
     write_voted_block,
 )
 from polygonize import (
     labels_to_polygons, polygons_to_records, close_labels,
 )
-from bacdm.predict import load_model, predict_before_after_chips
+
+# ── Model selection ──────────────────────────────────────────────────────────
+# MODEL names a model package directory under <shared>/ (default bacdm).
+# Every model package exposes the same interface — predict.load_model,
+# predict.predict_before_after_chips, DEFAULT_WEIGHTS, CLOSING_RADII — see
+# bacdm/__init__.py for the contract. polygonize (imported above) reads the
+# same env var, so the block-level close uses the matching CLOSING_RADII.
+MODEL = os.environ.get("MODEL", "bacdm")
+try:
+    _model_pkg = importlib.import_module(MODEL)
+    _model_predict = importlib.import_module(f"{MODEL}.predict")
+except ImportError as exc:
+    _available = sorted(
+        p.parent.name for p in _HERE.parent.glob("*/predict.py")
+    )
+    raise SystemExit(
+        f"[predict_block] Could not import model package '{MODEL}': {exc}\n"
+        f"Available model packages under {_HERE.parent}: {_available}"
+    )
+load_model = _model_predict.load_model
+predict_before_after_chips = _model_predict.predict_before_after_chips
 
 
 def rss_mb() -> float:
@@ -115,7 +142,20 @@ def _dates_env() -> np.ndarray:
 
 def main() -> None:
     hdf5_path     = _required_env("TILE_HDF5_PATH")
-    weights_path  = _required_env("WEIGHTS_PATH")
+    # Checkpoint: explicit WEIGHTS_PATH wins; otherwise the model package's
+    # DEFAULT_WEIGHTS. Checked up front so a missing file fails fast with a
+    # clear message instead of a torch.load traceback after the HDF5 read.
+    weights_path  = (os.environ.get("WEIGHTS_PATH")
+                     or str(getattr(_model_pkg, "DEFAULT_WEIGHTS", "")))
+    if not weights_path:
+        raise SystemExit(
+            f"[predict_block] WEIGHTS_PATH is unset and model package "
+            f"'{MODEL}' has no DEFAULT_WEIGHTS"
+        )
+    if not Path(weights_path).is_file():
+        raise SystemExit(
+            f"[predict_block] Model weights not found: {weights_path}"
+        )
     # Per-block .npz/.gpkg go to BLOCK_OUTPUT_DIR (submit_tile.sh sets this to
     # OUTPUT_DIR/block_outputs); fall back to OUTPUT_DIR for standalone runs.
     output_dir    = os.environ.get("BLOCK_OUTPUT_DIR") or _required_env("OUTPUT_DIR")
@@ -132,9 +172,9 @@ def main() -> None:
     max_composite_days = (int(_mcd_env)
                           if _mcd_env not in (None, "") else None)
     # Post-vote morphological close radius (disk). Per-class radii come from
-    # AAA_Configs.CLOSING_RADII (Cuts → 3, Fires → 1); leaving CLOSING_RADIUS
-    # unset uses those. Setting CLOSING_RADIUS forces one radius for every
-    # class (override); CLOSING_RADIUS=0 disables closing entirely.
+    # the model package's CLOSING_RADII (Cuts → 3, Fires → 1); leaving
+    # CLOSING_RADIUS unset uses those. Setting CLOSING_RADIUS forces one
+    # radius for every class (override); CLOSING_RADIUS=0 disables closing.
     _cr_env = os.environ.get("CLOSING_RADIUS")
     closing_radius = int(_cr_env) if _cr_env is not None else None
     # Block-level patch-area floor (m^2). Dropped at this stage; the master
@@ -157,6 +197,7 @@ def main() -> None:
     print(f"HDF5:           {hdf5_path}")
     print(f"Block:          ({block_row}, {block_col}) of grid "
           f"({n_rows}, {n_cols})")
+    print(f"Model:          {MODEL}")
     print(f"Weights:        {weights_path}")
     print(f"Output dir:     {output_dir}")
     print(f"Target dates:   {[date.fromordinal(int(d)).isoformat() for d in target_dates]}")
@@ -165,7 +206,7 @@ def main() -> None:
     print(f"Vote classes:   {vote_classes}")
     print(f"Vote threshold: {vote_threshold}")
     print(f"Closing radius: "
-          f"{'per-class (AAA_Configs.CLOSING_RADII)' if closing_radius is None else closing_radius}")
+          f"{f'per-class ({MODEL}.CLOSING_RADII)' if closing_radius is None else closing_radius}")
     print(f"Min patch m^2:  {min_patch_m2}")
     print(f"\n[RSS] After imports:                   {rss_mb():7.1f} MB")
 
@@ -270,6 +311,7 @@ def main() -> None:
 
     rss_before_infer = rss_mb()
     t_inference_total = 0.0
+    t_postprocess_total = 0.0
     t_vote_total = 0.0
     n_pairs = 0
     class_counts: Counter[int] = Counter()
@@ -295,14 +337,27 @@ def main() -> None:
     batch: list = []
 
     def flush(batch: list) -> None:
-        nonlocal t_inference_total, n_pairs
+        nonlocal t_inference_total, t_postprocess_total, n_pairs
         if not batch:
             return
         before = np.stack([p.before.transpose(1, 2, 0) for p in batch])
         after  = np.stack([p.after.transpose(1, 2, 0)  for p in batch])
         t0 = time.perf_counter()
+        # predict_before_after_chips now returns RAW model output. Chip-level
+        # per-class morphological closing is applied here, after prediction,
+        # via the shared model-agnostic postprocess_prediction. remove_small=
+        # False: close only — chips vote on closed-but-unfiltered output, with
+        # size filtering deferred to the block/master stages where patches are
+        # whole. Per-class radii come from the active MODEL package, matching
+        # the block-level close (polygonize.close_labels).
         labels = predict_before_after_chips(before, after, model)
         t_inference_total += time.perf_counter() - t0
+        t0 = time.perf_counter()
+        labels = np.stack([
+            postprocess_prediction(labels[i], remove_small=False)
+            for i in range(len(labels))
+        ])
+        t_postprocess_total += time.perf_counter() - t0
         n_pairs += len(batch)
         for p, label in zip(batch, labels):
             kind_counts[p.chip_kind] += 1
@@ -323,6 +378,8 @@ def main() -> None:
     print(f"  By chip kind:      {dict(sorted(kind_counts.items()))}")
     print(f"  Total infer time:  {t_inference_total:.2f} s  "
           f"({t_inference_total / max(n_pairs, 1) * 1000:.1f} ms/chip)")
+    print(f"  Total close time:  {t_postprocess_total:.2f} s  "
+          f"(chip-level postprocess)")
     print(f"  Total vote time:   {t_vote_total:.2f} s")
     print(f"[RSS] After all inference:             {rss_after_infer:7.1f} MB  "
           f"(delta {rss_after_infer - rss_before_infer:+6.1f} MB)")

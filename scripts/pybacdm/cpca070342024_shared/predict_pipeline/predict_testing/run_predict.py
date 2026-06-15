@@ -54,6 +54,7 @@ from composite_shift_chips import (
 from postprocess import (
     encode_chip_predictions,
     chip_nw_pixel_offset,
+    postprocess_prediction,
     write_task_shard,
     read_shards,
     VoteAccumulator,
@@ -140,10 +141,11 @@ SAVE_CHIP_RECORDS = False
 TILE_ID = "T29TPG"
 DUMMY_TILE_ID = "DUMMY"
 
-# Note: small-component filtering (was MIN_COMPONENT_PIXELS) is now done
-# exclusively upstream by predict.postprocess_prediction (MIN_PATCH_SIZE,
-# CLOSING_RADIUS defaults from AAA_Configs). encode_chip_predictions just
-# stores whatever non-background pixels survive that filter.
+# Note: chip-level cleanup (per-class morphological closing; small-component
+# filtering is deferred to the block/master stages) is done by the shared
+# postprocess.chip_records.postprocess_prediction, applied right after the
+# model returns raw labels (radii/MIN_PATCH_SIZE come from the active MODEL
+# package). encode_chip_predictions just stores whatever survives.
 
 
 # ============================================================================
@@ -314,6 +316,13 @@ def main():
             after  = np.stack([p.after.transpose(1, 2, 0)  for p in batch])
             t0 = time.perf_counter()
             labels = predict_before_after_chips(before, after, model)
+            # Chip-level close (per-class radii; size filtering deferred to the
+            # block/master stages) — applied here, after the model returns raw
+            # labels, mirroring predict_block.py.
+            labels = np.stack([
+                postprocess_prediction(labels[i], remove_small=False)
+                for i in range(len(labels))
+            ])
             t_inference_total += time.perf_counter() - t0
             n_pairs += len(batch)
             for p, label in zip(batch, labels):
@@ -346,6 +355,10 @@ def main():
                 t0 = time.perf_counter()
                 labels = predict_before_after_chips(
                     before_view, after_view, model)
+                labels = np.stack([
+                    postprocess_prediction(labels[i], remove_small=False)
+                    for i in range(len(labels))
+                ])
                 t_inference_total += time.perf_counter() - t0
                 batch_kinds = bundle.chip_kinds[i:i + BATCH_SIZE]
                 batch_positions = bundle.grid_positions[i:i + BATCH_SIZE]

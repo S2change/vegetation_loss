@@ -170,7 +170,8 @@ def test_encode_emits_one_record_with_multiple_classes():
 
 def test_encode_no_size_filter():
     """No minimum-component filter: a 1-pixel speckle still produces a record
-    (predict.py's `postprocess_prediction` is the only filter upstream)."""
+    (the chip-level `postprocess_prediction`, applied upstream by
+    predict_block.py, is the only filter before encoding)."""
     lm = _empty_label_map()
     lm[5, 5] = 1   # single-pixel speckle
     records = list(encode_chip_predictions(

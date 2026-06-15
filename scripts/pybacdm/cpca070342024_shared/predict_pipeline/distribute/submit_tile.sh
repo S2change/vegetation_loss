@@ -25,15 +25,25 @@
 #       OUTPUT_DIR=/users1/cpca070342024/shared/predict_outputs/T29TPG_run01
 #
 # Optional knobs (KEY=VALUE):
+#   MODEL=bacdm         model package directory name under <shared>/ (the
+#                       parent of distribute/). Each model package exposes the
+#                       same interface (predict.load_model,
+#                       predict.predict_before_after_chips, DEFAULT_WEIGHTS,
+#                       CLOSING_RADII — see bacdm/__init__.py for the
+#                       contract), so switching model is just e.g.
+#                       MODEL=efficientnet_b2. Default: bacdm (Swin-YNet).
 #   THREADS=2           CPU threads per task. Also sets --cpus-per-task so the
 #                       allocation matches. A thread sweep showed ~95% scaling
 #                       at 2 threads, ~68% at 4 — 2 is the efficient default.
 #   MAX_CONCURRENT=8   max array tasks running at once (--array %N cap).
 #                       With THREADS, keep THREADS*MAX_CONCURRENT well under the
 #                       node's core count to avoid memory-bandwidth saturation.
-#   WEIGHTS_PATH=...    .pth checkpoint (has a default).
+#   WEIGHTS_PATH=...    .pth checkpoint. Default: the model package's
+#                       DEFAULT_WEIGHTS (a checkpoint inside the model dir).
 #   BATCH_SIZE=8        model batch size.
-#   VOTE_CLASSES=1,2    non-bg class IDs to vote on. 1 = Cuts, 2 = Fires. Class names are in AAA_Configs.py
+#   VOTE_CLASSES=1,2    non-bg class IDs to vote on. 1 = Cuts, 2 = Fires. Class
+#                       names are in the model package's config (e.g.
+#                       bacdm/AAA_Configs.py, efficientnet_b2/configs.py).
 #   VOTE_THRESHOLD=2    min votes per pixel to keep a detection.
 #   CLOSING_RADIUS=3    post-vote morphological close disk radius (0 = off).
 #   MIN_PATCH_M2=2500   block-level patch-area floor (m^2), firm.
@@ -72,7 +82,10 @@ done
 : "${OUTPUT_DIR:?OUTPUT_DIR is required}"
 
 # ── Optional (with defaults) ──────────────────────────────────────────────
-export WEIGHTS_PATH="${WEIGHTS_PATH:-/users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/bacdm/model_weights/teste20260429163505_best.pth}"
+# Model package (directory name under <shared>/). Validated — and the
+# default WEIGHTS_PATH resolved from it — once SHARED_DIR/VENV are known
+# below.
+export MODEL="${MODEL:-bacdm}"
 export BATCH_SIZE="${BATCH_SIZE:-8}"
 export VOTE_CLASSES="${VOTE_CLASSES:-1,2}"
 export VOTE_THRESHOLD="${VOTE_THRESHOLD:-2}"
@@ -118,6 +131,32 @@ mkdir -p "$OUTPUT_DIR" "$LOG_DIR" "$BLOCK_OUTPUT_DIR" "$FINAL_OUTPUT_DIR"
 DISTRIBUTE_DIR="$(cd "$(dirname "$0")" && pwd)"
 SHARED_DIR="$(dirname "$DISTRIBUTE_DIR")"
 VENV="${VENV:-/users1/cpca070342024/shared/vchips/venv}"
+
+# ── Validate the model package + resolve default weights ──────────────────
+# A model package is any <SHARED_DIR>/<name>/ with a predict.py. When
+# WEIGHTS_PATH is unset, ask the package for its DEFAULT_WEIGHTS
+if [[ ! -f "$SHARED_DIR/$MODEL/predict.py" ]]; then
+    echo "Unknown MODEL '$MODEL' — no $SHARED_DIR/$MODEL/predict.py" >&2
+    echo "Available model packages:" >&2
+    for p in "$SHARED_DIR"/*/predict.py; do
+        [[ -f "$p" ]] && echo "  $(basename "$(dirname "$p")")" >&2
+    done
+    exit 1
+fi
+if [[ -z "${WEIGHTS_PATH:-}" ]]; then
+    WEIGHTS_PATH="$(
+        PYTHONPATH="$SHARED_DIR" "$VENV/bin/python" -c "
+import importlib
+print(importlib.import_module('$MODEL').DEFAULT_WEIGHTS)
+"
+    )" || exit 1
+fi
+export WEIGHTS_PATH
+if [[ ! -f "$WEIGHTS_PATH" ]]; then
+    echo "Model weights not found: $WEIGHTS_PATH" >&2
+    echo "(set WEIGHTS_PATH=... or place the checkpoint at the model's default path)" >&2
+    exit 1
+fi
 
 read N_ROWS N_COLS <<<"$(
     PYTHONPATH="$SHARED_DIR" "$VENV/bin/python" -c "
@@ -184,6 +223,7 @@ else
 fi
 
 echo "Tile:           $TILE_ID"
+echo "Model:          $MODEL"
 echo "HDF5:           $TILE_HDF5_PATH"
 echo "Block grid:     ${N_ROWS} x ${N_COLS}  ($N_BLOCKS blocks)"
 echo "Processing:     ${SELECT_DESC}"
