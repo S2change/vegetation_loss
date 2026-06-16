@@ -1,6 +1,6 @@
 # Harmonized Reference Database
 
-This folder describes the harmonized reference dataset and includes data from the following reference datasets:
+This folder describes the harmonized reference dataset that is composed of the following reference datasets:
 
 1. NVG
 2. ICNF
@@ -9,9 +9,16 @@ This folder describes the harmonized reference dataset and includes data from th
 
 “Harmonized” means that the original datasets were converted into a common structure, including standardized field names, identifiers, temporal information, text values, spatial reference system, and other shared attributes. Detailed documentation for each dataset is available in the corresponding Markdown files in this folder.
 
+# How to use
+
+There are two options -- see [export_generation](https://github.com/S2change/vegetation_loss/blob/main/data_info/reference_data/Harmonized/Export_generation/Export_data_generation.md):
+1. Use of the tools developed to select, filter, combine, and export information from the harmonized BDR, BDR Expanded, NVG, and ICNF reference datasets.
+2. Concatenate the harmonized source layers into a single aggregated GeoPackage (e.g. `...\partilhado\ref__datasets\harmonized\Export_generation\Results\Merged_harmonized_layers\all_harmonized_merged.gpkg`)
+
+
 # Attributes of the harmonized reference dataset 
 
-The core set of attributes (if selected while creating the aggregated harmonized data set) are:
+The core set of attributes of the aggregated hamonized geopackageare:
 
     Field    Type
     fid    INTEGER
