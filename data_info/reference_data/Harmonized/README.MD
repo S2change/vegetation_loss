@@ -12,7 +12,7 @@ This folder describes the harmonized reference dataset that is composed of the f
 # How to use
 
 There are two options -- see [export_generation](https://github.com/S2change/vegetation_loss/blob/main/data_info/reference_data/Harmonized/Export_generation/Export_data_generation.md):
-1. Use of the tools developed to select, filter, combine, and export information from the harmonized BDR, BDR Expanded, NVG, and ICNF reference datasets.
+1. Use tools to select, filter, combine, and export information from the harmonized BDR, BDR Expanded, NVG, and ICNF individual reference datasets.
 2. Concatenate the harmonized source layers into a single aggregated GeoPackage (e.g. `...\partilhado\ref__datasets\harmonized\Export_generation\Results\Merged_harmonized_layers\all_harmonized_merged.gpkg`)
 
 
