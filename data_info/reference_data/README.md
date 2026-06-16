@@ -8,7 +8,7 @@ The harmonized versions of BDR-TNE-300, BDR-TNE-300-Expanded, ICNF, and NVG are 
 
 `Harmonized/README.MD`
 
-## Archive data sets
+## Archive data sets 
 
 ### BDR-TNE-300
 
