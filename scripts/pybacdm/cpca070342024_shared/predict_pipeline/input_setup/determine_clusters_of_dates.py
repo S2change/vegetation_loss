@@ -59,59 +59,40 @@ def determine_clusters_of_dates(path_to_hdf5, ts_start_ordinal, ts_end_ordinal):
         Median ordinal date of each cluster.
     """
     with h5py.File(path_to_hdf5, "r") as f:
-        ordinals             = np.asarray(f["ts"]).astype(int)
-        clear_pixel_count_pt = np.asarray(f["clear_pixel_count_pt"])
+        ordinals = np.asarray(f["ts"]).astype(int)
 
-    # Filter to window
+    # Filter to window and sort
     mask = np.ones(len(ordinals), dtype=bool)
     if ts_start_ordinal is not None:
         mask &= ordinals >= ts_start_ordinal
     if ts_end_ordinal is not None:
         mask &= ordinals <= ts_end_ordinal
 
-    order = np.where(mask)[0]
-    order = order[np.argsort(ordinals[order])]
+    window_ordinals = sorted(int(o) for o in ordinals[mask])
 
-    sel           = list(order)
-    earliest      = {i: int(ordinals[i]) for i in sel}
-    latest        = {i: int(ordinals[i]) for i in sel}
-    cluster_dates = {i: [int(ordinals[i])] for i in sel}
+    # Start: each date is its own cluster
+    clusters = [[o] for o in window_ordinals]
 
     for theta in range(1, MAX_THETA + 1):
-        ords = np.array([ordinals[i] for i in sel])
-
-        clusters, current = [], [sel[0]]
-        for j in range(1, len(sel)):
-            span_if_merged = latest[sel[j]] - earliest[current[0]]
+        merged, current = [], clusters[0]
+        for j in range(1, len(clusters)):
+            gap            = clusters[j][0] - current[-1]
+            span_if_merged = clusters[j][-1] - current[0]
             amplitude_ok   = (MAX_CLUSTER_AMPLITUDE is None or
                               span_if_merged <= MAX_CLUSTER_AMPLITUDE)
-            if ords[j] - ords[j - 1] <= theta and amplitude_ok:
-                current.append(sel[j])
+            if gap <= theta and amplitude_ok:
+                current = current + clusters[j]
             else:
-                clusters.append(current)
-                current = [sel[j]]
-        clusters.append(current)
+                merged.append(current)
+                current = clusters[j]
+        merged.append(current)
+        clusters = merged
 
-        new_sel = []
-        for cl in clusters:
-            best = max(cl, key=lambda i: clear_pixel_count_pt[i])
-            earliest[best]      = min(earliest[j] for j in cl)
-            latest[best]        = max(latest[j]   for j in cl)
-            cluster_dates[best] = sorted(sum([cluster_dates[j] for j in cl], []))
-            new_sel.append(best)
-        sel = sorted(new_sel, key=lambda i: ordinals[i])
-
-    sel_sorted = sorted(sel, key=lambda i: ordinals[i])
-
-    list_of_date_clusters_ordinal = [
-        cluster_dates[i] for i in sel_sorted
-    ]
-    list_of_median_dates_ordinal = [
-        int(np.median(cl)) for cl in list_of_date_clusters_ordinal
-    ]
+    list_of_date_clusters_ordinal = clusters
+    list_of_median_dates_ordinal  = [int(np.median(cl)) for cl in clusters]
     list_of_potential_change_dates_ordinal = [
-        (latest[sel_sorted[k]] + earliest[sel_sorted[k + 1]]) // 2
-        for k in range(len(sel_sorted) - 1)
+        (clusters[k][-1] + clusters[k + 1][0]) // 2
+        for k in range(len(clusters) - 1)
     ]
 
     return (list_of_potential_change_dates_ordinal,
