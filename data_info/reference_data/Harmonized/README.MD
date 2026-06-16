@@ -18,7 +18,7 @@ There are two options -- see [export_generation](https://github.com/S2change/veg
 
 # Attributes of the harmonized reference dataset 
 
-The core set of attributes of the aggregated hamonized geopackageare:
+The core set of attributes of the aggregated hamonized GeoPackage are:
 
     Field    Type
     fid    INTEGER
