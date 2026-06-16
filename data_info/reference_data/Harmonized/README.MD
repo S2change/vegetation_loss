@@ -1,15 +1,17 @@
 # Harmonized Reference Database
 
-This folder contains the harmonized reference datasets used for vegetation-change analysis in Portugal:
+This folder describes the harmonized reference dataset and includes data from the following reference datasets:
 
 1. NVG
 2. ICNF
-3. BDR-TNE-300
+3. BDR-TNE-300 
 4. BDR-TNE-300-Expanded
 
 “Harmonized” means that the original datasets were converted into a common structure, including standardized field names, identifiers, temporal information, text values, spatial reference system, and other shared attributes. Detailed documentation for each dataset is available in the corresponding Markdown files in this folder.
 
-# Attributes of the harmonized reference dataset (maximal set of attributes)
+# Attributes of the harmonized reference dataset 
+
+The core set of attributes (if selected while creating the aggregated harmonized data set) are:
 
     Field    Type
     fid    INTEGER
