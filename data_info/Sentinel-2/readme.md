@@ -1,6 +1,6 @@
 # HDF5 preprocessed files at INCD
 
-See <https://github.com/S2change/vegetation_loss/tree/main/scripts/data_exploration/tifs_to_hdf5_to_tifs/CNCA_tifs_to_hdf5>
+See data description and scripts at <https://github.com/S2change/vegetation_loss/tree/main/scripts/data_exploration/tifs_to_hdf5_to_tifs/CNCA_tifs_to_hdf5>
 
 # Copernicus links
 
