@@ -26,6 +26,12 @@ set them without re-templating Python source):
                       interface contract.
     WEIGHTS_PATH      Path to the model's .pth checkpoint. Defaults to the
                       model package's DEFAULT_WEIGHTS.
+    DATA_DTYPE        "u8" (default) reads blocks with the q02/q98 stretch
+                      (uint8, nodata 255) — bacdm / efficientnet_b2. "u16"
+                      keeps raw uint16 reflectance (nodata 65535) — for
+                      models that scale natively (efficientnet_b2_16bit_
+                      pipeline). Controls the read->composite->shift chain,
+                      not the model (each model handles its own input).
     BLOCK_OUTPUT_DIR  Where to write the per-block .npz + .gpkg. Defaults to
                       OUTPUT_DIR (submit_tile.sh sets it to
                       OUTPUT_DIR/block_outputs).
@@ -181,6 +187,24 @@ def main() -> None:
     # applies a second, larger floor after cross-block merge.
     min_patch_m2 = float(os.environ.get("MIN_PATCH_M2", "2500"))
 
+    # Input data dtype for the whole read->composite->shift chain. "u8"
+    # (default) reads blocks with the per-band q02/q98 percentile stretch
+    # (uint8, nodata 255) — what the bacdm / efficientnet_b2 models expect.
+    # "u16" keeps raw uint16 reflectance (nodata 65535) — for models trained
+    # on native reflectance (e.g. efficientnet_b2_16bit_pipeline), which scale
+    # by 10000 internally. The model itself doesn't read this knob; it only
+    # controls how the block is read + carried up to the model call.
+    _dtype_env = os.environ.get("DATA_DTYPE", "u8").strip().lower()
+    if _dtype_env in ("u8", "uint8", "8"):
+        stretch, input_nodata = True, 255
+    elif _dtype_env in ("u16", "uint16", "16"):
+        stretch, input_nodata = False, 65535
+    else:
+        raise SystemExit(
+            f"[predict_block] DATA_DTYPE={_dtype_env!r} invalid "
+            f"(expected 'u8' or 'u16')"
+        )
+
     # Bounds check the block coordinates against the HDF5's grid shape so
     # a misconfigured array index fails fast with a clear message instead
     # of read_block raising an opaque slice-bounds error.
@@ -198,6 +222,7 @@ def main() -> None:
     print(f"Block:          ({block_row}, {block_col}) of grid "
           f"({n_rows}, {n_cols})")
     print(f"Model:          {MODEL}")
+    print(f"Input dtype:    {'uint16 (raw, nodata 65535)' if not stretch else 'uint8 (stretched, nodata 255)'}")
     print(f"Weights:        {weights_path}")
     print(f"Output dir:     {output_dir}")
     print(f"Target dates:   {[date.fromordinal(int(d)).isoformat() for d in target_dates]}")
@@ -213,7 +238,8 @@ def main() -> None:
     # ── Step 1: read chip block ───────────────────────────────────────────
     print(f"\nStep 1: reading chip-block from HDF5...")
     t0 = time.perf_counter()
-    block, ts, position = read_block(hdf5_path, block_row, block_col)
+    block, ts, position = read_block(hdf5_path, block_row, block_col,
+                                     stretch=stretch)
     print(f"  block: shape={block.shape}  dtype={block.dtype}  "
           f"{block.nbytes / 1e6:.1f} MB")
     print(f"  ts:    {date.fromordinal(int(ts[0]))} -> "
@@ -227,6 +253,7 @@ def main() -> None:
     composites, valid_dates_mask = create_before_after_composites(
         block, ts, target_dates, verbose=True,
         max_days_from_break=max_composite_days,
+        nodata=input_nodata,
     )
     n_valid = int(valid_dates_mask.sum())
     print(f"  composites: shape={composites.shape}  dtype={composites.dtype}  "
@@ -256,6 +283,7 @@ def main() -> None:
             world_origin_y=position.world_origin_y,
             pixel_res=position.pixel_res,
             crs=_read_hdf5_crs(hdf5_path),
+            nodata=input_nodata,
         )
         print(f"  wrote {len(comp_paths)} composite TIF(s) "
               f"in {time.perf_counter() - t0:.2f} s")

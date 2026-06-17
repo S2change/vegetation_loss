@@ -15,14 +15,18 @@ area is loaded as full chips and a 128-px-thick ghost ring (4 edge strips
 + 4 corner squares) is loaded from the chips bordering it. Missing chip
 positions (sparse HDF5, off-tile, water mask) are filled with NODATA_U8.
 
-Output layout: `(N_TS, 10, BLOCK_H, BLOCK_W)` uint8 where BLOCK_H = BLOCK_W
-= 1280. The live area sits at `block[..., GHOST:GHOST+LIVE_H, GHOST:GHOST+LIVE_W]`
+Output layout: `(N_TS, 10, BLOCK_H, BLOCK_W)` where BLOCK_H = BLOCK_W = 1280.
+The live area sits at `block[..., GHOST:GHOST+LIVE_H, GHOST:GHOST+LIVE_W]`
 and the ghost ring surrounds it. This 2-D layout makes shift extraction in
 `composite_shift_chips` a matter of simple slicing.
 
-Stretch is fused into the read path: each chip-timestep is converted from
-uint16 to uint8 via the same per-band q02/q98 logic the training data used
-(mirrors `pybacdm/shared/bacdm/data/dataset_swin_GZ._to_uint8`).
+Stretch is fused into the read path: by default each chip-timestep is
+converted from uint16 to uint8 via the same per-band q02/q98 logic the
+training data used (mirrors
+`pybacdm/shared/bacdm/data/dataset_swin_GZ._to_uint8`), and the block is
+uint8 with nodata 255. Pass `stretch=False` to `read_block` / `iter_blocks`
+to skip the stretch and keep the block as raw uint16 (nodata = the source
+`nodata_val`, usually 65535) — for callers wanting native reflectance.
 
 Distribution: `read_block(block_row, block_col)` is the unit of work for a
 SLURM array task. `iter_blocks` is a convenience for single-node runs.
@@ -229,17 +233,24 @@ def _select_timesteps(ts: np.ndarray,
     return np.where(mask)[0]
 
 
-def _read_and_stretch_chip(values, ts_indices: np.ndarray, flat_chip_idx: int,
-                            n_ts: int, nodata_val: int) -> np.ndarray:
-    """Read one chip's full (n_ts, 10, CHIP_SIZE, CHIP_SIZE) uint8 stretched slab.
+def _read_chip(values, ts_indices: np.ndarray, flat_chip_idx: int,
+               n_ts: int, nodata_val: int, stretch: bool = True) -> np.ndarray:
+    """Read one chip's full (n_ts, 10, CHIP_SIZE, CHIP_SIZE) slab.
 
-    Returns a 2-D-per-band uint8 chip ready to splice into the block array.
+    Returns a 2-D-per-band chip ready to splice into the block array.
+
+    With `stretch=True` (default) the chip is converted to uint8 via the
+    per-band q02/q98 percentile stretch (nodata -> NODATA_U8). With
+    `stretch=False` the raw uint16 is returned unchanged (nodata kept as the
+    source `nodata_val` sentinel).
     """
     pix_start = flat_chip_idx * CHIP_PIXELS
     pix_end = pix_start + CHIP_PIXELS
     chip_flat_u16: np.ndarray = values[ts_indices, :, pix_start:pix_end]   # type: ignore[index,assignment]
     chip_u16 = chip_flat_u16.reshape(n_ts, 10, CHIP_SIZE, CHIP_SIZE)
-    return _stretch_chip_uint16_to_uint8(chip_u16, nodata_val)
+    if stretch:
+        return _stretch_chip_uint16_to_uint8(chip_u16, nodata_val)
+    return chip_u16
 
 
 def get_block_grid_shape(hdf5_path: str) -> tuple[int, int]:
@@ -268,8 +279,9 @@ def read_block(hdf5_path: str,
                block_col: int,
                ts_start_ordinal: Optional[int] = DEFAULT_TS_START_ORDINAL,
                ts_end_ordinal:   Optional[int] = DEFAULT_TS_END_ORDINAL,
+               stretch: bool = True,
                ) -> tuple[np.ndarray, np.ndarray, BlockPosition]:
-    """Read one block (live 4x4 + 128-px ghost ring), stretch to uint8.
+    """Read one block (live 4x4 + 128-px ghost ring).
 
     Parameters
     ----------
@@ -280,15 +292,24 @@ def read_block(hdf5_path: str,
     ts_start_ordinal, ts_end_ordinal : int or None
         Ordinal-date range to keep along the time axis. None on either side
         means "no bound on that side."
+    stretch : bool (default True)
+        When True, each chip is converted to uint8 via the per-band q02/q98
+        percentile stretch (the training-data preprocessing). When False, the
+        block keeps the source uint16 data unchanged — useful for callers that
+        want the raw reflectance values (e.g. their own normalisation, or
+        writing composites in native units).
 
     Returns
     -------
-    block : (N_TS_kept, 10, BLOCK_H, BLOCK_W) uint8
+    block : (N_TS_kept, 10, BLOCK_H, BLOCK_W)
         2-D pixel-grid layout. The live 4x4 area sits at
         `block[..., GHOST:GHOST+LIVE_H, GHOST:GHOST+LIVE_W]` (1024 x 1024).
         The ghost ring (top/bottom/left/right strips + 4 corner squares)
         surrounds it with 128 px on each side. Missing chip-grid positions
-        (sparse HDF5, off-tile) are filled with NODATA_U8.
+        (sparse HDF5, off-tile) are filled with nodata.
+        dtype is uint8 with nodata NODATA_U8 (255) when `stretch=True`, or
+        uint16 with nodata the source `nodata_val` (e.g. 65535) when
+        `stretch=False`.
     ts : (N_TS_kept,) int64
         Ordinal dates aligned to `block`'s axis 0.
     position : BlockPosition
@@ -317,8 +338,13 @@ def read_block(hdf5_path: str,
         n_ts = len(ts_indices)
 
         # Pre-allocate the 2-D block array, filled with NODATA so missing
-        # chips need no extra write.
-        block = np.full((n_ts, 10, BLOCK_H, BLOCK_W), NODATA_U8, dtype=np.uint8)
+        # chips need no extra write. dtype + nodata fill depend on `stretch`:
+        # uint8/NODATA_U8 for the stretched path, raw uint16/nodata_val
+        # otherwise.
+        block_dtype = np.uint8 if stretch else np.uint16
+        block_nodata = NODATA_U8 if stretch else nodata_val
+        block = np.full((n_ts, 10, BLOCK_H, BLOCK_W), block_nodata,
+                        dtype=block_dtype)
 
         # ── 16 inner chips (full 256x256) ────────────────────────────────
         # Placed at block[..., GHOST + 256r : GHOST + 256(r+1),
@@ -328,8 +354,8 @@ def read_block(hdf5_path: str,
                 flat_chip_idx = chip_lookup.get((chip_y_start + r, chip_x_start + c))
                 if flat_chip_idx is None:
                     continue
-                chip = _read_and_stretch_chip(values, ts_indices, flat_chip_idx,
-                                              n_ts, nodata_val)
+                chip = _read_chip(values, ts_indices, flat_chip_idx,
+                                  n_ts, nodata_val, stretch=stretch)
                 y0 = GHOST + r * CHIP_SIZE
                 x0 = GHOST + c * CHIP_SIZE
                 block[:, :, y0:y0 + CHIP_SIZE, x0:x0 + CHIP_SIZE] = chip
@@ -341,8 +367,8 @@ def read_block(hdf5_path: str,
             flat_chip_idx = chip_lookup.get((chip_y_start - 1, chip_x_start + c))
             if flat_chip_idx is None:
                 continue
-            chip = _read_and_stretch_chip(values, ts_indices, flat_chip_idx,
-                                          n_ts, nodata_val)
+            chip = _read_chip(values, ts_indices, flat_chip_idx,
+                              n_ts, nodata_val, stretch=stretch)
             x0 = GHOST + c * CHIP_SIZE
             block[:, :, 0:GHOST, x0:x0 + CHIP_SIZE] = chip[:, :, CHIP_SIZE - GHOST:, :]
 
@@ -352,8 +378,8 @@ def read_block(hdf5_path: str,
             flat_chip_idx = chip_lookup.get((chip_y_start + LIVE_ROWS, chip_x_start + c))
             if flat_chip_idx is None:
                 continue
-            chip = _read_and_stretch_chip(values, ts_indices, flat_chip_idx,
-                                          n_ts, nodata_val)
+            chip = _read_chip(values, ts_indices, flat_chip_idx,
+                              n_ts, nodata_val, stretch=stretch)
             x0 = GHOST + c * CHIP_SIZE
             block[:, :, GHOST + LIVE_H:, x0:x0 + CHIP_SIZE] = chip[:, :, :GHOST, :]
 
@@ -363,8 +389,8 @@ def read_block(hdf5_path: str,
             flat_chip_idx = chip_lookup.get((chip_y_start + r, chip_x_start - 1))
             if flat_chip_idx is None:
                 continue
-            chip = _read_and_stretch_chip(values, ts_indices, flat_chip_idx,
-                                          n_ts, nodata_val)
+            chip = _read_chip(values, ts_indices, flat_chip_idx,
+                              n_ts, nodata_val, stretch=stretch)
             y0 = GHOST + r * CHIP_SIZE
             block[:, :, y0:y0 + CHIP_SIZE, 0:GHOST] = chip[:, :, :, CHIP_SIZE - GHOST:]
 
@@ -374,8 +400,8 @@ def read_block(hdf5_path: str,
             flat_chip_idx = chip_lookup.get((chip_y_start + r, chip_x_start + LIVE_COLS))
             if flat_chip_idx is None:
                 continue
-            chip = _read_and_stretch_chip(values, ts_indices, flat_chip_idx,
-                                          n_ts, nodata_val)
+            chip = _read_chip(values, ts_indices, flat_chip_idx,
+                              n_ts, nodata_val, stretch=stretch)
             y0 = GHOST + r * CHIP_SIZE
             block[:, :, y0:y0 + CHIP_SIZE, GHOST + LIVE_W:] = chip[:, :, :, :GHOST]
 
@@ -400,8 +426,8 @@ def read_block(hdf5_path: str,
             flat_chip_idx = chip_lookup.get((cy, cx))
             if flat_chip_idx is None:
                 continue
-            chip = _read_and_stretch_chip(values, ts_indices, flat_chip_idx,
-                                          n_ts, nodata_val)
+            chip = _read_chip(values, ts_indices, flat_chip_idx,
+                              n_ts, nodata_val, stretch=stretch)
             block[:, :, dys, dxs] = chip[:, :, sys_, sxs]
 
     position = BlockPosition(
@@ -424,6 +450,7 @@ def iter_blocks(hdf5_path: str,
                 ts_start_ordinal: Optional[int] = DEFAULT_TS_START_ORDINAL,
                 ts_end_ordinal:   Optional[int] = DEFAULT_TS_END_ORDINAL,
                 block_filter=None,
+                stretch: bool = True,
                 ) -> Iterator[tuple[np.ndarray, np.ndarray, BlockPosition]]:
     """Iterate over every block in the tile.
 
@@ -435,6 +462,8 @@ def iter_blocks(hdf5_path: str,
     block_filter : callable or None
         Optional `(block_row, block_col) -> bool` predicate. Returning False
         skips the block without reading it.
+    stretch : bool (default True)
+        Passed through to `read_block` — False keeps blocks as raw uint16.
 
     Yields
     ------
@@ -447,7 +476,8 @@ def iter_blocks(hdf5_path: str,
                 continue
             yield read_block(hdf5_path, br, bc,
                              ts_start_ordinal=ts_start_ordinal,
-                             ts_end_ordinal=ts_end_ordinal)
+                             ts_end_ordinal=ts_end_ordinal,
+                             stretch=stretch)
 
 
 # ============================================================================

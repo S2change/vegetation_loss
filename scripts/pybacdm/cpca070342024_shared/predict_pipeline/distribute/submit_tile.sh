@@ -38,6 +38,13 @@
 #                       CLOSING_RADII — see bacdm/__init__.py for the
 #                       contract), so switching model is just e.g.
 #                       MODEL=efficientnet_b2. Default: bacdm (Swin-YNet).
+#   DATA_DTYPE=u8       input data dtype for the read->composite->shift chain.
+#                       u8 (default) applies the q02/q98 stretch (uint8,
+#                       nodata 255) — bacdm / efficientnet_b2. u16 keeps raw
+#                       uint16 reflectance (nodata 65535) — for models that
+#                       scale natively (efficientnet_b2_16bit_pipeline). Match
+#                       this to the model: a u16 model on u8 data (or vice
+#                       versa) silently produces garbage.
 #   THREADS=2           CPU threads per task. Also sets --cpus-per-task so the
 #                       allocation matches. A thread sweep showed ~95% scaling
 #                       at 2 threads, ~68% at 4 — 2 is the efficient default.
@@ -108,6 +115,15 @@ fi
 # default WEIGHTS_PATH resolved from it — once SHARED_DIR/VENV are known
 # below.
 export MODEL="${MODEL:-bacdm}"
+# Input data dtype for the read->composite->shift chain. u8 (default) applies
+# the q02/q98 stretch (uint8, nodata 255) — bacdm / efficientnet_b2. u16 keeps
+# raw uint16 reflectance (nodata 65535) — for models that scale natively
+# (e.g. efficientnet_b2_16bit_pipeline). Validate now so a typo fails at submit.
+export DATA_DTYPE="${DATA_DTYPE:-u8}"
+case "$DATA_DTYPE" in
+    u8|uint8|8|u16|uint16|16) ;;
+    *) echo "Invalid DATA_DTYPE='$DATA_DTYPE' (expected u8 or u16)" >&2; exit 1 ;;
+esac
 export BATCH_SIZE="${BATCH_SIZE:-8}"
 export VOTE_CLASSES="${VOTE_CLASSES:-1,2}"
 export VOTE_THRESHOLD="${VOTE_THRESHOLD:-2}"
@@ -267,6 +283,7 @@ fi
 
 echo "Tile:           $TILE_ID"
 echo "Model:          $MODEL"
+echo "Data dtype:     $DATA_DTYPE"
 echo "HDF5:           $TILE_HDF5_PATH"
 echo "Block grid:     ${N_ROWS} x ${N_COLS}  ($N_BLOCKS blocks)"
 echo "Processing:     ${SELECT_DESC}"

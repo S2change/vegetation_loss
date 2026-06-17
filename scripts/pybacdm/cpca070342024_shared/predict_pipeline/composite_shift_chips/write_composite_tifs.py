@@ -61,8 +61,9 @@ def write_block_composite_tifs(
 
     Parameters
     ----------
-    composites : (2, D, 10, H, W) uint8
+    composites : (2, D, 10, H, W) uint8 or uint16
         Output of create_before_after_composites. [0]=before, [1]=after.
+        The GeoTIFF dtype is taken from this array's dtype.
     target_dates : (D,) int
         Ordinal target dates aligned to composites' axis 1.
     valid_dates_mask : (D,) bool
@@ -80,7 +81,8 @@ def write_block_composite_tifs(
     band_names : sequence[str]
         Per-band descriptions (native HDF5 order).
     nodata : int
-        uint8 NODATA sentinel tagged on the GeoTIFF.
+        NODATA sentinel tagged on the GeoTIFF; must match the composites'
+        dtype (255 for uint8, 65535 for uint16).
     ghost : int
         Ghost-ring thickness in px (block = LIVE + 2*ghost).
 
@@ -102,13 +104,14 @@ def write_block_composite_tifs(
                             pixel_res, pixel_res)
 
     _, _, _, h, w = composites.shape
+    tif_dtype = str(composites.dtype)   # uint8 or uint16 — match the data
     paths: list[str] = []
     for k, ordinal in enumerate(target_dates):
         if not bool(valid_dates_mask[k]):
             continue
         iso = _date.fromordinal(int(ordinal)).isoformat()
         for side_idx, side in ((0, "before"), (1, "after")):
-            arr = composites[side_idx, k]  # (10, H, W) uint8
+            arr = composites[side_idx, k]  # (10, H, W) uint8 or uint16
             out_path = os.path.join(
                 out_dir,
                 f"{tile_id}_block_{block_row:03d}_{block_col:03d}"
@@ -116,7 +119,7 @@ def write_block_composite_tifs(
             )
             profile = {
                 "driver": "GTiff",
-                "dtype": "uint8",
+                "dtype": tif_dtype,
                 "count": n_bands,
                 "height": h,
                 "width": w,
