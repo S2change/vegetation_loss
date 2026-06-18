@@ -22,3 +22,5 @@ scripts/pybacdm/cpca070342024_shared/predict_pipeline/small_test_area/*.h5
 *.aux.xml
 *.gpkg-shm
 *.gpkg-wal
+
+scripts/pybacdm/cpca070342024_shared/predict_pipeline/postprocess/CCDC_Mask_dissolve.gpkg
