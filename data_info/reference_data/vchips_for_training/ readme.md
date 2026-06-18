@@ -1,7 +1,7 @@
 Processo de interpretação e geração das máscaras dos VChips, no âmbito do contrato DGT/ISA 3044-D (Jesús Céspedes, junho 2026). 
 See scripts at <https://github.com/S2change/vegetation_loss/tree/main/scripts/ref_datasets>
 
-179 "vchips" 4 km por 4 km com 5 classes de perda de vegetação. A distribuição das "vchips" por anos é: 24 (2019); 81 (2020); 26 (2021); 37 (2022); 11 (2023)
+179 "vchips" 4 km por 4 km com 5 classes de perda de vegetação. A distribuição das "vchips" por anos é: 24 (2019); 81 (2020); 26 (2021); 37 (2022); 11 (2023). "vchip" bands are in the following order: `'B12', 'B11', 'B8A', 'B8', 'B7', 'B6', 'B5', 'B4', 'B3', 'B2', 'date'` and need to be reversed to `B2,...,B12` when creating chips for training (assuming that the whole prediction pipeline uses the standard order `B2,...,B12`.
 
 # Visual Chip Mask Generation Workflow
 
