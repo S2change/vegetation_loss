@@ -43,6 +43,13 @@ set them without re-templating Python source):
     MIN_PATCH_M2      Block-level patch-area floor in m^2 (default 2500).
     MAX_COMPOSITE_DAYS  Symmetric day-window around the break date for
                       before/after compositing (unset = unbounded).
+    DATE_CLUSTERS     Serialized date clusters (set by submit_tile.sh when
+                      USE_DATE_CLUSTERS=1). Format: clusters ';'-separated,
+                      ISO dates within a cluster ','-separated, e.g.
+                      "2023-01-01,2023-01-03;2023-02-10,2023-02-12". When set,
+                      the block's raw timesteps are collapsed to one min-
+                      composite per cluster before compositing. Unset = use
+                      every raw timestep.
 
   Optional — debug composite GeoTIFFs
     WRITE_COMPOSITE_TIFS    Set to 1 to create the before & after time-
@@ -69,7 +76,10 @@ import torch
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent))                          # shared/ (for <model>.*)
 
-from input_setup import read_block, get_block_grid_shape
+from input_setup import (
+    read_block, get_block_grid_shape,
+    aggregate_block_dates, parse_date_clusters,
+)
 from composite_shift_chips import (
     create_before_after_composites,
     generate_shifted_chips,
@@ -205,6 +215,15 @@ def main() -> None:
             f"(expected 'u8' or 'u16')"
         )
 
+    # Optional temporal cluster-aggregation. submit_tile.sh computes the date
+    # clusters once (from the tile's acquisition calendar over START/END) and
+    # exports them as DATE_CLUSTERS; the TARGET_DATES it also derives are the
+    # cluster-gap midpoints. When DATE_CLUSTERS is set, each block's raw
+    # timesteps are collapsed to one min-composite per cluster (ts -> cluster
+    # medians) before before/after compositing — cloud-suppressing and
+    # shrinking the time axis. Unset (default) = use every raw timestep.
+    date_clusters = parse_date_clusters(os.environ.get("DATE_CLUSTERS", ""))
+
     # Bounds check the block coordinates against the HDF5's grid shape so
     # a misconfigured array index fails fast with a clear message instead
     # of read_block raising an opaque slice-bounds error.
@@ -233,6 +252,7 @@ def main() -> None:
     print(f"Closing radius: "
           f"{f'per-class ({MODEL}.CLOSING_RADII)' if closing_radius is None else closing_radius}")
     print(f"Min patch m^2:  {min_patch_m2}")
+    print(f"Date clusters:  {len(date_clusters) if date_clusters else 'off (raw timesteps)'}")
     print(f"\n[RSS] After imports:                   {rss_mb():7.1f} MB")
 
     # ── Step 1: read chip block ───────────────────────────────────────────
@@ -246,6 +266,37 @@ def main() -> None:
           f"{date.fromordinal(int(ts[-1]))}  ({len(ts)} timesteps)")
     print(f"  Step 1 time: {time.perf_counter() - t0:.2f} s")
     print(f"[RSS] After chip-block:                {rss_mb():7.1f} MB")
+
+    # ── Step 2b: temporal cluster-aggregation (optional) ──────────────────
+    # Collapse the block's raw timesteps into one min-composite per date
+    # cluster (ts -> cluster medians) before compositing. The clusters were
+    # computed once by submit_tile.sh from the tile calendar and exported as
+    # DATE_CLUSTERS. Clusters whose dates fall entirely outside this block's
+    # kept timesteps are dropped here so a block with a narrower ts window
+    # still aggregates cleanly.
+    if date_clusters:
+        kept = set(int(t) for t in ts)
+        block_clusters = [
+            [d for d in cl if int(d) in kept] for cl in date_clusters
+        ]
+        block_clusters = [cl for cl in block_clusters if cl]
+        if not block_clusters:
+            raise SystemExit(
+                "[predict_block] DATE_CLUSTERS set but none of the clustered "
+                "dates are in this block's kept timesteps — check the "
+                "START/END window matches the tile."
+            )
+        print(f"\nStep 2b: aggregating {len(ts)} timesteps into "
+              f"{len(block_clusters)} date-cluster composite(s)...")
+        t0 = time.perf_counter()
+        block, ts, position = aggregate_block_dates(
+            block, ts, position, block_clusters, nodata=input_nodata,
+        )
+        print(f"  block: shape={block.shape}  dtype={block.dtype}  "
+              f"{block.nbytes / 1e6:.1f} MB")
+        print(f"  ts:    {[date.fromordinal(int(t)).isoformat() for t in ts]}")
+        print(f"  Step 2b time: {time.perf_counter() - t0:.2f} s")
+        print(f"[RSS] After cluster-aggregation:       {rss_mb():7.1f} MB")
 
     # ── Step 3: per-pixel before/after compositing ────────────────────────
     print(f"\nStep 3: compositing for {len(target_dates)} target date(s)...")

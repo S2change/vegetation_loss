@@ -60,7 +60,14 @@
 #   VOTE_THRESHOLD=2    min votes per pixel to keep a detection.
 #   TARGET_STEP_DAYS=45 spacing (days) between generated dates when using the
 #                       START_DATE/END_DATE span form (ignored if TARGET_DATES
-#                       is given explicitly).
+#                       is given explicitly or USE_DATE_CLUSTERS=1).
+#   USE_DATE_CLUSTERS=0 when 1, cluster the tile's acquisition calendar over
+#                       START_DATE..END_DATE: the cluster-gap midpoints become
+#                       the target dates and each block's timesteps are
+#                       collapsed to one min-composite per cluster before
+#                       compositing (cloud-suppressing temporal summary).
+#                       Requires START_DATE+END_DATE; TARGET_DATES must NOT be
+#                       set (the dates are derived). Default 0 = raw timesteps.
 #   CLOSING_RADIUS=3    post-vote morphological close disk radius (0 = off).
 #   MIN_PATCH_M2=2500   block-level patch-area floor (m^2), firm.
 #   MIN_TILE_PATCH_M2=5000  master patch-area floor (m^2), post cross-block merge.
@@ -96,12 +103,30 @@ done
 : "${TILE_HDF5_PATH:?TILE_HDF5_PATH is required}"
 : "${OUTPUT_DIR:?OUTPUT_DIR is required}"
 
-# Target dates: either an explicit TARGET_DATES, or a START_DATE/END_DATE span
-# that we expand into TARGET_DATES below (once the venv Python is available).
-# Validate the inputs here; the actual generation needs Python so it happens
-# in the "Resolve TARGET_DATES" block further down.
+# Date clusters: when on, target dates AND the cluster membership are both
+# derived from the tile's acquisition calendar over START_DATE..END_DATE
+# (computed once below, exported to all tasks). It's an alternative to the
+# fixed-cadence / explicit TARGET_DATES paths, so an explicit TARGET_DATES
+# would be contradictory — require START/END and reject TARGET_DATES.
+USE_DATE_CLUSTERS="${USE_DATE_CLUSTERS:-0}"
+_clusters_on=0
+case "$USE_DATE_CLUSTERS" in 1|true|True|yes) _clusters_on=1 ;; esac
+
+# Target dates: three mutually exclusive sources, all resolved (with Python)
+# in the "Resolve TARGET_DATES" block below. Validate the inputs here.
 TARGET_STEP_DAYS="${TARGET_STEP_DAYS:-45}"
-if [[ -z "${TARGET_DATES:-}" ]]; then
+if [[ "$_clusters_on" == 1 ]]; then
+    if [[ -n "${TARGET_DATES:-}" ]]; then
+        echo "USE_DATE_CLUSTERS=1 derives the target dates from the date " \
+             "clusters, so TARGET_DATES must not also be set." >&2
+        exit 1
+    fi
+    if [[ -z "${START_DATE:-}" || -z "${END_DATE:-}" ]]; then
+        echo "USE_DATE_CLUSTERS=1 requires START_DATE and END_DATE " \
+             "(YYYY-MM-DD) — the cluster window." >&2
+        exit 1
+    fi
+elif [[ -z "${TARGET_DATES:-}" ]]; then
     if [[ -z "${START_DATE:-}" || -z "${END_DATE:-}" ]]; then
         echo "Provide TARGET_DATES (comma-separated YYYY-MM-DD), OR both " \
              "START_DATE and END_DATE (YYYY-MM-DD) to generate them every " \
@@ -170,13 +195,34 @@ DISTRIBUTE_DIR="$(cd "$(dirname "$0")" && pwd)"
 SHARED_DIR="$(dirname "$DISTRIBUTE_DIR")"
 VENV="${VENV:-/users1/cpca070342024/shared/vchips/venv}"
 
-# ── Resolve TARGET_DATES ──────────────────────────────────────────────────
-# If TARGET_DATES wasn't given explicitly, generate it from the
-# START_DATE/END_DATE span via target_dates_creation.py — one date every
-# TARGET_STEP_DAYS, starting one step after START_DATE. Captured into a var
-# first (not piped straight into export) so a generation error fails the
-# whole script instead of silently exporting an empty list.
-if [[ -z "${TARGET_DATES:-}" ]]; then
+# ── Resolve TARGET_DATES (+ DATE_CLUSTERS) ────────────────────────────────
+# Three mutually exclusive sources, captured into vars first (not piped
+# straight into export) so a generation error fails the whole script instead
+# of silently exporting an empty list:
+#   1. USE_DATE_CLUSTERS=1: cluster the tile's acquisition calendar over
+#      START..END; the cluster-gap midpoints become TARGET_DATES and the
+#      cluster membership becomes DATE_CLUSTERS (consumed by predict_block).
+#   2. START_DATE/END_DATE only: one date every TARGET_STEP_DAYS.
+#   3. explicit TARGET_DATES: used as-is.
+export DATE_CLUSTERS="${DATE_CLUSTERS:-}"
+if [[ "$_clusters_on" == 1 ]]; then
+    # The CLI prints exactly two lines: line 1 = TARGET_DATES, line 2 =
+    # serialized DATE_CLUSTERS. Read both; the determine script lives in
+    # input_setup/ and runs as a plain script (no package import needed).
+    _cluster_out="$(
+        "$VENV/bin/python" "$SHARED_DIR/input_setup/determine_clusters_of_dates.py" \
+            "$TILE_HDF5_PATH" --start "$START_DATE" --end "$END_DATE" --for-submit
+    )" || exit 1
+    TARGET_DATES="$(printf '%s\n' "$_cluster_out" | sed -n '1p')"
+    DATE_CLUSTERS="$(printf '%s\n' "$_cluster_out" | sed -n '2p')"
+    if [[ -z "$TARGET_DATES" || -z "$DATE_CLUSTERS" ]]; then
+        echo "Date clustering produced no change dates / clusters for " \
+             "$START_DATE..$END_DATE (too few acquisitions in window?)." >&2
+        exit 1
+    fi
+    echo "Derived TARGET_DATES + DATE_CLUSTERS from the acquisition calendar " \
+         "over $START_DATE..$END_DATE."
+elif [[ -z "${TARGET_DATES:-}" ]]; then
     TARGET_DATES="$(
         "$VENV/bin/python" "$DISTRIBUTE_DIR/target_dates_creation.py" \
             "$START_DATE" "$END_DATE" --step-days "$TARGET_STEP_DAYS"
@@ -190,6 +236,7 @@ if [[ -z "${TARGET_DATES:-}" ]]; then
          "(every $TARGET_STEP_DAYS days):"
 fi
 export TARGET_DATES
+export DATE_CLUSTERS
 
 # ── Validate the model package + resolve default weights ──────────────────
 # A model package is any <SHARED_DIR>/<name>/ with a predict.py. When
@@ -292,6 +339,11 @@ echo "  logs:         $LOG_DIR"
 echo "  block out:    $BLOCK_OUTPUT_DIR"
 echo "  final out:    $FINAL_OUTPUT_DIR"
 echo "Target dates:   $TARGET_DATES"
+if [[ "$_clusters_on" == 1 ]]; then
+    echo "Date clusters:  on ($(printf '%s' "$DATE_CLUSTERS" | awk -F';' '{print NF}') clusters)"
+else
+    echo "Date clusters:  off (raw timesteps)"
+fi
 echo "Batch size:     $BATCH_SIZE"
 echo "Vote classes:   $VOTE_CLASSES"
 echo "Vote threshold: $VOTE_THRESHOLD"
