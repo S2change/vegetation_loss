@@ -71,6 +71,18 @@
 #   CLOSING_RADIUS=3    post-vote morphological close disk radius (0 = off).
 #   MIN_PATCH_M2=2500   block-level patch-area floor (m^2), firm.
 #   MIN_TILE_PATCH_M2=5000  master patch-area floor (m^2), post cross-block merge.
+#   OUTPUT_NDVI=0       when 1, also output per-pixel before/after NDVI
+#                       alongside the change prediction: added to each block's
+#                       .npz and the tile .npz (keys ndvi_before/ndvi_after),
+#                       plus per-date NDVI GeoTIFFs
+#                       ({TILE}_tile_{date}_ndvi_before/after.tif). float32,
+#                       NoData -9999. Default 0 = labels only.
+#   CLIP_MASK_GPKG      path to a polygon .gpkg; when set, the final vector map
+#                       (.gpkg/.parquet) is clipped to this mask — polygons
+#                       outside are dropped, edge-straddling ones cut to the
+#                       inside. Reprojected to the tile CRS automatically. Does
+#                       not affect the .npz / per-date .tif rasters. Unset = no
+#                       clip.
 #   MAX_COMPOSITE_DAYS  symmetric day-window around each break date for
 #                       before/after compositing (unset = unbounded).
 #   BLOCK_ROWS / BLOCK_COLS  process only a rectangular sub-grid of blocks
@@ -156,6 +168,19 @@ export VOTE_THRESHOLD="${VOTE_THRESHOLD:-2}"
 export CLOSING_RADIUS="${CLOSING_RADIUS:-3}"
 export MIN_PATCH_M2="${MIN_PATCH_M2:-2500}"
 export MIN_TILE_PATCH_M2="${MIN_TILE_PATCH_M2:-5000}"
+# Optional per-pixel before/after NDVI output (off by default). Just exported
+# through to predict_block + aggregate_tile, which key off it.
+export OUTPUT_NDVI="${OUTPUT_NDVI:-0}"
+# Optional clip mask for the final vector map. Validate the path now (fail at
+# submit, not an hour later in the aggregator) and export so the aggregator
+# inherits it. Unset = no clip.
+if [[ -n "${CLIP_MASK_GPKG:-}" ]]; then
+    if [[ ! -f "$CLIP_MASK_GPKG" ]]; then
+        echo "CLIP_MASK_GPKG not found: $CLIP_MASK_GPKG" >&2
+        exit 1
+    fi
+    export CLIP_MASK_GPKG
+fi
 
 # Symmetric day-window (days) around each break date for before/after
 # compositing. Unset = unbounded (any timestep before/after the target). Only
@@ -350,6 +375,8 @@ echo "Vote threshold: $VOTE_THRESHOLD"
 echo "Closing radius: $CLOSING_RADIUS"
 echo "Block floor:    $MIN_PATCH_M2 m^2"
 echo "Tile floor:     $MIN_TILE_PATCH_M2 m^2"
+echo "Clip mask:      ${CLIP_MASK_GPKG:-none}"
+echo "Output NDVI:    $OUTPUT_NDVI"
 echo "Max comp. days: ${MAX_COMPOSITE_DAYS:-unbounded}"
 echo "Threads/task:   $THREADS  (= --cpus-per-task)"
 echo "Max concurrent: $MAX_CONCURRENT  (cores in use <= THREADS*MAX_CONCURRENT = $((THREADS * MAX_CONCURRENT)))"

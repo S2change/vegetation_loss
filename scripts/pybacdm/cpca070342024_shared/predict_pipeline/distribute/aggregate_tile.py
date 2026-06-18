@@ -18,6 +18,10 @@ Runs once after all array tasks for a tile complete (gated by the SLURM
     uint8 label map (blocks stitched into one canvas) + metadata.
   - `{TILE_ID}_tile_{YYYY-MM-DD}.tif` (GIS raster) — one LZW GeoTIFF per
     date, class 0 as NoData.
+  - `{TILE_ID}_tile_{YYYY-MM-DD}_ndvi_before.tif` / `_ndvi_after.tif`
+    (optional) — per-date before/after NDVI float32 rasters, written only
+    when the predict step ran with OUTPUT_NDVI=1. NDVI is also added to the
+    dense .npz (keys `ndvi_before` / `ndvi_after`). NoData = -9999.
   - `{TILE_ID}_block_grid.gpkg` (DEBUG) — one rectangle per block's LIVE
     extent (layer `block_grid`), drawn from each block's recorded
     world_origin. Overlay on the detections in QGIS to inspect block seams;
@@ -27,6 +31,13 @@ Boundary merge: LIVE areas tile with no gap, so a patch crossing a block
 seam yields two edge-touching polygons in adjacent blocks. unary_union
 welds touching/overlapping polygons, so the dissolved result is one patch
 — no ghost output or overlap dedup needed.
+
+Optional clip mask: set CLIP_MASK_GPKG to a polygon .gpkg to restrict the
+final VECTOR map to a region of interest. The dissolved patches are
+intersected with the (reprojected) mask before being written, so polygons
+outside the mask are dropped and edge-straddling ones are cut to the inside.
+This affects the .gpkg / .parquet outputs only; the dense .npz and per-date
+.tif rasters are produced from the stitched label array and are not clipped.
 """
 import os
 import sys
@@ -56,6 +67,7 @@ sys.path.insert(0, str(_HERE))          # distribute/
 
 from postprocess.voted_output import read_voted_block
 from postprocess.vote import LIVE_H, LIVE_W
+from composite_shift_chips.ndvi import NDVI_NODATA
 
 
 # Output column order for the dissolved tile vector (.gpkg / .parquet).
@@ -108,6 +120,30 @@ def _stitch_blocks(blocks: list[dict], n_rows: int, n_cols: int,
     return labels
 
 
+def _stitch_float_key(blocks: list[dict], key: str,
+                      n_rows: int, n_cols: int,
+                      block_h: int, block_w: int, n_dates: int,
+                      fill: float,
+                      row_offset: int = 0, col_offset: int = 0) -> np.ndarray:
+    """Stitch a per-block float array (e.g. ndvi_before) into the tile canvas.
+
+    Same placement as `_stitch_blocks` but for a float32 key, pre-filled with
+    `fill` so any block missing the key (or off-canvas gaps) reads as nodata.
+    """
+    canvas = np.full(
+        (n_dates, n_rows * block_h, n_cols * block_w), fill, dtype=np.float32,
+    )
+    for b in blocks:
+        if key not in b:
+            continue
+        r = int(b["block_row"]) - row_offset
+        c = int(b["block_col"]) - col_offset
+        y0 = r * block_h
+        x0 = c * block_w
+        canvas[:, y0:y0 + block_h, x0:x0 + block_w] = b[key]
+    return canvas
+
+
 def _dissolve_block_polygons(block_gdf: gpd.GeoDataFrame,
                              tile_id: str,
                              pixel_res: float,
@@ -152,6 +188,89 @@ def _dissolve_block_polygons(block_gdf: gpd.GeoDataFrame,
                 "date_ordinal": int(ordinal),
                 "date_iso": iso,
                 "class_id": int(cls),
+                "n_pixels": int(round(area_m2 / px_area)),
+                "area_m2": area_m2,
+                "centroid_x": float(centroid.x),
+                "centroid_y": float(centroid.y),
+                "geometry": geom,
+            })
+
+    if not rows:
+        return gpd.GeoDataFrame(columns=_VECTOR_COLUMNS, geometry="geometry",
+                                crs=crs)
+    out = gpd.GeoDataFrame(rows, geometry="geometry", crs=crs)
+    return out[_VECTOR_COLUMNS]
+
+
+def _clip_to_mask(tile_gdf: gpd.GeoDataFrame,
+                  mask_gpkg_path: str,
+                  pixel_res: float,
+                  ) -> gpd.GeoDataFrame:
+    """Clip the dissolved tile polygons to a mask polygon .gpkg.
+
+    Reads `mask_gpkg_path`, reprojects it to the tile CRS, unions all its
+    features into a single mask geometry, and intersects every tile polygon
+    with it. Polygons fully outside the mask are dropped; polygons straddling
+    the mask edge are cut to the inside portion. n_pixels / area_m2 / centroid
+    are re-derived from the clipped geometry so the attributes stay consistent
+    with what's actually stored (same convention as _dissolve_block_polygons).
+
+    Parameters
+    ----------
+    tile_gdf : GeoDataFrame
+        Dissolved tile polygons (`_VECTOR_COLUMNS`), with a CRS set.
+    mask_gpkg_path : str
+        Path to a polygon .gpkg used as the clip mask. All layers/features are
+        unioned into one mask.
+    pixel_res : float
+        Metres per pixel, for re-deriving n_pixels from the clipped area.
+
+    Returns
+    -------
+    GeoDataFrame with `_VECTOR_COLUMNS`, same CRS as `tile_gdf`, containing
+    only the inside-mask geometry. Empty if nothing overlaps the mask.
+    """
+    px_area = float(pixel_res) * float(pixel_res)
+    crs = tile_gdf.crs
+
+    mask_gdf = gpd.read_file(mask_gpkg_path)
+    if len(mask_gdf) == 0:
+        raise SystemExit(
+            f"[aggregate_tile] clip mask {mask_gpkg_path} has no features."
+        )
+    # Reproject the mask to the tile CRS so the intersection is valid. Requires
+    # both to have a CRS; the tile CRS comes from the HDF5, the mask from its
+    # own file.
+    if crs is not None and mask_gdf.crs is not None and mask_gdf.crs != crs:
+        mask_gdf = mask_gdf.to_crs(crs)
+    elif mask_gdf.crs is None:
+        print("  [warn] clip mask has no CRS; assuming it matches the tile CRS.")
+
+    mask_geom = unary_union(list(mask_gdf.geometry))
+
+    if len(tile_gdf) == 0:
+        return gpd.GeoDataFrame(columns=_VECTOR_COLUMNS, geometry="geometry",
+                                crs=crs)
+
+    rows: list[dict] = []
+    for _, r in tile_gdf.iterrows():
+        clipped = r["geometry"].intersection(mask_geom)
+        if clipped.is_empty:
+            continue
+        geoms = list(clipped.geoms) if clipped.geom_type == "MultiPolygon" \
+            else [clipped]
+        for geom in geoms:
+            # intersection can yield lines/points where geometries only touch;
+            # keep polygonal pieces only.
+            if geom.is_empty or geom.geom_type not in ("Polygon", "MultiPolygon"):
+                continue
+            area_m2 = float(geom.area)
+            centroid = geom.centroid
+            rows.append({
+                "tile_id": r["tile_id"],
+                "date_ordinal": int(r["date_ordinal"]),
+                "date_iso": r["date_iso"],
+                "class_id": int(r["class_id"]),
                 "n_pixels": int(round(area_m2 / px_area)),
                 "area_m2": area_m2,
                 "centroid_x": float(centroid.x),
@@ -251,6 +370,52 @@ def _write_geotiffs_per_date(output_dir: str,
     return paths
 
 
+def _write_ndvi_geotiffs_per_date(output_dir: str,
+                                  tile_id: str,
+                                  ndvi_before: np.ndarray,
+                                  ndvi_after: np.ndarray,
+                                  target_dates: np.ndarray,
+                                  world_origin_x: float,
+                                  world_origin_y: float,
+                                  pixel_res: float,
+                                  crs: CRS | None) -> list[str]:
+    """Write one float32 NDVI GeoTIFF per (date, side).
+
+    Files: `{tile_id}_tile_{iso}_ndvi_before.tif` / `_ndvi_after.tif`.
+    NDVI_NODATA is tagged as the GeoTIFF nodata value. Same affine/CRS as the
+    label GeoTIFFs so they overlay pixel-for-pixel.
+    """
+    transform = from_origin(world_origin_x, world_origin_y, pixel_res, pixel_res)
+    n_dates, tile_h, tile_w = ndvi_before.shape
+
+    paths: list[str] = []
+    for i in range(n_dates):
+        iso = _date.fromordinal(int(target_dates[i])).isoformat()
+        for side_name, arr in (("before", ndvi_before), ("after", ndvi_after)):
+            out_path = os.path.join(
+                output_dir, f"{tile_id}_tile_{iso}_ndvi_{side_name}.tif")
+            profile = {
+                "driver": "GTiff",
+                "dtype": "float32",
+                "count": 1,
+                "height": tile_h,
+                "width": tile_w,
+                "transform": transform,
+                "nodata": float(NDVI_NODATA),
+                "compress": "LZW",
+                "tiled": True,
+                "blockxsize": 256,
+                "blockysize": 256,
+            }
+            if crs is not None:
+                profile["crs"] = crs
+            with rasterio.open(out_path, "w", **profile) as dst:
+                dst.write(arr[i], 1)
+                dst.set_band_description(1, f"ndvi_{side_name}_{iso}")
+            paths.append(out_path)
+    return paths
+
+
 def _write_block_grid(out_path: str,
                       blocks: list[dict],
                       tile_id: str,
@@ -316,7 +481,13 @@ def _write_dense_npz(out_path: str, *,
                      classes: np.ndarray, tile_id: str,
                      world_origin_x: float, world_origin_y: float,
                      pixel_res: float, threshold: int,
-                     n_block_rows: int, n_block_cols: int) -> None:
+                     n_block_rows: int, n_block_cols: int,
+                     ndvi_before: np.ndarray | None = None,
+                     ndvi_after: np.ndarray | None = None) -> None:
+    extra = {}
+    if ndvi_before is not None:
+        extra["ndvi_before"] = ndvi_before.astype(np.float32, copy=False)
+        extra["ndvi_after"] = ndvi_after.astype(np.float32, copy=False)
     np.savez_compressed(
         out_path,
         labels=labels,
@@ -329,6 +500,7 @@ def _write_dense_npz(out_path: str, *,
         threshold=np.uint8(threshold),
         n_block_rows=np.int64(n_block_rows),
         n_block_cols=np.int64(n_block_cols),
+        **extra,
     )
 
 
@@ -488,6 +660,23 @@ def main() -> None:
     )
     print(f"  Stitch time: {time.perf_counter() - t0:.2f} s")
 
+    # ── Optional: stitch per-pixel NDVI (present iff predict_block wrote it) ─
+    # NDVI is opt-in (OUTPUT_NDVI in the predict step). Every block agrees
+    # (all written by the same run), so detecting it on the reference block is
+    # enough. Stitched as float32 with NDVI_NODATA fill.
+    ndvi_before_tile = ndvi_after_tile = None
+    has_ndvi = "ndvi_before" in ref
+    if has_ndvi:
+        print("\nStitching per-pixel NDVI (before/after)...")
+        ndvi_before_tile = _stitch_float_key(
+            blocks, "ndvi_before", n_rows, n_cols, block_h, block_w, n_dates,
+            fill=float(NDVI_NODATA), row_offset=min_row, col_offset=min_col,
+        )
+        ndvi_after_tile = _stitch_float_key(
+            blocks, "ndvi_after", n_rows, n_cols, block_h, block_w, n_dates,
+            fill=float(NDVI_NODATA), row_offset=min_row, col_offset=min_col,
+        )
+
     # ── Per-date detection summary ────────────────────────────────────────
     print("\nPer-date detections in the merged tile:")
     for i in range(n_dates):
@@ -537,6 +726,24 @@ def main() -> None:
     if tile_gdf.crs is None and crs is not None:
         tile_gdf.set_crs(crs, inplace=True, allow_override=True)
 
+    # ── Optional: clip the dissolved polygons to a mask .gpkg ─────────────
+    # CLIP_MASK_GPKG (unset = no clip) restricts the final map to a region of
+    # interest: polygons outside the mask are dropped, ones straddling its edge
+    # are cut to the inside. Done after the cross-block dissolve so patches are
+    # whole before clipping, and after the CRS stamp so the mask can reproject.
+    clip_mask = os.environ.get("CLIP_MASK_GPKG")
+    if clip_mask:
+        if not Path(clip_mask).is_file():
+            raise SystemExit(
+                f"[aggregate_tile] CLIP_MASK_GPKG not found: {clip_mask}"
+            )
+        print(f"\nClipping to mask: {clip_mask}")
+        t0 = time.perf_counter()
+        n_before = len(tile_gdf)
+        tile_gdf = _clip_to_mask(tile_gdf, clip_mask, ref_pres)
+        print(f"  {n_before} -> {len(tile_gdf)} patches after clip "
+              f"in {time.perf_counter() - t0:.2f} s")
+
     gpkg_path = os.path.join(output_dir, f"{tile_id}_tile.gpkg")
     parquet_path = os.path.join(output_dir, f"{tile_id}_tile.parquet")
     t0 = time.perf_counter()
@@ -556,6 +763,7 @@ def main() -> None:
         world_origin_x=tile_origin_x, world_origin_y=tile_origin_y,
         pixel_res=ref_pres, threshold=ref_threshold,
         n_block_rows=n_rows, n_block_cols=n_cols,
+        ndvi_before=ndvi_before_tile, ndvi_after=ndvi_after_tile,
     )
     write_npz_s = time.perf_counter() - t0
     npz_bytes = os.path.getsize(npz_path)
@@ -578,6 +786,17 @@ def main() -> None:
           f"(total {total_tif_bytes / 1024:.1f} KB):")
     for p in tif_paths:
         print(f"    {p}  ({os.path.getsize(p) / 1024:.1f} KB)")
+
+    # Per-date NDVI GeoTIFFs (before/after), only when NDVI was produced.
+    if has_ndvi:
+        print(f"\nWriting per-date NDVI GeoTIFFs...")
+        t0 = time.perf_counter()
+        ndvi_paths = _write_ndvi_geotiffs_per_date(
+            output_dir, tile_id, ndvi_before_tile, ndvi_after_tile, ref_dates,
+            tile_origin_x, tile_origin_y, ref_pres, crs,
+        )
+        print(f"  Wrote {len(ndvi_paths)} NDVI GeoTIFF(s) in "
+              f"{time.perf_counter() - t0:.2f} s")
 
     # ── Step D: block-grid outline (debug overlay) ────────────────────────
     # One rectangle per block's LIVE extent so you can overlay it on the
