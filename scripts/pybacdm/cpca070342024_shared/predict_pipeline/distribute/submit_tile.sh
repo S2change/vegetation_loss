@@ -17,34 +17,39 @@
 #   OUTPUT_DIR/block_outputs/ per-block .npz + .gpkg
 #   OUTPUT_DIR/final_outputs/ tile-level .gpkg/.parquet/.npz/.tif
 #
-# Run on the login node:
+# Run on the login node (the default USE_DATE_CLUSTERS=1 derives the target
+# dates from the acquisition calendar, so just give the START/END window):
 #   ./submit_tile.sh \
 #       TILE_ID=T29TPG \
 #       TILE_HDF5_PATH=/users1/cpca070342024/shared/hdf5/T29TPG_48ts_20251028_20251229.h5 \
-#       TARGET_DATES=2025-11-15,2025-12-01 \
+#       START_DATE=2023-01-01 \
+#       END_DATE=2023-12-31 \
 #       OUTPUT_DIR=/users1/cpca070342024/shared/predict_outputs/T29TPG_run01
 #
-# Target dates — give EITHER an explicit TARGET_DATES, OR a START_DATE +
-# END_DATE span (the dates are then generated automatically, one every
-# TARGET_STEP_DAYS=45 days, starting one step after START_DATE):
+# Target dates — the default USE_DATE_CLUSTERS=1 derives them from the
+# acquisition calendar over START_DATE..END_DATE (TARGET_DATES must NOT be
+# set). To pick dates yourself instead, set USE_DATE_CLUSTERS=0 and give
+# EITHER an explicit TARGET_DATES, OR a START_DATE + END_DATE span (then
+# generated automatically, one every TARGET_STEP_DAYS=45 days):
 #   ./submit_tile.sh TILE_ID=... TILE_HDF5_PATH=... OUTPUT_DIR=... \
-#       START_DATE=2025-01-01 END_DATE=2025-06-01
+#       USE_DATE_CLUSTERS=0 TARGET_DATES=2025-11-15,2025-12-01
 #
 # Optional knobs (KEY=VALUE):
-#   MODEL=bacdm         model package directory name under <shared>/ (the
+#   MODEL=efficientnet_b2_16bit_pipeline
+#                       model package directory name under <shared>/ (the
 #                       parent of distribute/). Each model package exposes the
 #                       same interface (predict.load_model,
 #                       predict.predict_before_after_chips, DEFAULT_WEIGHTS,
 #                       CLOSING_RADII — see bacdm/__init__.py for the
 #                       contract), so switching model is just e.g.
-#                       MODEL=efficientnet_b2. Default: bacdm (Swin-YNet).
-#   DATA_DTYPE=u8       input data dtype for the read->composite->shift chain.
-#                       u8 (default) applies the q02/q98 stretch (uint8,
-#                       nodata 255) — bacdm / efficientnet_b2. u16 keeps raw
-#                       uint16 reflectance (nodata 65535) — for models that
-#                       scale natively (efficientnet_b2_16bit_pipeline). Match
-#                       this to the model: a u16 model on u8 data (or vice
-#                       versa) silently produces garbage.
+#                       MODEL=bacdm. Default: efficientnet_b2_16bit_pipeline.
+#   DATA_DTYPE=u16      input data dtype for the read->composite->shift chain.
+#                       u16 (default) keeps raw uint16 reflectance (nodata
+#                       65535) — for models that scale natively
+#                       (efficientnet_b2_16bit_pipeline). u8 applies the
+#                       q02/q98 stretch (uint8, nodata 255) — bacdm /
+#                       efficientnet_b2. Match this to the model: a u16 model
+#                       on u8 data (or vice versa) silently produces garbage.
 #   THREADS=2           CPU threads per task. Also sets --cpus-per-task so the
 #                       allocation matches. A thread sweep showed ~95% scaling
 #                       at 2 threads, ~68% at 4 — 2 is the efficient default.
@@ -61,13 +66,15 @@
 #   TARGET_STEP_DAYS=45 spacing (days) between generated dates when using the
 #                       START_DATE/END_DATE span form (ignored if TARGET_DATES
 #                       is given explicitly or USE_DATE_CLUSTERS=1).
-#   USE_DATE_CLUSTERS=0 when 1, cluster the tile's acquisition calendar over
-#                       START_DATE..END_DATE: the cluster-gap midpoints become
-#                       the target dates and each block's timesteps are
-#                       collapsed to one min-composite per cluster before
-#                       compositing (cloud-suppressing temporal summary).
-#                       Requires START_DATE+END_DATE; TARGET_DATES must NOT be
-#                       set (the dates are derived). Default 0 = raw timesteps.
+#   USE_DATE_CLUSTERS=1 when 1 (default), cluster the tile's acquisition
+#                       calendar over START_DATE..END_DATE: the cluster-gap
+#                       midpoints become the target dates and each block's
+#                       timesteps are collapsed to one min-composite per
+#                       cluster before compositing (cloud-suppressing temporal
+#                       summary). Requires START_DATE+END_DATE; TARGET_DATES
+#                       must NOT be set (the dates are derived). Set 0 to use
+#                       raw timesteps with the fixed-cadence / explicit
+#                       TARGET_DATES paths instead.
 #   CLOSING_RADIUS=3    post-vote morphological close disk radius (0 = off).
 #   MIN_PATCH_M2=2500   block-level patch-area floor (m^2), firm.
 #   MIN_TILE_PATCH_M2=5000  master patch-area floor (m^2), post cross-block merge.
@@ -91,7 +98,7 @@
 #                       2x2 of a 4x4 grid; a bare number selects one index.
 #                       Unset = whole tile. The aggregator crops its outputs to
 #                       the selected sub-region.
-#   WRITE_COMPOSITE_TIFS=1  dump per-block before/after time-composites as
+#   WRITE_COMPOSITE_TIFS=0  dump per-block before/after time-composites as
 #                       10-band GeoTIFFs (debug/inspection only; off by
 #                       default).
 #
@@ -120,7 +127,7 @@ done
 # (computed once below, exported to all tasks). It's an alternative to the
 # fixed-cadence / explicit TARGET_DATES paths, so an explicit TARGET_DATES
 # would be contradictory — require START/END and reject TARGET_DATES.
-USE_DATE_CLUSTERS="${USE_DATE_CLUSTERS:-0}"
+USE_DATE_CLUSTERS="${USE_DATE_CLUSTERS:-1}"
 _clusters_on=0
 case "$USE_DATE_CLUSTERS" in 1|true|True|yes) _clusters_on=1 ;; esac
 
@@ -151,12 +158,12 @@ fi
 # Model package (directory name under <shared>/). Validated — and the
 # default WEIGHTS_PATH resolved from it — once SHARED_DIR/VENV are known
 # below.
-export MODEL="${MODEL:-bacdm}"
-# Input data dtype for the read->composite->shift chain. u8 (default) applies
-# the q02/q98 stretch (uint8, nodata 255) — bacdm / efficientnet_b2. u16 keeps
-# raw uint16 reflectance (nodata 65535) — for models that scale natively
+export MODEL="${MODEL:-efficientnet_b2_16bit_pipeline}"
+# Input data dtype for the read->composite->shift chain. u8 applies
+# the q02/q98 stretch (uint8, nodata 255) — bacdm / efficientnet_b2. u16 (default)
+# keeps raw uint16 reflectance (nodata 65535) — for models that scale natively
 # (e.g. efficientnet_b2_16bit_pipeline). Validate now so a typo fails at submit.
-export DATA_DTYPE="${DATA_DTYPE:-u8}"
+export DATA_DTYPE="${DATA_DTYPE:-u16}"
 case "$DATA_DTYPE" in
     u8|uint8|8|u16|uint16|16) ;;
     *) echo "Invalid DATA_DTYPE='$DATA_DTYPE' (expected u8 or u16)" >&2; exit 1 ;;
