@@ -152,6 +152,13 @@ def predict_before_after_chips(before_batch, after_batch, model_or_path,
             if cuts_id is not None:
                 pred[probs[:, cuts_id] > C.CUTS_THRESHOLD] = cuts_id
 
+        if getattr(C, 'FIRES_THRESHOLD', None) is not None:
+            fires_id = next(
+                (k for k, v in C.CLASS_NAMES.items() if v == 'Fires'), None
+            )
+            if fires_id is not None:
+                pred[(pred == fires_id) & (probs[:, fires_id] <= C.FIRES_THRESHOLD)] = 0
+
     labels = pred.cpu().numpy().astype(np.uint8)
     labels[nodata_mask] = C.NODATA_UINT8
     return labels

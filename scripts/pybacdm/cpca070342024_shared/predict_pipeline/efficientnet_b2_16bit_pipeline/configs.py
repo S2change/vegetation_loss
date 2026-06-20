@@ -32,7 +32,11 @@ CLOSING_RADII = {1: 3, 2: 1}
 # ── Per-class inference threshold ──────────────────────────────────────────────
 # Pixels where P(Cuts) exceeds this value are labelled Cuts even if not argmax.
 # Set to None to fall back to plain argmax for all classes.
-CUTS_THRESHOLD = 0.3
+CUTS_THRESHOLD = 0.5
+
+# Fires pixels where P(Fires) ≤ this value are reverted to Background.
+# Set to None to disable.
+FIRES_THRESHOLD = 0.8
 
 # ── Class definitions ──────────────────────────────────────────────────────────
 NUM_CLASSES  = 3
