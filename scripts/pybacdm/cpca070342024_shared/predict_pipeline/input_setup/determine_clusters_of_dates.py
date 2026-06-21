@@ -56,7 +56,9 @@ MAX_THETA             = 10   # maximum gap (days) for single-link merging
 MAX_CLUSTER_AMPLITUDE = 15   # a cluster must not span more than this many days
 
 
-def determine_clusters_of_dates(path_to_hdf5, ts_start_ordinal, ts_end_ordinal):
+def determine_clusters_of_dates(path_to_hdf5, ts_start_ordinal, ts_end_ordinal,
+                                max_theta=MAX_THETA,
+                                max_cluster_amplitude=MAX_CLUSTER_AMPLITUDE):
     """
     Read acquisition dates from an HDF5 file, filter to the requested window,
     and group them into temporal clusters by iterative single-link clustering.
@@ -66,6 +68,11 @@ def determine_clusters_of_dates(path_to_hdf5, ts_start_ordinal, ts_end_ordinal):
     path_to_hdf5     : str or Path
     ts_start_ordinal : int or None — inclusive lower bound (date.toordinal())
     ts_end_ordinal   : int or None — inclusive upper bound
+    max_theta        : int — maximum gap (days) for single-link merging; the
+                       clustering runs theta = 1..max_theta. Default MAX_THETA.
+    max_cluster_amplitude : int or None — a cluster must not span more than
+                       this many days (None = no amplitude cap). Default
+                       MAX_CLUSTER_AMPLITUDE.
 
     Returns
     -------
@@ -94,13 +101,13 @@ def determine_clusters_of_dates(path_to_hdf5, ts_start_ordinal, ts_end_ordinal):
     # Start: each date is its own cluster
     clusters = [[o] for o in window_ordinals]
 
-    for theta in range(1, MAX_THETA + 1):
+    for theta in range(1, max_theta + 1):
         merged, current = [], clusters[0]
         for j in range(1, len(clusters)):
             gap            = clusters[j][0] - current[-1]
             span_if_merged = clusters[j][-1] - current[0]
-            amplitude_ok   = (MAX_CLUSTER_AMPLITUDE is None or
-                              span_if_merged <= MAX_CLUSTER_AMPLITUDE)
+            amplitude_ok   = (max_cluster_amplitude is None or
+                              span_if_merged <= max_cluster_amplitude)
             if gap <= theta and amplitude_ok:
                 current = current + clusters[j]
             else:
@@ -259,6 +266,16 @@ def _main(argv=None) -> int:
     parser.add_argument("--end", default=None,
                         help="inclusive window end, YYYY-MM-DD")
     parser.add_argument(
+        "--max-theta", type=int, default=MAX_THETA,
+        help=f"maximum gap (days) for single-link merging; clustering runs "
+             f"theta = 1..max-theta (default {MAX_THETA}).",
+    )
+    parser.add_argument(
+        "--max-cluster-amplitude", type=int, default=MAX_CLUSTER_AMPLITUDE,
+        help=f"a cluster must not span more than this many days "
+             f"(default {MAX_CLUSTER_AMPLITUDE}).",
+    )
+    parser.add_argument(
         "--for-submit", action="store_true",
         help="machine-readable output for submit_tile.sh: line 1 = "
              "comma-separated change dates (TARGET_DATES), line 2 = "
@@ -270,7 +287,9 @@ def _main(argv=None) -> int:
     ts_end   = _date.fromisoformat(args.end).toordinal() if args.end else None
 
     change_dates, clusters, medians = determine_clusters_of_dates(
-        args.hdf5_path, ts_start, ts_end
+        args.hdf5_path, ts_start, ts_end,
+        max_theta=args.max_theta,
+        max_cluster_amplitude=args.max_cluster_amplitude,
     )
 
     if args.for_submit:

@@ -55,6 +55,8 @@ In this example subission, the first 5 inputs (TILE_ID, TILE_HDF5, OUTPUT_DIR, S
 | `VOTE_THRESHOLD` | `2` (int) | Min votes per pixel to keep a detection. |
 | `TARGET_STEP_DAYS` | `45` (int, days) | Spacing (days) between generated dates when using the `START_DATE`/`END_DATE` span form (ignored if `TARGET_DATES` is given explicitly or `USE_DATE_CLUSTERS=1`). |
 | `USE_DATE_CLUSTERS` | `1` (bool: 0\|1) | When 1 (default), cluster the tile's acquisition calendar over `START_DATE..END_DATE`: the cluster-gap midpoints become the target dates and each block's timesteps are collapsed to one min-composite per cluster before compositing (cloud-suppressing temporal summary). Requires `START_DATE`+`END_DATE`; `TARGET_DATES` must NOT be set (the dates are derived). Set 0 to use raw timesteps with the fixed-cadence / explicit `TARGET_DATES` paths instead. |
+| `MAX_THETA` | unset, default 10 (int, days) | Clustering tuning (`USE_DATE_CLUSTERS=1` only): max gap (days) for single-link merging; clustering runs theta = 1..MAX_THETA. Unset = the determine script's default (10). |
+| `MAX_CLUSTER_AMPLITUDE` | unset, default 15 (int, days) | Clustering tuning (`USE_DATE_CLUSTERS=1` only): max span (days) a single cluster may cover (the amplitude cap that stops a long chain of near-dates snowballing into one cluster). Unset = the determine script's default (15). |
 | `CLOSING_RADIUS` | `3` (int) | Post-vote morphological close disk radius (0 = off). |
 | `MIN_PATCH_M2` | `2500` (float, m^2) | Block-level patch-area floor (m^2), firm. |
 | `MIN_TILE_PATCH_M2` | `5000` (float, m^2) | Master patch-area floor (m^2), post cross-block merge. |

@@ -75,6 +75,12 @@
 #                       must NOT be set (the dates are derived). Set 0 to use
 #                       raw timesteps with the fixed-cadence / explicit
 #                       TARGET_DATES paths instead.
+#   MAX_THETA           clustering tuning (USE_DATE_CLUSTERS=1 only): max gap
+#                       (days) for single-link merging. Unset = the determine
+#                       script's default (10).
+#   MAX_CLUSTER_AMPLITUDE  clustering tuning (USE_DATE_CLUSTERS=1 only): max
+#                       span (days) a single cluster may cover. Unset = the
+#                       determine script's default (15).
 #   CLOSING_RADIUS=3    post-vote morphological close disk radius (0 = off).
 #   MIN_PATCH_M2=2500   block-level patch-area floor (m^2), firm.
 #   MIN_TILE_PATCH_M2=5000  master patch-area floor (m^2), post cross-block merge.
@@ -130,6 +136,14 @@ done
 USE_DATE_CLUSTERS="${USE_DATE_CLUSTERS:-1}"
 _clusters_on=0
 case "$USE_DATE_CLUSTERS" in 1|true|True|yes) _clusters_on=1 ;; esac
+
+# Clustering tuning (only used when USE_DATE_CLUSTERS=1). Left empty by default
+# so determine_clusters_of_dates.py applies its own MAX_THETA /
+# MAX_CLUSTER_AMPLITUDE; when set, they are passed through as CLI flags below.
+#   MAX_THETA              max gap (days) for single-link merging.
+#   MAX_CLUSTER_AMPLITUDE  max span (days) a single cluster may cover.
+MAX_THETA="${MAX_THETA:-}"
+MAX_CLUSTER_AMPLITUDE="${MAX_CLUSTER_AMPLITUDE:-}"
 
 # Target dates: three mutually exclusive sources, all resolved (with Python)
 # in the "Resolve TARGET_DATES" block below. Validate the inputs here.
@@ -241,9 +255,16 @@ if [[ "$_clusters_on" == 1 ]]; then
     # The CLI prints exactly two lines: line 1 = TARGET_DATES, line 2 =
     # serialized DATE_CLUSTERS. Read both; the determine script lives in
     # input_setup/ and runs as a plain script (no package import needed).
+    # MAX_THETA / MAX_CLUSTER_AMPLITUDE are only forwarded when the caller set
+    # them; otherwise the determine script uses its own defaults.
+    _cluster_flags=()
+    [[ -n "$MAX_THETA" ]] && _cluster_flags+=(--max-theta "$MAX_THETA")
+    [[ -n "$MAX_CLUSTER_AMPLITUDE" ]] && \
+        _cluster_flags+=(--max-cluster-amplitude "$MAX_CLUSTER_AMPLITUDE")
     _cluster_out="$(
         "$VENV/bin/python" "$SHARED_DIR/input_setup/determine_clusters_of_dates.py" \
-            "$TILE_HDF5_PATH" --start "$START_DATE" --end "$END_DATE" --for-submit
+            "$TILE_HDF5_PATH" --start "$START_DATE" --end "$END_DATE" \
+            ${_cluster_flags[@]+"${_cluster_flags[@]}"} --for-submit
     )" || exit 1
     TARGET_DATES="$(printf '%s\n' "$_cluster_out" | sed -n '1p')"
     DATE_CLUSTERS="$(printf '%s\n' "$_cluster_out" | sed -n '2p')"
@@ -373,6 +394,8 @@ echo "  final out:    $FINAL_OUTPUT_DIR"
 echo "Target dates:   $TARGET_DATES"
 if [[ "$_clusters_on" == 1 ]]; then
     echo "Date clusters:  on ($(printf '%s' "$DATE_CLUSTERS" | awk -F';' '{print NF}') clusters)"
+    echo "  max theta:    ${MAX_THETA:-default}"
+    echo "  max amplitude: ${MAX_CLUSTER_AMPLITUDE:-default}"
 else
     echo "Date clusters:  off (raw timesteps)"
 fi
