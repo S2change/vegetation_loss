@@ -63,10 +63,3 @@ NVG is a reference dataset used to represent and validate vegetation-cover chang
 The dataset contains spatial and temporal information associated with vegetation changes and is used to compare, confirm, and contextualize change information derived from the other project layers.
 
 
-<<<<<<< HEAD
-The harmonized versions of BDR-TNE-300, BDR-TNE-300-Expanded, ICNF, and NVG are documented in:
-
-`Harmonized/README.MD`
-
-=======
->>>>>>> f0ff7609390503001a9b6013df43a902db71b74c
