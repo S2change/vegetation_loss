@@ -52,6 +52,7 @@
 - 10 de maio de 2026: reunião DGT/LIP , com participação ISA no início
 
 - 11 de maio de 2026: reunião técnica LIP/ISA: ver relatório
+- 26 de maio de 2026: reunião DGT/LIP/ISA [apresentação ISA; diagrama para pipeline](https://github.com/S2change/vegetation_loss/blob/main/documents/presentations/2026/reuniao_DGT_LIP_ISA_26_maio_2026.md)
 
 ## 2025
 
