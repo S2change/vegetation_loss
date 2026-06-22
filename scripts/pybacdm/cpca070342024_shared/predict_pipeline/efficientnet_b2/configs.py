@@ -11,7 +11,7 @@ import numpy as np
 USE_CUDA = True
 
 # ── Input channels ─────────────────────────────────────────────────────────────
-# Chips are ordered B12, B11, …, B2 (10 spectral bands); no reordering needed.
+# B2-B12 ordering
 NUM_BANDS = 10
 
 NORM_MEAN = (0.485, 0.456, 0.406, 0.485, 0.456, 0.406, 0.485, 0.456, 0.406, 0.485)

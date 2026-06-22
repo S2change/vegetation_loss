@@ -35,6 +35,12 @@ from .hdf5_reader import (
     BLOCK_W,
     NODATA_U8,
 )
+from .determine_clusters_of_dates import (
+    determine_clusters_of_dates,
+    aggregate_block_dates,
+    parse_date_clusters,
+    serialize_date_clusters,
+)
 
 __all__ = [
     "read_block",
@@ -42,6 +48,10 @@ __all__ = [
     "get_block_grid_shape",
     "dry_run",
     "BlockPosition",
+    "determine_clusters_of_dates",
+    "aggregate_block_dates",
+    "parse_date_clusters",
+    "serialize_date_clusters",
     "CHIP_SIZE",
     "CHIP_PIXELS",
     "LIVE_ROWS",

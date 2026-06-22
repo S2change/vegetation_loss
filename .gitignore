@@ -16,8 +16,11 @@ scripts/chips/copy_chips_S2_dates.py
 
 smallfile_T29TQG_6bands.h5
 
-scripts/pybacdm/cpca070342024_shared/predict_pipeline/small_test_area/T29SNB_testblock.h5
+scripts/pybacdm/cpca070342024_shared/predict_pipeline/small_test_area/*.h5
+*.pth
 
 *.aux.xml
 *.gpkg-shm
 *.gpkg-wal
+
+scripts/pybacdm/cpca070342024_shared/predict_pipeline/postprocess/CCDC_Mask_dissolve.gpkg

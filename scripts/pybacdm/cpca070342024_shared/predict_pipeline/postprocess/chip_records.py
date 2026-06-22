@@ -1,22 +1,34 @@
-"""Encode one ChipPredictionRecord per (chip, target_date).
+"""Chip-level post-processing + per-(chip, target_date) record encoding.
 
-Step 5 of the chip-chunked prediction pipeline. For each chip's (256, 256)
-prediction label map we emit a single record carrying the chip's identity
-(6-tuple), date, world position, and per-class binary masks RLE-encoded.
+This module owns two chip-level steps of the chunked prediction pipeline:
 
-No connected-component enumeration happens here — downstream pixel-level
-voting (multiple shifted predictions per pixel in the live 4x4 area) is the
-natural unit of analysis, so storing per-component records would just be
-work to undo. predict.py's `postprocess_prediction` already runs
-morphological closing + small-component removal at the model-output level
-before we ever see the labels here.
+  * `postprocess_prediction` — per-class morphological closing (+ optional
+    small-component removal) applied to a single chip's raw model-output
+    label map. Model-agnostic: every model's predictions are closed the
+    same way, with per-class radii drawn from the active model package (so
+    the rule matches the block-level close in polygonize.close_labels).
+    Run by predict_block.py right after the model returns, before voting.
+
+  * `encode_chip_predictions` (Step 5) — emit one ChipPredictionRecord per
+    chip carrying the chip's identity (6-tuple), date, world position, and
+    per-class binary masks RLE-encoded.
+
+No connected-component enumeration happens in encoding — downstream
+pixel-level voting (multiple shifted predictions per pixel in the live 4x4
+area) is the natural unit of analysis, so storing per-component records
+would just be work to undo. `postprocess_prediction` (called upstream by
+predict_block.py) is the only chip-level filter before voting.
 """
 from __future__ import annotations
 
+import importlib
+import os
 from dataclasses import dataclass, field, asdict
+from pathlib import Path
 from typing import Iterator
 
 import numpy as np
+from scipy.ndimage import binary_closing, label as nd_label
 
 # ============================================================================
 # CONFIGURATION
@@ -29,6 +41,121 @@ HALF = 128
 # Background class index — its mask is never stored (it's the complement of
 # every other class's masks unioned together).
 BACKGROUND_CLASS = 0
+
+# Sentinel for NoData in a uint8 label map (set by each model's _to_uint8
+# stretch). Pixels >= this are excluded from closing / size filtering.
+NODATA_8 = 255
+
+# Fallback per-chip min patch size (pixels) and closing radius, used when the
+# active model package doesn't define them. 25 px matches the historical
+# MIN_PATCH_SIZE; radius 3 the historical CLOSING_RADIUS.
+DEFAULT_MIN_PATCH_SIZE = 25
+DEFAULT_CLOSING_RADIUS = 3
+
+
+# ============================================================================
+# CHIP-LEVEL POST-PROCESSING (model-agnostic)
+# ============================================================================
+
+def _model_pkg():
+    """Import the active model package (MODEL env var, default 'bacdm').
+
+    Mirrors the resolution polygonize.py does, so the chip-level close reads
+    the SAME per-class radii as the block-level close. Model packages live
+    next to distribute/ + postprocess/ under <shared>/.
+    """
+    model = os.environ.get("MODEL", "bacdm")
+    import sys
+    shared = str(Path(__file__).resolve().parent.parent)
+    if shared not in sys.path:
+        sys.path.insert(0, shared)
+    try:
+        return importlib.import_module(model)
+    except ImportError as exc:
+        available = sorted(
+            p.parent.name for p in Path(shared).glob("*/predict.py")
+        )
+        raise SystemExit(
+            f"[chip_records] Could not import model package '{model}': {exc}\n"
+            f"Available model packages: {available}"
+        )
+
+
+def _disk(r: int) -> np.ndarray:
+    """Boolean disk structuring element of integer radius r."""
+    r = int(r)
+    gy, gx = np.ogrid[-r:r + 1, -r:r + 1]
+    return (gx ** 2 + gy ** 2) <= r ** 2
+
+
+def postprocess_prediction(pred, *, min_size=None, closing_radius=None,
+                           remove_small=True, closing_radii=None):
+    """Per-class morphological closing (+ optional small-component removal).
+
+    Model-agnostic chip-level cleanup of one chip's raw model output. Every
+    model's predictions go through this identical step before voting, so the
+    chip-level close can't drift between models or from the block-level close
+    (polygonize.close_labels reads the same per-class radii).
+
+    Parameters
+    ----------
+    pred : (H, W) uint8
+        One chip's raw class labels (0 = background, NODATA_8 = no-data).
+    min_size : int or None
+        Small-component floor in pixels. None -> the active model package's
+        MIN_PATCH_SIZE, else DEFAULT_MIN_PATCH_SIZE.
+    closing_radius : int or None
+        Force one radius for every class (legacy/override). None -> use
+        per-class radii.
+    closing_radii : dict or None
+        Explicit {class_id: radius}. None -> the active model package's
+        CLOSING_RADII (with the model's CLOSING_RADIUS, else
+        DEFAULT_CLOSING_RADIUS, as the per-class fallback).
+    remove_small : bool (default True)
+        Drop connected components smaller than `min_size`. Set False at the
+        chip level so chips vote on closed-but-unfiltered output — size
+        filtering is deferred to the block/master stages where patches are
+        whole.
+
+    Returns
+    -------
+    (H, W) uint8 — a copy; `pred` is not mutated.
+    """
+    pkg = None
+    if min_size is None:
+        pkg = _model_pkg()
+        min_size = int(getattr(pkg, "MIN_PATCH_SIZE", DEFAULT_MIN_PATCH_SIZE))
+    if closing_radius is None and closing_radii is None:
+        pkg = pkg or _model_pkg()
+        closing_radii = getattr(pkg, "CLOSING_RADII", {})
+        radius_fallback = int(getattr(pkg, "CLOSING_RADIUS",
+                                      DEFAULT_CLOSING_RADIUS))
+    else:
+        radius_fallback = DEFAULT_CLOSING_RADIUS
+
+    def _radius(cls: int) -> int:
+        if closing_radius is not None:
+            return int(closing_radius)
+        return int((closing_radii or {}).get(int(cls), radius_fallback))
+
+    out = pred.copy()
+    valid = pred < NODATA_8
+
+    for cls in [c for c in np.unique(pred[valid]) if c != BACKGROUND_CLASS]:
+        r = _radius(cls)
+        if r <= 0:
+            continue
+        closed = binary_closing(pred == cls, structure=_disk(r))
+        out[closed & (out == BACKGROUND_CLASS) & valid] = cls
+
+    if remove_small:
+        for cls in [c for c in np.unique(out[valid]) if c != BACKGROUND_CLASS]:
+            labeled, n = nd_label(out == cls)
+            for i in range(1, n + 1):
+                if (labeled == i).sum() < min_size:
+                    out[labeled == i] = BACKGROUND_CLASS
+
+    return out
 
 
 # ============================================================================

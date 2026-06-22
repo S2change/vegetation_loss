@@ -1,6 +1,6 @@
 """Per-pixel before/after compositing across a chip-block timestep axis.
 
-Step 3 of the chip-chunked prediction pipeline. Takes the uint8 chip-block
+Step 3 of the chip-chunked prediction pipeline. Takes the chip-block
 produced by step 2 (with 2-D pixel layout) and, for each requested target
 date Dk, builds:
 
@@ -15,12 +15,17 @@ helper in scripts/utils/bacdm_utils/chip_creation.py.
 
 If a target date has no valid timesteps on one (or both) sides, the date
 is skipped with a warning explaining the reason; its slot in the output
-array is left filled with NODATA_U8.
+array is left filled with `nodata`.
+
+dtype: this stage is dtype-preserving — the output composites match the
+input block's dtype (uint8 for the stretched pipeline, uint16 for the raw-
+reflectance pipeline). The `nodata` sentinel must match that dtype (255 for
+uint8, 65535 for uint16); the caller passes it through.
 
 Input/output shapes
 -------------------
-Input block:    (N_TS, 10, BLOCK_H, BLOCK_W) uint8
-Output composites: (2, |D|, 10, BLOCK_H, BLOCK_W) uint8
+Input block:    (N_TS, 10, BLOCK_H, BLOCK_W)  uint8 or uint16
+Output composites: (2, |D|, 10, BLOCK_H, BLOCK_W)  same dtype as input
 """
 from datetime import date
 
@@ -28,7 +33,14 @@ import numpy as np
 
 NODATA_U8 = 255
 SELECTION_BAND_IDX_DEFAULT = 0
-B2_VALID_MAX = 200
+# Validity heuristic on band 0 (B2): a pixel is "real data" when its B2 value
+# is below this max (high B2 = cloud / haze / saturated, treated as invalid so
+# the cascading pick falls through to a cleaner timestep). The threshold lives
+# in the data's own units, so it differs by dtype:
+#   - uint8  (stretched pipeline): B2 < 200
+#   - uint16 (raw reflectance):    B2 < 5000
+B2_VALID_MAX = 200          # uint8 stretched units
+B2_VALID_MAX_U16 = 5000     # raw uint16 reflectance units
 
 
 def cascading_select(block_subset: np.ndarray,
@@ -44,18 +56,19 @@ def cascading_select(block_subset: np.ndarray,
 
     Parameters
     ----------
-    block_subset : (N, 10, H, W) uint8
+    block_subset : (N, 10, H, W) uint8 or uint16
         Subset of the chip-block restricted to the timesteps to consider.
     ordinals_sorted : (N,) int
         Ordinal dates aligned with axis 0 of block_subset.
     selection_band_idx : int
         Band used for nodata detection. Default 0.
     nodata : int
-        uint8 nodata sentinel. Default 255.
+        nodata sentinel matching block_subset's dtype (255 for uint8,
+        65535 for uint16). Default 255.
 
     Returns
     -------
-    selected : (10, H, W) uint8
+    selected : (10, H, W) — same dtype as block_subset
         Per-pixel picked values. Pixels with no valid timestep are filled
         with `nodata`.
     timestamps : (H, W) int64
@@ -65,15 +78,18 @@ def cascading_select(block_subset: np.ndarray,
     """
     if block_subset.shape[0] == 0:
         H, W = block_subset.shape[2], block_subset.shape[3]
-        return (np.full((10, H, W), nodata, dtype=np.uint8),
+        return (np.full((10, H, W), nodata, dtype=block_subset.dtype),
                 np.full((H, W), nodata, dtype=np.int64),
                 np.zeros((H, W), dtype=bool))
 
     n, _, h, w = block_subset.shape
 
-    # Validity mask along time axis using only the selection band.
+    # Validity mask along time axis using only the selection band. The
+    # B2_VALID_MAX heuristic (B2 below a max = real data, high B2 = cloud/haze)
+    # is in the data's own units, so the threshold differs by dtype.
     if selection_band_idx == 0:
-        valid_mask = block_subset[:, selection_band_idx, :, :] < B2_VALID_MAX # (N, H, W)
+        valid_max = B2_VALID_MAX_U16 if block_subset.dtype == np.uint16 else B2_VALID_MAX
+        valid_mask = block_subset[:, selection_band_idx, :, :] < valid_max # (N, H, W)
     else:
         valid_mask = block_subset[:, selection_band_idx, :, :] != nodata # (N, H, W)
     any_valid = valid_mask.any(axis=0)                                # (H, W)
@@ -111,7 +127,7 @@ def create_before_after_composites(block: np.ndarray,
 
     Parameters
     ----------
-    block : (N_TS, 10, H, W) uint8
+    block : (N_TS, 10, H, W) uint8 or uint16
         The chip-block output of step 2 (in 2-D pixel layout).
     ts : (N_TS,) int
         Ordinal dates aligned to block's axis 0.
@@ -120,7 +136,9 @@ def create_before_after_composites(block: np.ndarray,
     selection_band_idx : int
         Band used for nodata detection. Default 0.
     nodata : int
-        uint8 nodata sentinel. Default 255.
+        nodata sentinel matching block's dtype (255 for uint8, 65535 for
+        uint16). Default 255. Must match the dtype or the validity test and
+        fill value will be wrong.
     verbose : bool
         Print a one-line warning per skipped target date.
     max_days_from_break : int or None
@@ -133,7 +151,7 @@ def create_before_after_composites(block: np.ndarray,
 
     Returns
     -------
-    composites : (2, D, 10, H, W) uint8
+    composites : (2, D, 10, H, W) — same dtype as `block`
         composites[0, k] = before composite for target_dates[k].
         composites[1, k] = after  composite for target_dates[k].
         Slots for skipped dates are left filled with `nodata`.
@@ -150,7 +168,7 @@ def create_before_after_composites(block: np.ndarray,
     n_ts, _, h, w = block.shape
     n_target = len(target_dates)
 
-    composites = np.full((2, n_target, 10, h, w), nodata, dtype=np.uint8)
+    composites = np.full((2, n_target, 10, h, w), nodata, dtype=block.dtype)
     valid_dates_mask = np.zeros(n_target, dtype=bool)
 
     ts_min, ts_max = int(ts.min()), int(ts.max())

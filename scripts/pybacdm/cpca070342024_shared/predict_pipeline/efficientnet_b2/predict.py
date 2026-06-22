@@ -29,7 +29,6 @@ sys.path.insert(0, str(_here))
 
 import numpy as np
 import torch
-from scipy.ndimage import binary_closing, label as nd_label
 import segmentation_models_pytorch as smp
 
 import configs
@@ -40,6 +39,12 @@ _NODATA_8  = 255
 
 _MEAN = torch.tensor(configs.NORM_MEAN).view(-1, 1, 1)   # (10, 1, 1)
 _STD  = torch.tensor(configs.NORM_STD).view(-1, 1, 1)    # (10, 1, 1)
+
+# NOTE: chip-level post-processing (per-class morphological closing + small-
+# component removal) lives in postprocess.chip_records.postprocess_prediction,
+# shared across all models and applied by predict_block.py after this module
+# returns raw labels. configs.CLOSING_RADII / MIN_PATCH_SIZE feed it via the
+# efficientnet_b2 package (see efficientnet_b2/__init__.py).
 
 
 # ── Preprocessing ─────────────────────────────────────────────────────────────
@@ -70,50 +75,6 @@ def _chip_to_tensor(arr_hwc):
     u8 = _to_uint8(arr_hwc)
     t  = torch.from_numpy(u8.transpose(2, 0, 1)).float() / 255.0
     return (t - _MEAN) / _STD
-
-
-# ── Post-processing ───────────────────────────────────────────────────────────
-
-def _disk(r):
-    """Boolean disk structuring element of integer radius r."""
-    r = int(r)
-    gy, gx = np.ogrid[-r:r + 1, -r:r + 1]
-    return (gx ** 2 + gy ** 2) <= r ** 2
-
-
-def _class_radius(cls):
-    """Per-class closing radius — CLOSING_RADII override, else CLOSING_RADIUS."""
-    return int(configs.CLOSING_RADII.get(int(cls), configs.CLOSING_RADIUS))
-
-
-def postprocess_prediction(pred, min_size=None, closing_radius=None, remove_small=True):
-    """Per-class morphological closing + optional small-component removal.
-
-    Closing uses a per-class radius from configs.CLOSING_RADII (Cuts→3, Fires→1),
-    falling back to configs.CLOSING_RADIUS for unlisted classes.
-
-    Pass an int closing_radius to force one radius for all classes.
-    Set remove_small=False to close only — used at chip level so chips vote on
-    closed-but-unfiltered output; size filtering is deferred to block/master stages.
-    """
-    if min_size is None:
-        min_size = configs.MIN_PATCH_SIZE
-    out   = pred.copy()
-    valid = pred < _NODATA_8
-
-    for cls in [c for c in np.unique(pred[valid]) if c != 0]:
-        r = closing_radius if closing_radius is not None else _class_radius(cls)
-        closed = binary_closing(pred == cls, structure=_disk(r))
-        out[closed & (out == 0) & valid] = cls
-
-    if remove_small:
-        for cls in [c for c in np.unique(out[valid]) if c != 0]:
-            labeled, n = nd_label(out == cls)
-            for i in range(1, n + 1):
-                if (labeled == i).sum() < min_size:
-                    out[labeled == i] = 0
-
-    return out
 
 
 # ── Model ─────────────────────────────────────────────────────────────────────
@@ -151,8 +112,15 @@ def load_model(weights_path, device=None):
 # ── Public inference API ──────────────────────────────────────────────────────
 
 def predict_before_after_chips(before_batch, after_batch, model_or_path,
-                               device=None, postprocess=True):
+                               device=None):
     """Segment a batch of before/after 256×256 chip pairs.
+
+    Returns RAW model output (argmax + any per-class threshold override).
+    Chip-level post-processing — per-class morphological closing and small-
+    component removal — is applied downstream by predict_block.py via the
+    shared postprocess.chip_records.postprocess_prediction, so every model
+    is cleaned up identically and the chip-level close matches the block-
+    level one (polygonize.close_labels).
 
     Parameters
     ----------
@@ -162,11 +130,6 @@ def predict_before_after_chips(before_batch, after_batch, model_or_path,
                     Pass a pre-loaded model when calling this function repeatedly to avoid
                     reloading weights on every batch.
     device        : torch.device or None (auto-detected)
-    postprocess   : bool (default True). When True, each chip's label map is
-                    passed through postprocess_prediction with remove_small=False —
-                    per-class morphological closing only (Cuts→3, Fires→1). Size
-                    filtering is deferred to block/master stages where patches are whole.
-                    Set False to return raw model output.
 
     Returns
     -------
@@ -204,8 +167,5 @@ def predict_before_after_chips(before_batch, after_batch, model_or_path,
             if cuts_id is not None:
                 pred[probs[:, cuts_id] > configs.CUTS_THRESHOLD] = cuts_id
 
-    labels = pred.cpu().numpy().astype(np.uint8)
-    if postprocess:
-        return np.stack([postprocess_prediction(labels[i], remove_small=False)
-                         for i in range(len(labels))])
+    return pred.cpu().numpy().astype(np.uint8)
     return labels

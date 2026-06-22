@@ -18,6 +18,7 @@ from .chip_records import (
     ChipPredictionRecord,
     encode_chip_predictions,
     chip_nw_pixel_offset,
+    postprocess_prediction,
 )
 from .shard import write_task_shard, read_shards, shard_path_for_block
 from .vote import (
@@ -36,6 +37,7 @@ __all__ = [
     "ChipPredictionRecord",
     "encode_chip_predictions",
     "chip_nw_pixel_offset",
+    "postprocess_prediction",
     "write_task_shard",
     "read_shards",
     "shard_path_for_block",

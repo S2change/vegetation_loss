@@ -1,9 +1,10 @@
 """Generate model-ready chip pairs from a 2-D composite block.
 
 Step 4 of the chip-chunked prediction pipeline. Takes the
-(2, |D|, 10, BLOCK_H, BLOCK_W) uint8 composite array produced by step 3
-and yields ChipPair named-tuples, each containing a (before, after)
-256x256 chip pair ready for the model.
+(2, |D|, 10, BLOCK_H, BLOCK_W) composite array produced by step 3 (uint8 for
+the stretched pipeline, uint16 for the raw-reflectance pipeline) and yields
+ChipPair named-tuples, each containing a (before, after) 256x256 chip pair
+ready for the model. dtype is preserved from the composites throughout.
 
 Block layout (matches input_setup.hdf5_reader):
   - BLOCK_H = BLOCK_W = 1280 (= LIVE + 2*GHOST = 1024 + 256)
@@ -297,10 +298,12 @@ def generate_shifted_chips_bundled(composites: np.ndarray,
         after_side  = composites[1, k]
         date_ordinal = int(target)
 
+        # Preserve the composite dtype (uint8 stretched / uint16 raw) so the
+        # bundled batch matches what the model expects.
         before_bundle = np.empty(
-            (BUNDLE_SIZE, CHIP_H, CHIP_W, 10), dtype=np.uint8)
+            (BUNDLE_SIZE, CHIP_H, CHIP_W, 10), dtype=composites.dtype)
         after_bundle  = np.empty(
-            (BUNDLE_SIZE, CHIP_H, CHIP_W, 10), dtype=np.uint8)
+            (BUNDLE_SIZE, CHIP_H, CHIP_W, 10), dtype=composites.dtype)
 
         kinds_b, positions_b = _fill_bundle_side(before_side, before_bundle)
         kinds_a, positions_a = _fill_bundle_side(after_side,  after_bundle)

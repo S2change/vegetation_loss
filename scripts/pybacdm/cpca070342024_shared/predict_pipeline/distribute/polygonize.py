@@ -32,20 +32,32 @@ BACKGROUND_CLASS = 0
 # rasterio connectivity: 4 = rook (no diagonal). Matches the connected-
 # component convention the raster path used before polygonization.
 CONNECTIVITY = 4
-# Morphological closing radius for the post-vote close (disk structuring
-# element). Mirrors AAA_Configs.CLOSING_RADIUS default used by the old
-# per-chip postprocess_prediction. Used as the fallback for classes absent
-# from CLOSING_RADII.
-DEFAULT_CLOSING_RADIUS = 3
-# Per-class closing radii, shared with the chip-level close in
-# predict.postprocess_prediction so the two stages can't drift. AAA_Configs
-# lives in the sibling bacdm/ package (<shared>/bacdm/), so add that to the
-# path here — polygonize is imported before bacdm.predict, so bacdm/ isn't on
-# the path yet at this point.
+# Per-class closing radii + fallback radius, shared with the chip-level
+# close in <model>.predict.postprocess_prediction so the two stages can't
+# drift. They come from the active model package — selected by the MODEL
+# env var (same knob predict_block.py uses to pick the model), defaulting
+# to bacdm. Model packages sit next to distribute/ under <shared>/, so put
+# <shared>/ on the path here.
+import importlib as _importlib
+import os as _os
 import sys as _sys
 from pathlib import Path
-_sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bacdm"))
-from AAA_Configs import CLOSING_RADII as DEFAULT_CLOSING_RADII
+_sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+_MODEL = _os.environ.get("MODEL", "bacdm")
+try:
+    _model_pkg = _importlib.import_module(_MODEL)
+except ImportError as _exc:
+    _available = sorted(
+        p.parent.name
+        for p in (Path(__file__).resolve().parent.parent).glob("*/predict.py")
+    )
+    raise SystemExit(
+        f"[polygonize] Could not import model package '{_MODEL}': {_exc}\n"
+        f"Available model packages: {_available}"
+    )
+DEFAULT_CLOSING_RADII = getattr(_model_pkg, "CLOSING_RADII", {})
+# Fallback radius for classes absent from CLOSING_RADII.
+DEFAULT_CLOSING_RADIUS = int(getattr(_model_pkg, "CLOSING_RADIUS", 3))
 # Block-level minimum patch area (m^2). Patches smaller than this are
 # dropped at the per-block stage. 2500 m^2 = 25 px at 10 m/px, matching
 # the old per-chip MIN_PATCH_SIZE=25 floor.
@@ -66,9 +78,9 @@ def close_labels(labels_2d: np.ndarray,
     to the voted block result instead of per chip.
 
     Each class is closed with its own radius (Cuts → 3, Fires → 1), drawn
-    from `AAA_Configs.CLOSING_RADII` (shared with the chip-level close so
-    the two stages can't drift). Classes absent from that dict fall back to
-    `DEFAULT_CLOSING_RADIUS`.
+    from the active model package's `CLOSING_RADII` (shared with the
+    chip-level close so the two stages can't drift). Classes absent from
+    that dict fall back to `DEFAULT_CLOSING_RADIUS`.
 
     Parameters
     ----------

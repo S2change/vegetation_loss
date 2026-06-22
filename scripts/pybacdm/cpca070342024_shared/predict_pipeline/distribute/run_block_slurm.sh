@@ -5,7 +5,7 @@
 # exports the matching BLOCK_ROW / BLOCK_COL before exec'ing
 # predict_block.py.
 
-#SBATCH --time=0:30:00
+#SBATCH --time=1:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 # NOTE: --cpus-per-task is set on the sbatch command line by submit_tile.sh

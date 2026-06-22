@@ -17,27 +17,85 @@
 #   OUTPUT_DIR/block_outputs/ per-block .npz + .gpkg
 #   OUTPUT_DIR/final_outputs/ tile-level .gpkg/.parquet/.npz/.tif
 #
-# Run on the login node:
+# Run on the login node (the default USE_DATE_CLUSTERS=1 derives the target
+# dates from the acquisition calendar, so just give the START/END window):
 #   ./submit_tile.sh \
 #       TILE_ID=T29TPG \
 #       TILE_HDF5_PATH=/users1/cpca070342024/shared/hdf5/T29TPG_48ts_20251028_20251229.h5 \
-#       TARGET_DATES=2025-11-15,2025-12-01 \
+#       START_DATE=2023-01-01 \
+#       END_DATE=2023-12-31 \
 #       OUTPUT_DIR=/users1/cpca070342024/shared/predict_outputs/T29TPG_run01
 #
+# Target dates — the default USE_DATE_CLUSTERS=1 derives them from the
+# acquisition calendar over START_DATE..END_DATE (TARGET_DATES must NOT be
+# set). To pick dates yourself instead, set USE_DATE_CLUSTERS=0 and give
+# EITHER an explicit TARGET_DATES, OR a START_DATE + END_DATE span (then
+# generated automatically, one every TARGET_STEP_DAYS=45 days):
+#   ./submit_tile.sh TILE_ID=... TILE_HDF5_PATH=... OUTPUT_DIR=... \
+#       USE_DATE_CLUSTERS=0 TARGET_DATES=2025-11-15,2025-12-01
+#
 # Optional knobs (KEY=VALUE):
+#   MODEL=efficientnet_b2_16bit_pipeline
+#                       model package directory name under <shared>/ (the
+#                       parent of distribute/). Each model package exposes the
+#                       same interface (predict.load_model,
+#                       predict.predict_before_after_chips, DEFAULT_WEIGHTS,
+#                       CLOSING_RADII — see bacdm/__init__.py for the
+#                       contract), so switching model is just e.g.
+#                       MODEL=bacdm. Default: efficientnet_b2_16bit_pipeline.
+#   DATA_DTYPE=u16      input data dtype for the read->composite->shift chain.
+#                       u16 (default) keeps raw uint16 reflectance (nodata
+#                       65535) — for models that scale natively
+#                       (efficientnet_b2_16bit_pipeline). u8 applies the
+#                       q02/q98 stretch (uint8, nodata 255) — bacdm /
+#                       efficientnet_b2. Match this to the model: a u16 model
+#                       on u8 data (or vice versa) silently produces garbage.
 #   THREADS=2           CPU threads per task. Also sets --cpus-per-task so the
 #                       allocation matches. A thread sweep showed ~95% scaling
 #                       at 2 threads, ~68% at 4 — 2 is the efficient default.
 #   MAX_CONCURRENT=8   max array tasks running at once (--array %N cap).
 #                       With THREADS, keep THREADS*MAX_CONCURRENT well under the
 #                       node's core count to avoid memory-bandwidth saturation.
-#   WEIGHTS_PATH=...    .pth checkpoint (has a default).
+#   WEIGHTS_PATH=...    .pth checkpoint. Default: the model package's
+#                       DEFAULT_WEIGHTS (a checkpoint inside the model dir).
 #   BATCH_SIZE=8        model batch size.
-#   VOTE_CLASSES=1,2    non-bg class IDs to vote on. 1 = Cuts, 2 = Fires. Class names are in AAA_Configs.py
+#   VOTE_CLASSES=1,2    non-bg class IDs to vote on. 1 = Cuts, 2 = Fires. Class
+#                       names are in the model package's config (e.g.
+#                       bacdm/AAA_Configs.py, efficientnet_b2/configs.py).
 #   VOTE_THRESHOLD=2    min votes per pixel to keep a detection.
+#   TARGET_STEP_DAYS=45 spacing (days) between generated dates when using the
+#                       START_DATE/END_DATE span form (ignored if TARGET_DATES
+#                       is given explicitly or USE_DATE_CLUSTERS=1).
+#   USE_DATE_CLUSTERS=1 when 1 (default), cluster the tile's acquisition
+#                       calendar over START_DATE..END_DATE: the cluster-gap
+#                       midpoints become the target dates and each block's
+#                       timesteps are collapsed to one min-composite per
+#                       cluster before compositing (cloud-suppressing temporal
+#                       summary). Requires START_DATE+END_DATE; TARGET_DATES
+#                       must NOT be set (the dates are derived). Set 0 to use
+#                       raw timesteps with the fixed-cadence / explicit
+#                       TARGET_DATES paths instead.
+#   MAX_THETA           clustering tuning (USE_DATE_CLUSTERS=1 only): max gap
+#                       (days) for single-link merging. Unset = the determine
+#                       script's default (10).
+#   MAX_CLUSTER_AMPLITUDE  clustering tuning (USE_DATE_CLUSTERS=1 only): max
+#                       span (days) a single cluster may cover. Unset = the
+#                       determine script's default (15).
 #   CLOSING_RADIUS=3    post-vote morphological close disk radius (0 = off).
 #   MIN_PATCH_M2=2500   block-level patch-area floor (m^2), firm.
 #   MIN_TILE_PATCH_M2=5000  master patch-area floor (m^2), post cross-block merge.
+#   OUTPUT_NDVI=0       when 1, also output per-pixel before/after NDVI
+#                       alongside the change prediction: added to each block's
+#                       .npz and the tile .npz (keys ndvi_before/ndvi_after),
+#                       plus per-date NDVI GeoTIFFs
+#                       ({TILE}_tile_{date}_ndvi_before/after.tif). float32,
+#                       NoData -9999. Default 0 = labels only.
+#   CLIP_MASK_GPKG      path to a polygon .gpkg; when set, the final vector map
+#                       (.gpkg/.parquet) is clipped to this mask — polygons
+#                       outside are dropped, edge-straddling ones cut to the
+#                       inside. Reprojected to the tile CRS automatically. Does
+#                       not affect the .npz / per-date .tif rasters. Unset = no
+#                       clip.
 #   MAX_COMPOSITE_DAYS  symmetric day-window around each break date for
 #                       before/after compositing (unset = unbounded).
 #   BLOCK_ROWS / BLOCK_COLS  process only a rectangular sub-grid of blocks
@@ -46,7 +104,7 @@
 #                       2x2 of a 4x4 grid; a bare number selects one index.
 #                       Unset = whole tile. The aggregator crops its outputs to
 #                       the selected sub-region.
-#   WRITE_COMPOSITE_TIFS=1  dump per-block before/after time-composites as
+#   WRITE_COMPOSITE_TIFS=0  dump per-block before/after time-composites as
 #                       10-band GeoTIFFs (debug/inspection only; off by
 #                       default).
 #
@@ -68,11 +126,62 @@ done
 # ── Required ──────────────────────────────────────────────────────────────
 : "${TILE_ID:?TILE_ID is required}"
 : "${TILE_HDF5_PATH:?TILE_HDF5_PATH is required}"
-: "${TARGET_DATES:?TARGET_DATES is required (comma-separated YYYY-MM-DD)}"
 : "${OUTPUT_DIR:?OUTPUT_DIR is required}"
 
+# Date clusters: when on, target dates AND the cluster membership are both
+# derived from the tile's acquisition calendar over START_DATE..END_DATE
+# (computed once below, exported to all tasks). It's an alternative to the
+# fixed-cadence / explicit TARGET_DATES paths, so an explicit TARGET_DATES
+# would be contradictory — require START/END and reject TARGET_DATES.
+USE_DATE_CLUSTERS="${USE_DATE_CLUSTERS:-1}"
+_clusters_on=0
+case "$USE_DATE_CLUSTERS" in 1|true|True|yes) _clusters_on=1 ;; esac
+
+# Clustering tuning (only used when USE_DATE_CLUSTERS=1). Left empty by default
+# so determine_clusters_of_dates.py applies its own MAX_THETA /
+# MAX_CLUSTER_AMPLITUDE; when set, they are passed through as CLI flags below.
+#   MAX_THETA              max gap (days) for single-link merging.
+#   MAX_CLUSTER_AMPLITUDE  max span (days) a single cluster may cover.
+MAX_THETA="${MAX_THETA:-}"
+MAX_CLUSTER_AMPLITUDE="${MAX_CLUSTER_AMPLITUDE:-}"
+
+# Target dates: three mutually exclusive sources, all resolved (with Python)
+# in the "Resolve TARGET_DATES" block below. Validate the inputs here.
+TARGET_STEP_DAYS="${TARGET_STEP_DAYS:-45}"
+if [[ "$_clusters_on" == 1 ]]; then
+    if [[ -n "${TARGET_DATES:-}" ]]; then
+        echo "USE_DATE_CLUSTERS=1 derives the target dates from the date " \
+             "clusters, so TARGET_DATES must not also be set." >&2
+        exit 1
+    fi
+    if [[ -z "${START_DATE:-}" || -z "${END_DATE:-}" ]]; then
+        echo "USE_DATE_CLUSTERS=1 requires START_DATE and END_DATE " \
+             "(YYYY-MM-DD) — the cluster window." >&2
+        exit 1
+    fi
+elif [[ -z "${TARGET_DATES:-}" ]]; then
+    if [[ -z "${START_DATE:-}" || -z "${END_DATE:-}" ]]; then
+        echo "Provide TARGET_DATES (comma-separated YYYY-MM-DD), OR both " \
+             "START_DATE and END_DATE (YYYY-MM-DD) to generate them every " \
+             "TARGET_STEP_DAYS days." >&2
+        exit 1
+    fi
+fi
+
 # ── Optional (with defaults) ──────────────────────────────────────────────
-export WEIGHTS_PATH="${WEIGHTS_PATH:-/users1/cpca070342024/shared/model_weights/teste20260429163505_best.pth}"
+# Model package (directory name under <shared>/). Validated — and the
+# default WEIGHTS_PATH resolved from it — once SHARED_DIR/VENV are known
+# below.
+export MODEL="${MODEL:-efficientnet_b2_16bit_pipeline}"
+# Input data dtype for the read->composite->shift chain. u8 applies
+# the q02/q98 stretch (uint8, nodata 255) — bacdm / efficientnet_b2. u16 (default)
+# keeps raw uint16 reflectance (nodata 65535) — for models that scale natively
+# (e.g. efficientnet_b2_16bit_pipeline). Validate now so a typo fails at submit.
+export DATA_DTYPE="${DATA_DTYPE:-u16}"
+case "$DATA_DTYPE" in
+    u8|uint8|8|u16|uint16|16) ;;
+    *) echo "Invalid DATA_DTYPE='$DATA_DTYPE' (expected u8 or u16)" >&2; exit 1 ;;
+esac
 export BATCH_SIZE="${BATCH_SIZE:-8}"
 export VOTE_CLASSES="${VOTE_CLASSES:-1,2}"
 export VOTE_THRESHOLD="${VOTE_THRESHOLD:-2}"
@@ -80,6 +189,19 @@ export VOTE_THRESHOLD="${VOTE_THRESHOLD:-2}"
 export CLOSING_RADIUS="${CLOSING_RADIUS:-3}"
 export MIN_PATCH_M2="${MIN_PATCH_M2:-2500}"
 export MIN_TILE_PATCH_M2="${MIN_TILE_PATCH_M2:-5000}"
+# Optional per-pixel before/after NDVI output (off by default). Just exported
+# through to predict_block + aggregate_tile, which key off it.
+export OUTPUT_NDVI="${OUTPUT_NDVI:-0}"
+# Optional clip mask for the final vector map. Validate the path now (fail at
+# submit, not an hour later in the aggregator) and export so the aggregator
+# inherits it. Unset = no clip.
+if [[ -n "${CLIP_MASK_GPKG:-}" ]]; then
+    if [[ ! -f "$CLIP_MASK_GPKG" ]]; then
+        echo "CLIP_MASK_GPKG not found: $CLIP_MASK_GPKG" >&2
+        exit 1
+    fi
+    export CLIP_MASK_GPKG
+fi
 
 # Symmetric day-window (days) around each break date for before/after
 # compositing. Unset = unbounded (any timestep before/after the target). Only
@@ -118,6 +240,82 @@ mkdir -p "$OUTPUT_DIR" "$LOG_DIR" "$BLOCK_OUTPUT_DIR" "$FINAL_OUTPUT_DIR"
 DISTRIBUTE_DIR="$(cd "$(dirname "$0")" && pwd)"
 SHARED_DIR="$(dirname "$DISTRIBUTE_DIR")"
 VENV="${VENV:-/users1/cpca070342024/shared/vchips/venv}"
+
+# ── Resolve TARGET_DATES (+ DATE_CLUSTERS) ────────────────────────────────
+# Three mutually exclusive sources, captured into vars first (not piped
+# straight into export) so a generation error fails the whole script instead
+# of silently exporting an empty list:
+#   1. USE_DATE_CLUSTERS=1: cluster the tile's acquisition calendar over
+#      START..END; the cluster-gap midpoints become TARGET_DATES and the
+#      cluster membership becomes DATE_CLUSTERS (consumed by predict_block).
+#   2. START_DATE/END_DATE only: one date every TARGET_STEP_DAYS.
+#   3. explicit TARGET_DATES: used as-is.
+export DATE_CLUSTERS="${DATE_CLUSTERS:-}"
+if [[ "$_clusters_on" == 1 ]]; then
+    # The CLI prints exactly two lines: line 1 = TARGET_DATES, line 2 =
+    # serialized DATE_CLUSTERS. Read both; the determine script lives in
+    # input_setup/ and runs as a plain script (no package import needed).
+    # MAX_THETA / MAX_CLUSTER_AMPLITUDE are only forwarded when the caller set
+    # them; otherwise the determine script uses its own defaults.
+    _cluster_flags=()
+    [[ -n "$MAX_THETA" ]] && _cluster_flags+=(--max-theta "$MAX_THETA")
+    [[ -n "$MAX_CLUSTER_AMPLITUDE" ]] && \
+        _cluster_flags+=(--max-cluster-amplitude "$MAX_CLUSTER_AMPLITUDE")
+    _cluster_out="$(
+        "$VENV/bin/python" "$SHARED_DIR/input_setup/determine_clusters_of_dates.py" \
+            "$TILE_HDF5_PATH" --start "$START_DATE" --end "$END_DATE" \
+            ${_cluster_flags[@]+"${_cluster_flags[@]}"} --for-submit
+    )" || exit 1
+    TARGET_DATES="$(printf '%s\n' "$_cluster_out" | sed -n '1p')"
+    DATE_CLUSTERS="$(printf '%s\n' "$_cluster_out" | sed -n '2p')"
+    if [[ -z "$TARGET_DATES" || -z "$DATE_CLUSTERS" ]]; then
+        echo "Date clustering produced no change dates / clusters for " \
+             "$START_DATE..$END_DATE (too few acquisitions in window?)." >&2
+        exit 1
+    fi
+    echo "Derived TARGET_DATES + DATE_CLUSTERS from the acquisition calendar " \
+         "over $START_DATE..$END_DATE."
+elif [[ -z "${TARGET_DATES:-}" ]]; then
+    TARGET_DATES="$(
+        "$VENV/bin/python" "$DISTRIBUTE_DIR/target_dates_creation.py" \
+            "$START_DATE" "$END_DATE" --step-days "$TARGET_STEP_DAYS"
+    )" || exit 1
+    if [[ -z "$TARGET_DATES" ]]; then
+        echo "No target dates generated for $START_DATE..$END_DATE every " \
+             "$TARGET_STEP_DAYS days (span shorter than one step?)." >&2
+        exit 1
+    fi
+    echo "Generated TARGET_DATES from $START_DATE..$END_DATE " \
+         "(every $TARGET_STEP_DAYS days):"
+fi
+export TARGET_DATES
+export DATE_CLUSTERS
+
+# ── Validate the model package + resolve default weights ──────────────────
+# A model package is any <SHARED_DIR>/<name>/ with a predict.py. When
+# WEIGHTS_PATH is unset, ask the package for its DEFAULT_WEIGHTS
+if [[ ! -f "$SHARED_DIR/$MODEL/predict.py" ]]; then
+    echo "Unknown MODEL '$MODEL' — no $SHARED_DIR/$MODEL/predict.py" >&2
+    echo "Available model packages:" >&2
+    for p in "$SHARED_DIR"/*/predict.py; do
+        [[ -f "$p" ]] && echo "  $(basename "$(dirname "$p")")" >&2
+    done
+    exit 1
+fi
+if [[ -z "${WEIGHTS_PATH:-}" ]]; then
+    WEIGHTS_PATH="$(
+        PYTHONPATH="$SHARED_DIR" "$VENV/bin/python" -c "
+import importlib
+print(importlib.import_module('$MODEL').DEFAULT_WEIGHTS)
+"
+    )" || exit 1
+fi
+export WEIGHTS_PATH
+if [[ ! -f "$WEIGHTS_PATH" ]]; then
+    echo "Model weights not found: $WEIGHTS_PATH" >&2
+    echo "(set WEIGHTS_PATH=... or place the checkpoint at the model's default path)" >&2
+    exit 1
+fi
 
 read N_ROWS N_COLS <<<"$(
     PYTHONPATH="$SHARED_DIR" "$VENV/bin/python" -c "
@@ -184,6 +382,8 @@ else
 fi
 
 echo "Tile:           $TILE_ID"
+echo "Model:          $MODEL"
+echo "Data dtype:     $DATA_DTYPE"
 echo "HDF5:           $TILE_HDF5_PATH"
 echo "Block grid:     ${N_ROWS} x ${N_COLS}  ($N_BLOCKS blocks)"
 echo "Processing:     ${SELECT_DESC}"
@@ -192,12 +392,21 @@ echo "  logs:         $LOG_DIR"
 echo "  block out:    $BLOCK_OUTPUT_DIR"
 echo "  final out:    $FINAL_OUTPUT_DIR"
 echo "Target dates:   $TARGET_DATES"
+if [[ "$_clusters_on" == 1 ]]; then
+    echo "Date clusters:  on ($(printf '%s' "$DATE_CLUSTERS" | awk -F';' '{print NF}') clusters)"
+    echo "  max theta:    ${MAX_THETA:-default}"
+    echo "  max amplitude: ${MAX_CLUSTER_AMPLITUDE:-default}"
+else
+    echo "Date clusters:  off (raw timesteps)"
+fi
 echo "Batch size:     $BATCH_SIZE"
 echo "Vote classes:   $VOTE_CLASSES"
 echo "Vote threshold: $VOTE_THRESHOLD"
 echo "Closing radius: $CLOSING_RADIUS"
 echo "Block floor:    $MIN_PATCH_M2 m^2"
 echo "Tile floor:     $MIN_TILE_PATCH_M2 m^2"
+echo "Clip mask:      ${CLIP_MASK_GPKG:-none}"
+echo "Output NDVI:    $OUTPUT_NDVI"
 echo "Max comp. days: ${MAX_COMPOSITE_DAYS:-unbounded}"
 echo "Threads/task:   $THREADS  (= --cpus-per-task)"
 echo "Max concurrent: $MAX_CONCURRENT  (cores in use <= THREADS*MAX_CONCURRENT = $((THREADS * MAX_CONCURRENT)))"

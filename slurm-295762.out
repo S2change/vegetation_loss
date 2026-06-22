@@ -1,0 +1,148 @@
+* ----------------------------------------------------------------
+* Running PROLOG for run_aggregate_slurm.sh on Fri Jun 19 18:28:30 WEST 2026
+*    JOB_NAME                : run_aggregate_slurm.sh
+*    JOB_ID                  : 295762
+*    JOB_PARTITION           : fct
+*    JOB_USER                : domwelsh
+*    JOB_ACCOUNT             : cpca070342024
+*    JOB_QOS                 : cpca070342024
+*    NODE_LIST               : hpc001
+*    SLURM_NNODES            : 1
+*    SLURM_NPROCS            : 1
+*    SLURM_NTASKS            : 1
+*    SLURM_CPUS_ON_NODE      : 1
+*    SLURM_TASKS_PER_NODE    : 1
+*    SLURM_JOB_CPUS_PER_NODE : 1
+*    SLURM_MEM_PER_CPU       : 5333
+*    SUBMIT_HOST             : ui102.d.incd.pt
+*    WORK_DIR                : /users1/cpca070342024/shared/vegetation_loss
+*    JOB_SCRIPT              : /users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/distribute/run_aggregate_slurm.sh
+* ----------------------------------------------------------------
+Tile:        T29TPE
+Block dir:   /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/block_outputs
+Output dir:  /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs
+Found 6 block shards.
+Block grid:  3 x 2  (each block 1024x1024)  [sub-region rows 0-2 cols 1-2]
+Tile size:   3072 x 2048  (21 target date(s))
+Classes:     [1, 2]
+Threshold:   2
+Pixel res:   10.0 m
+
+Stitching 6 blocks into (21, 3072, 2048) uint8...
+  Stitch time: 0.03 s
+
+Per-date detections in the merged tile:
+  2023-01-17: {1: 617038, 2: 12684}
+  2023-02-07: {1: 311822, 2: 3425}
+  2023-02-19: {1: 472486, 2: 15159}
+  2023-03-06: {1: 100555, 2: 4709}
+  2023-03-18: {1: 394686, 2: 2206}
+  2023-04-01: {1: 790356, 2: 4941}
+  2023-04-15: {1: 55221, 2: 15402}
+  2023-05-03: {1: 447073, 2: 47498}
+  2023-05-21: {1: 230486, 2: 362661}
+  2023-05-30: {1: 83257, 2: 821431}
+  2023-06-19: {1: 11171, 2: 396039}
+  2023-07-07: {1: 54759, 2: 217168}
+  2023-07-26: {1: 64466, 2: 137047}
+  2023-08-10: {1: 56796, 2: 45282}
+  2023-08-25: {1: 92275, 2: 188331}
+  2023-09-09: {1: 314289, 2: 820897}
+  2023-09-18: {1: 154716, 2: 617892}
+  2023-10-05: {1: 202133, 2: 27369}
+  2023-10-28: {1: 1082298, 2: 485593}
+  2023-11-28: {1: 1433463, 2: 3161}
+  2023-12-08: {1: 1084140, 2: 3509}
+
+Reading per-block polygons (.gpkg)...
+  Read 6 block .gpkg (32899 polygons) in 4.42 s
+
+Dissolving boundary-straddling patches per (date, class)...
+  Master patch-area floor: 5000.0 m^2 (post-merge)
+  32899 block polygons -> 22549 merged patches in 37.88 s
+  By (class, date) — count = n_patches, sum = total pixels:
+                     count      sum
+class_id date_iso                  
+1        2023-01-17   1511   589138
+         2023-02-07   1185   283447
+         2023-02-19    991   452568
+         2023-03-06    504    84997
+         2023-03-18   1063   371618
+         2023-04-01   1237   767609
+         2023-04-15    248    47190
+         2023-05-03    998   429337
+         2023-05-21    471   220989
+         2023-05-30    222    77811
+         2023-06-19     57     9180
+         2023-07-07    198    50681
+         2023-07-26    175    61033
+         2023-08-10    144    53577
+         2023-08-25    206    88491
+         2023-09-09    521   304768
+         2023-09-18    444   144488
+         2023-10-05    403   193595
+         2023-10-28   1125  1065016
+         2023-11-28   1452  1409350
+         2023-12-08   1308  1059549
+2        2023-01-17     62    10629
+         2023-02-07     21     2818
+         2023-02-19     61    13814
+         2023-03-06     27     4187
+         2023-03-18     11     1337
+         2023-04-01     25     3848
+         2023-04-15     67    11901
+         2023-05-03    142    43066
+         2023-05-21    656   374579
+         2023-05-30   1255   867786
+         2023-06-19    990   399393
+         2023-07-07    498   217694
+         2023-07-26    407   130306
+         2023-08-10    177    36006
+         2023-08-25    401   186904
+         2023-09-09   1152   867420
+         2023-09-18   1195   647114
+         2023-10-05     88    25408
+         2023-10-28    812   492550
+         2023-11-28     18     2623
+         2023-12-08     21     3095
+
+Wrote /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile.gpkg
+      /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile.parquet
+  (22549 patches in 1.57 s)
+Wrote /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile.npz
+  (3022.3 KB in 2.96 s)
+
+Writing per-date GeoTIFFs...
+  CRS:  EPSG:32629
+  Wrote 21 GeoTIFF(s) in 1.45 s (total 3338.7 KB):
+    /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile_2023-01-17.tif  (180.2 KB)
+    /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile_2023-02-07.tif  (129.5 KB)
+    /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile_2023-02-19.tif  (141.3 KB)
+    /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile_2023-03-06.tif  (80.4 KB)
+    /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile_2023-03-18.tif  (133.8 KB)
+    /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile_2023-04-01.tif  (178.2 KB)
+    /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile_2023-04-15.tif  (71.5 KB)
+    /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile_2023-05-03.tif  (148.9 KB)
+    /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile_2023-05-21.tif  (168.4 KB)
+    /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile_2023-05-30.tif  (228.8 KB)
+    /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile_2023-06-19.tif  (158.2 KB)
+    /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile_2023-07-07.tif  (118.0 KB)
+    /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile_2023-07-26.tif  (107.7 KB)
+    /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile_2023-08-10.tif  (81.9 KB)
+    /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile_2023-08-25.tif  (117.3 KB)
+    /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile_2023-09-09.tif  (254.2 KB)
+    /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile_2023-09-18.tif  (220.5 KB)
+    /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile_2023-10-05.tif  (91.7 KB)
+    /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile_2023-10-28.tif  (270.2 KB)
+    /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile_2023-11-28.tif  (247.2 KB)
+    /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_tile_2023-12-08.tif  (210.9 KB)
+
+Wrote /users1/cpca070342024/shared/predict_outputs/09_T29TPE_testblock_efficientnet_16bit_clustered/final_outputs/T29TPE_blockgrid.gpkg
+  (6 block outlines, layer 'block_grid'; all origins on-grid)
+
+Total aggregate time: 53.93 s
+Aggregator finished for tile T29TPE.
+
+* ----------------------------------------------------------------
+* Running EPILOG for run_aggregate_slurm.sh on Fri Jun 19 18:29:36 WEST 2026
+* ----------------------------------------------------------------

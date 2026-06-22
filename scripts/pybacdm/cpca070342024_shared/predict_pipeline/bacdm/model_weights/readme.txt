@@ -1,0 +1,1 @@
+The inputs are pairs of 12-band (B12,...B2) 8-bit images (NoData=255)

@@ -2,7 +2,15 @@
 
 This folder contains the reference datasets used in the project. The available reference layers are briefly described below.
 
-## BDR-TNE-300
+## Harmonized reference data
+
+The harmonized versions of BDR-TNE-300, BDR-TNE-300-Expanded, ICNF, and NVG are documented in:
+
+`Harmonized/README.MD`
+
+## Legacy data sets 
+
+### BDR-TNE-300
 
 BDR-TNE-300 is a reference dataset used to assess vegetation-cover disturbances detected through the BDR/CCDC workflow.
 
@@ -10,7 +18,7 @@ The dataset contains spatial units associated with detected or evaluated changes
 
 It is used as a reference source for validating and comparing vegetation-change information across the project.
 
-## BDR-TNE-300-Expanded
+### BDR-TNE-300-Expanded
 
 BDR-TNE-300-Expanded is an expert-based reference dataset developed to complement the automated disturbance information provided by `BDR_CCDC_TNE_v3`.
 
@@ -34,13 +42,13 @@ The interpretation was based on the combined use of:
 
 The reviewed reference layer includes interpreted temporal fields such as `Data_0` and `Data_1`, disturbance information, class attribution, and expert notes.
 
-### Examples
+#### Examples
 
 The figures illustrating the BDR-TNE-300-Expanded photointerpretation cases are available in:
 
 `Harmonized/Images/Images_BDR_expanded/README.md`
 
-## ICNF
+### ICNF
 
 The ICNF reference data comprise spatial information obtained from the Instituto da Conservação da Natureza e das Florestas.
 
@@ -48,15 +56,17 @@ These layers provide official information related to forest and vegetation event
 
 The ICNF datasets complement the other reference sources by providing independent information about mapped forest disturbances and related events.
 
-## NVG
+### NVG
 
 NVG is a reference dataset used to represent and validate vegetation-cover change information produced through the NVG workflow.
 
 The dataset contains spatial and temporal information associated with vegetation changes and is used to compare, confirm, and contextualize change information derived from the other project layers.
 
-## Harmonized reference data
 
+<<<<<<< HEAD
 The harmonized versions of BDR-TNE-300, BDR-TNE-300-Expanded, ICNF, and NVG are documented in:
 
 `Harmonized/README.MD`
 
+=======
+>>>>>>> f0ff7609390503001a9b6013df43a902db71b74c
