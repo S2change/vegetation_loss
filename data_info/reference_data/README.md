@@ -59,3 +59,4 @@ The dataset contains spatial and temporal information associated with vegetation
 The harmonized versions of BDR-TNE-300, BDR-TNE-300-Expanded, ICNF, and NVG are documented in:
 
 `Harmonized/README.MD`
+
