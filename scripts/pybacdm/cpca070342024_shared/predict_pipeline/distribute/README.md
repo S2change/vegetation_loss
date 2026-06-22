@@ -73,3 +73,46 @@ OUTPUT_DIR/logs/            (SLURM .out/.err) \
 OUTPUT_DIR/block_outputs/   (per-block .npz + .gpkg) \
 OUTPUT_DIR/final_outputs/   (tile-level .gpkg/.parquet/.npz/.tif)
 ```
+<br></br>
+
+## Batch submission (multiple tiles)
+
+`submit_tiles_batch.sh` submits the pipeline for many tiles in one command. It
+calls `submit_tile.sh` once per tile — each tile becomes its own independent SLURM
+array job + aggregator, so tiles run in parallel and SLURM spreads their block tasks
+across nodes. Per-tile load is still bounded by each submission's `MAX_CONCURRENT`
+cap, so submitting all tiles at once is safe (the scheduler queues whatever doesn't
+fit).
+
+The only thing that differs between tiles is the HDF5 file; every other input is
+identical and forwarded verbatim to each `submit_tile.sh` call. Per tile the wrapper
+derives `TILE_ID` (the `.h5` filename without extension) and
+`OUTPUT_DIR=<BASE_OUTPUT_DIR>/<TILE_ID>`.
+
+### Batch-only inputs:
+
+| KEY | DEFAULT VALUE (DTYPE) | DESCRIPTION |
+| --- | --- | --- |
+| `BASE_OUTPUT_DIR` | (path) | **Required.** Per-tile output goes to `<BASE_OUTPUT_DIR>/<TILE_ID>/`. |
+| `TILE_DIR` | `/users1/dgt/hdf5/` (path) | Directory holding the tile `.h5` files. |
+| `TILES` | unset, all `*.h5` in `TILE_DIR` (space-sep str) | Explicit tile IDs to run, e.g. `"T29SNB T29TPE"`; each path = `<TILE_DIR>/<ID>.h5`. Unset = every `*.h5` in `TILE_DIR`. Missing files are skipped with a warning. |
+
+Every other `KEY=VALUE` is passed straight through to each `submit_tile.sh` call (see
+the tables above for those). Passing `TILE_ID`, `TILE_HDF5_PATH`, or `OUTPUT_DIR`
+here is an error — they are computed per tile.
+
+### Example submissions
+```
+# All *.h5 in a directory:
+/users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/distribute/submit_tiles_batch.sh \
+    BASE_OUTPUT_DIR=/users1/cpca070342024/shared/predict_outputs/13_summer2023 \
+    TILE_DIR=/users1/dgt/hdf5/ \
+    START_DATE=2023-07-01 END_DATE=2023-09-15 \
+    USE_DATE_CLUSTERS=1 MAX_THETA=5 MAX_CLUSTER_AMPLITUDE=5
+
+# An explicit subset (TILE_DIR defaults to /users1/dgt/hdf5/):
+/users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/distribute/submit_tiles_batch.sh \
+    BASE_OUTPUT_DIR=/users1/cpca070342024/shared/predict_outputs/13_summer2023 \
+    TILES="T29SNB T29TPE T29TPG" \
+    START_DATE=2023-07-01 END_DATE=2023-09-15
+```
