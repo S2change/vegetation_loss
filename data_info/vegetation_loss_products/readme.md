@@ -1,6 +1,6 @@
 ## Data available to download
-
-- `MBPV_v1.7z` zipped file (open with `7-zip` and password). It includes 12 bimensal maps for 2023-2024 (see below), each one with predicted vegetation loss polygons for the whole Portugal with the following fields: 
+- DL_MBPV_v1: . Fields: "date_iso" in format "yyyy-mm-dd", and "class_id" which takes values 1 ("Cuts") and 2 ("Fires").
+- CCD_MBPV_v1: `MBPV_v1.7z` zipped file (open with `7-zip` and password). It includes 12 bimensal maps for 2023-2024 (see below), each one with predicted vegetation loss polygons for the whole Portugal with the following fields: 
 fid,
 date_value,
 area_ha,
@@ -13,10 +13,13 @@ max_date_formatted.
 
 ## Data sets description
 
+All products have vector format, unless stated otherwise.
+
+- DL_MBPV_v1: 
 - CCD_RPV_v2: Raster product. Similarly to `MBPV_v1`, the Sentinel-2 series is processed up to a recent date (e.g. present), but the vector vegetation loss map is computed for some time interval I. For instance, S2 is processed by PyCCD up to 2025-11-17, but only breaks within ['2023-01-01','2023-02-28'] are extracted to create the vector product. Processing steps are similar to `MBVP_v1` with a few improvements.
 - CCD_MIPV_v2: (*mapa de perdas de vegetação v2*). Similarly to `MBPV_v1`, the Sentinel-2 series is processed up to a recent date (e.g. present), but the vector vegetation loss map is computed for some time interval I. For instance, S2 is processed by PyCCD up to 2025-11-17, but only breaks within ['2023-01-01','2023-02-28'] are extracted to create the vector product. Processing steps are similar to `MBVP_v1` with a few improvements.
 - CCD_MBPV_v2: (near-real time *mapa bimestral de perdas de vegetação v2*). Instead of being based on a Sentinel-2 time series up to 2024-12-31 (as `MBVP_v1`), this product is a *near-real time* bymonthly product, where for each date range,   e.g. ['2023-01-01','2023-02-28'], the Sentinel-2 time series is only processed up to the last date of the data range. Otherwise, the processing steps are similar to `MBVP_v1` with a few improvements. 
-- MBPV_v1: (*mapa bimestral de perdas de vegetação v1*). This is an experimental product for 2023-2024 that is solely based on the PyCCD estimated breaks. Furthermore, the PyCCD processing uses a parameter (minimum number of observations required  to identify break) which is probably too high and makes it harder to determine breaks, in particular at the end of the temporal series.  Neighbor pixels with similar dates (less than 10 days) are clustered and clusters with area smaller than 0.5 ha are discarded.
+- CCD_MBPV_v1, also called just MBPV_v1: (*mapa bimestral de perdas de vegetação v1*). This is an experimental product for 2023-2024 that is solely based on the PyCCD estimated breaks. Furthermore, the PyCCD processing uses a parameter (minimum number of observations required  to identify break) which is probably too high and makes it harder to determine breaks, in particular at the end of the temporal series.  Neighbor pixels with similar dates (less than 10 days) are clustered and clusters with area smaller than 0.5 ha are discarded.
 
   The steps to produce `MBPV_v1` are the following:
   1. Process Sentinel-2 time series up to 2024-12-31 with PyCCD.
