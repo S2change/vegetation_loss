@@ -97,6 +97,14 @@
 #                       clip.
 #   MAX_COMPOSITE_DAYS  symmetric day-window around each break date for
 #                       before/after compositing (unset = unbounded).
+#   READ_START_DATE / READ_END_DATE  clip the raw HDF5 timestep read to this
+#                       date range (YYYY-MM-DD) BEFORE loading the block into
+#                       memory. Default: START_DATE / END_DATE, so the read
+#                       matches the cluster window — HDF5s often hold timesteps
+#                       far past END_DATE that would otherwise be read in and
+#                       discarded, wasting memory. Set wider to keep more
+#                       timesteps, or empty (e.g. READ_END_DATE=) for no bound
+#                       on that side.
 #   BLOCK_ROWS / BLOCK_COLS  process only a rectangular sub-grid of blocks
 #                       (inclusive 0-based ranges) instead of the whole tile.
 #                       e.g. BLOCK_ROWS=1-2 BLOCK_COLS=1-2 processes the middle
@@ -187,6 +195,14 @@ export VOTE_THRESHOLD="${VOTE_THRESHOLD:-2}"
 # Two-tier patch-area floors (block then master)
 export MIN_PATCH_M2="${MIN_PATCH_M2:-2500}"
 export MIN_TILE_PATCH_M2="${MIN_TILE_PATCH_M2:-5000}"
+# Read window: clip the raw HDF5 timestep read to this date range BEFORE loading
+# the block into memory. Defaults to START_DATE/END_DATE so the read matches the
+# cluster window (HDF5s often hold timesteps far beyond END_DATE, which would
+# otherwise be read in and then discarded — wasting memory). Set wider to keep
+# more timesteps, or empty (READ_START_DATE=) for no bound on that side.
+# predict_block converts these to ordinals; empty/unset => unbounded.
+export READ_START_DATE="${READ_START_DATE-${START_DATE:-}}"
+export READ_END_DATE="${READ_END_DATE-${END_DATE:-}}"
 # Optional per-pixel before/after NDVI output (off by default). Just exported
 # through to predict_block + aggregate_tile, which key off it.
 export OUTPUT_NDVI="${OUTPUT_NDVI:-0}"

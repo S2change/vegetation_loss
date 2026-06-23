@@ -46,6 +46,11 @@ set them without re-templating Python source):
     MIN_PATCH_M2      Block-level patch-area floor in m^2 (default 2500).
     MAX_COMPOSITE_DAYS  Symmetric day-window around the break date for
                       before/after compositing (unset = unbounded).
+    READ_START_DATE / READ_END_DATE  Clip the raw HDF5 timestep read to this
+                      ISO date range before loading the block, so out-of-window
+                      timesteps aren't pulled into memory. Empty/unset on either
+                      side = no bound there. submit_tile.sh defaults these to
+                      START_DATE / END_DATE (the cluster window).
     OUTPUT_NDVI       Set to 1 to also compute per-pixel before/after NDVI
                       from each date's composite and store it in the block
                       .npz (keys ndvi_before / ndvi_after, float32, LIVE grid,
@@ -274,9 +279,23 @@ def main() -> None:
     print(f"\n[RSS] After imports:                   {rss_mb():7.1f} MB")
 
     # ── Step 1: read chip block ───────────────────────────────────────────
+    # Read window: clip the raw timestep read to [READ_START_DATE, READ_END_DATE]
+    # before loading, so timesteps outside the window aren't pulled into memory.
+    # submit_tile.sh defaults these to START_DATE/END_DATE (the cluster window);
+    # empty/unset on either side means "no bound on that side".
+    def _read_ordinal(name):
+        v = os.environ.get(name)
+        return date.fromisoformat(v).toordinal() if v not in (None, "") else None
+    read_start_ord = _read_ordinal("READ_START_DATE")
+    read_end_ord   = _read_ordinal("READ_END_DATE")
     print(f"\nStep 1: reading chip-block from HDF5...")
+    print(f"  Read window:  "
+          f"{os.environ.get('READ_START_DATE') or 'unbounded'} -> "
+          f"{os.environ.get('READ_END_DATE') or 'unbounded'}")
     t0 = time.perf_counter()
     block, ts, position = read_block(hdf5_path, block_row, block_col,
+                                     ts_start_ordinal=read_start_ord,
+                                     ts_end_ordinal=read_end_ord,
                                      stretch=stretch)
     print(f"  block: shape={block.shape}  dtype={block.dtype}  "
           f"{block.nbytes / 1e6:.1f} MB")
