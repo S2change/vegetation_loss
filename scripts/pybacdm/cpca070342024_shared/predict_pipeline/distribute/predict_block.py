@@ -38,8 +38,11 @@ set them without re-templating Python source):
     BATCH_SIZE        Model batch size (default 8).
     VOTE_CLASSES      Comma-separated non-bg class IDs (default "1,2").
     VOTE_THRESHOLD    Min votes per pixel to keep a detection (default 2).
-    CLOSING_RADIUS    Post-vote close radius; unset = the model package's
-                      per-class CLOSING_RADII, 0 = off (default unset).
+    CLOSING_RADIUS    Post-vote close radius. Normally UNSET (submit_tile.sh
+                      does not set it) so the model package's per-class
+                      CLOSING_RADII is the single source of truth. If present
+                      in the environment it still forces one radius for all
+                      classes (0 = off) — a low-level escape hatch only.
     MIN_PATCH_M2      Block-level patch-area floor in m^2 (default 2500).
     MAX_COMPOSITE_DAYS  Symmetric day-window around the break date for
                       before/after compositing (unset = unbounded).

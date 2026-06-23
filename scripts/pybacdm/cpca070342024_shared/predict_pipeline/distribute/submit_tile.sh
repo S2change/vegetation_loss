@@ -81,7 +81,6 @@
 #   MAX_CLUSTER_AMPLITUDE  clustering tuning (USE_DATE_CLUSTERS=1 only): max
 #                       span (days) a single cluster may cover. Unset = the
 #                       determine script's default (15).
-#   CLOSING_RADIUS=3    post-vote morphological close disk radius (0 = off).
 #   MIN_PATCH_M2=2500   block-level patch-area floor (m^2), firm.
 #   MIN_TILE_PATCH_M2=5000  master patch-area floor (m^2), post cross-block merge.
 #   OUTPUT_NDVI=0       when 1, also output per-pixel before/after NDVI
@@ -185,8 +184,7 @@ esac
 export BATCH_SIZE="${BATCH_SIZE:-8}"
 export VOTE_CLASSES="${VOTE_CLASSES:-1,2}"
 export VOTE_THRESHOLD="${VOTE_THRESHOLD:-2}"
-# Post-vote close + two-tier patch-area floors (block then master).
-export CLOSING_RADIUS="${CLOSING_RADIUS:-3}"
+# Two-tier patch-area floors (block then master)
 export MIN_PATCH_M2="${MIN_PATCH_M2:-2500}"
 export MIN_TILE_PATCH_M2="${MIN_TILE_PATCH_M2:-5000}"
 # Optional per-pixel before/after NDVI output (off by default). Just exported
@@ -418,7 +416,7 @@ fi
 echo "Batch size:     $BATCH_SIZE"
 echo "Vote classes:   $VOTE_CLASSES"
 echo "Vote threshold: $VOTE_THRESHOLD"
-echo "Closing radius: $CLOSING_RADIUS"
+echo "Closing radii:  per-class ($MODEL.CLOSING_RADII)"
 echo "Block floor:    $MIN_PATCH_M2 m^2"
 echo "Tile floor:     $MIN_TILE_PATCH_M2 m^2"
 echo "Clip mask:      ${CLIP_MASK_GPKG:-none}"
