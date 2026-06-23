@@ -1,0 +1,291 @@
+* ----------------------------------------------------------------
+* Running PROLOG for thread_sweep on Wed Jun  3 23:49:57 WEST 2026
+*    JOB_NAME                : thread_sweep
+*    JOB_ID                  : 288438
+*    JOB_PARTITION           : fct
+*    JOB_USER                : domwelsh
+*    JOB_ACCOUNT             : cpca070342024
+*    JOB_QOS                 : cpca070342024
+*    NODE_LIST               : hpc001
+*    SLURM_NNODES            : 1
+*    SLURM_NPROCS            : 1
+*    SLURM_NTASKS            : 1
+*    SLURM_CPUS_ON_NODE      : 4
+*    SLURM_TASKS_PER_NODE    : 1
+*    SLURM_JOB_CPUS_PER_NODE : 4
+*    SLURM_MEM_PER_CPU       : 5333
+*    SUBMIT_HOST             : ui102.d.incd.pt
+*    WORK_DIR                : /users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/distribute
+*    JOB_SCRIPT              : /users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/distribute/thread_sweep_slurm.sh
+* ----------------------------------------------------------------
+DISTRIBUTE_DIR: /users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/distribute
+=== Thread sweep on block (2,2) ===
+Node: hpc001.d.incd.pt  cores: 4
+Thread counts: 1 2 4
+
+############################################################
+### THREADS=1   (block 2,2 on hpc001.d.incd.pt)
+############################################################
+Tile:           T29TPG
+HDF5:           /users1/cpca070342024/shared/hdf5/T29TPG_48ts_20251028_20251229.h5
+Block:          (2, 2) of grid (7, 11)
+Weights:        /users1/cpca070342024/shared/model_weights/teste20260429163505_best.pth
+Output dir:     /users1/cpca070342024/shared/predict_outputs/thread_sweep/threads_1
+Target dates:   ['2025-11-15', '2025-12-01']
+Batch size:     8
+Vote classes:   (1, 2)
+Vote threshold: 2
+Closing radius: 3
+Min patch m^2:  2500.0
+
+[RSS] After imports:                     656.7 MB
+
+Step 1: reading chip-block from HDF5...
+  block: shape=(48, 10, 1280, 1280)  dtype=uint8  786.4 MB
+  ts:    2025-10-28 -> 2025-12-29  (48 timesteps)
+  Step 1 time: 18.08 s
+[RSS] After chip-block:                 1515.0 MB
+
+Step 3: compositing for 2 target date(s)...
+  composites: shape=(2, 2, 10, 1280, 1280)  dtype=uint8  65.5 MB
+  valid dates: 2 / 2
+  Step 3 time: 2.42 s
+[RSS] After composites:                 1545.2 MB
+
+torch threads:  1
+
+Loading model...
+SwinTransformerSys expand initial----depths:[2, 2, 18, 2];depths_decoder:[4, 4, 4, 4];drop_path_rate:0.1;num_classes:3
+/users1/cpca070342024/shared/vchips/venv/lib/python3.10/site-packages/torch/functional.py:505: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /pytorch/aten/src/ATen/native/TensorShape.cpp:4381.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+  Loaded in 1.92 s
+[RSS] After model loaded:               2692.5 MB
+
+Step 4: generating shifted chips + predicting...
+
+  Pairs predicted:   162
+  By chip kind:      {'diagonal': 50, 'h_shift': 40, 'original': 32, 'v_shift': 40}
+  Total infer time:  531.60 s  (3281.5 ms/chip)
+  Total vote time:   0.02 s
+[RSS] After all inference:              2848.5 MB  (delta +156.0 MB)
+
+Per-class pixel counts (aggregated across all chip pairs):
+  class 0:    8,186,881 pixels  (77.11%)
+  class 1:       54,726 pixels  ( 0.52%)
+  class 2:    2,375,225 pixels  (22.37%)
+
+Step 5b: voting (threshold=2, classes=(1, 2))
+  2025-11-15: pre-threshold votes={1: 8535, 2: 1034149}  post-threshold detections={1: 2643, 2: 272942}
+  2025-12-01: pre-threshold votes={1: 37427, 2: 904738}  post-threshold detections={1: 11276, 2: 245420}
+
+Step 6: writing voted .npz...
+  Wrote /users1/cpca070342024/shared/predict_outputs/thread_sweep/threads_1/T29TPG_block_002_002.npz in 0.15 s  (91.0 KB)
+
+Step 6b: closing + polygonizing voted labels...
+  Wrote /users1/cpca070342024/shared/predict_outputs/thread_sweep/threads_1/T29TPG_block_002_002.gpkg in 2.28 s  (201 polygons)
+
+[RSS] Final:                            2873.9 MB
+	Command being timed: "python -u /users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/distribute/predict_block.py"
+	User time (seconds): 548.65
+	System time (seconds): 10.56
+	Percent of CPU this job got: 98%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 9:26.28
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 3633440
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 2480209
+	Voluntary context switches: 1576
+	Involuntary context switches: 450
+	Swaps: 0
+	File system inputs: 32
+	File system outputs: 2744
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+
+############################################################
+### THREADS=2   (block 2,2 on hpc001.d.incd.pt)
+############################################################
+Tile:           T29TPG
+HDF5:           /users1/cpca070342024/shared/hdf5/T29TPG_48ts_20251028_20251229.h5
+Block:          (2, 2) of grid (7, 11)
+Weights:        /users1/cpca070342024/shared/model_weights/teste20260429163505_best.pth
+Output dir:     /users1/cpca070342024/shared/predict_outputs/thread_sweep/threads_2
+Target dates:   ['2025-11-15', '2025-12-01']
+Batch size:     8
+Vote classes:   (1, 2)
+Vote threshold: 2
+Closing radius: 3
+Min patch m^2:  2500.0
+
+[RSS] After imports:                     655.0 MB
+
+Step 1: reading chip-block from HDF5...
+  block: shape=(48, 10, 1280, 1280)  dtype=uint8  786.4 MB
+  ts:    2025-10-28 -> 2025-12-29  (48 timesteps)
+  Step 1 time: 18.07 s
+[RSS] After chip-block:                 1441.7 MB
+
+Step 3: compositing for 2 target date(s)...
+  composites: shape=(2, 2, 10, 1280, 1280)  dtype=uint8  65.5 MB
+  valid dates: 2 / 2
+  Step 3 time: 2.40 s
+[RSS] After composites:                 1507.4 MB
+
+torch threads:  2
+
+Loading model...
+SwinTransformerSys expand initial----depths:[2, 2, 18, 2];depths_decoder:[4, 4, 4, 4];drop_path_rate:0.1;num_classes:3
+/users1/cpca070342024/shared/vchips/venv/lib/python3.10/site-packages/torch/functional.py:505: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /pytorch/aten/src/ATen/native/TensorShape.cpp:4381.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+  Loaded in 1.95 s
+[RSS] After model loaded:               2690.0 MB
+
+Step 4: generating shifted chips + predicting...
+
+  Pairs predicted:   162
+  By chip kind:      {'diagonal': 50, 'h_shift': 40, 'original': 32, 'v_shift': 40}
+  Total infer time:  280.07 s  (1728.9 ms/chip)
+  Total vote time:   0.02 s
+[RSS] After all inference:              2945.0 MB  (delta +255.0 MB)
+
+Per-class pixel counts (aggregated across all chip pairs):
+  class 0:    8,186,881 pixels  (77.11%)
+  class 1:       54,726 pixels  ( 0.52%)
+  class 2:    2,375,225 pixels  (22.37%)
+
+Step 5b: voting (threshold=2, classes=(1, 2))
+  2025-11-15: pre-threshold votes={1: 8535, 2: 1034148}  post-threshold detections={1: 2643, 2: 272942}
+  2025-12-01: pre-threshold votes={1: 37427, 2: 904738}  post-threshold detections={1: 11276, 2: 245420}
+
+Step 6: writing voted .npz...
+  Wrote /users1/cpca070342024/shared/predict_outputs/thread_sweep/threads_2/T29TPG_block_002_002.npz in 0.16 s  (91.0 KB)
+
+Step 6b: closing + polygonizing voted labels...
+  Wrote /users1/cpca070342024/shared/predict_outputs/thread_sweep/threads_2/T29TPG_block_002_002.gpkg in 2.66 s  (201 polygons)
+
+[RSS] Final:                            2970.2 MB
+	Command being timed: "python -u /users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/distribute/predict_block.py"
+	User time (seconds): 577.35
+	System time (seconds): 10.09
+	Percent of CPU this job got: 186%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 5:15.43
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 3661796
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 84
+	Minor (reclaiming a frame) page faults: 2660129
+	Voluntary context switches: 2942
+	Involuntary context switches: 755
+	Swaps: 0
+	File system inputs: 600
+	File system outputs: 2736
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+
+############################################################
+### THREADS=4   (block 2,2 on hpc001.d.incd.pt)
+############################################################
+Tile:           T29TPG
+HDF5:           /users1/cpca070342024/shared/hdf5/T29TPG_48ts_20251028_20251229.h5
+Block:          (2, 2) of grid (7, 11)
+Weights:        /users1/cpca070342024/shared/model_weights/teste20260429163505_best.pth
+Output dir:     /users1/cpca070342024/shared/predict_outputs/thread_sweep/threads_4
+Target dates:   ['2025-11-15', '2025-12-01']
+Batch size:     8
+Vote classes:   (1, 2)
+Vote threshold: 2
+Closing radius: 3
+Min patch m^2:  2500.0
+
+[RSS] After imports:                     651.6 MB
+
+Step 1: reading chip-block from HDF5...
+  block: shape=(48, 10, 1280, 1280)  dtype=uint8  786.4 MB
+  ts:    2025-10-28 -> 2025-12-29  (48 timesteps)
+  Step 1 time: 18.08 s
+[RSS] After chip-block:                 1510.0 MB
+
+Step 3: compositing for 2 target date(s)...
+  composites: shape=(2, 2, 10, 1280, 1280)  dtype=uint8  65.5 MB
+  valid dates: 2 / 2
+  Step 3 time: 2.41 s
+[RSS] After composites:                 1540.1 MB
+
+torch threads:  4
+
+Loading model...
+SwinTransformerSys expand initial----depths:[2, 2, 18, 2];depths_decoder:[4, 4, 4, 4];drop_path_rate:0.1;num_classes:3
+/users1/cpca070342024/shared/vchips/venv/lib/python3.10/site-packages/torch/functional.py:505: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /pytorch/aten/src/ATen/native/TensorShape.cpp:4381.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+  Loaded in 2.22 s
+[RSS] After model loaded:               2687.2 MB
+
+Step 4: generating shifted chips + predicting...
+
+  Pairs predicted:   162
+  By chip kind:      {'diagonal': 50, 'h_shift': 40, 'original': 32, 'v_shift': 40}
+  Total infer time:  194.03 s  (1197.7 ms/chip)
+  Total vote time:   0.02 s
+[RSS] After all inference:              2892.8 MB  (delta +205.6 MB)
+
+Per-class pixel counts (aggregated across all chip pairs):
+  class 0:    8,186,881 pixels  (77.11%)
+  class 1:       54,726 pixels  ( 0.52%)
+  class 2:    2,375,225 pixels  (22.37%)
+
+Step 5b: voting (threshold=2, classes=(1, 2))
+  2025-11-15: pre-threshold votes={1: 8535, 2: 1034148}  post-threshold detections={1: 2643, 2: 272942}
+  2025-12-01: pre-threshold votes={1: 37427, 2: 904738}  post-threshold detections={1: 11276, 2: 245420}
+
+Step 6: writing voted .npz...
+  Wrote /users1/cpca070342024/shared/predict_outputs/thread_sweep/threads_4/T29TPG_block_002_002.npz in 0.13 s  (91.0 KB)
+
+Step 6b: closing + polygonizing voted labels...
+  Wrote /users1/cpca070342024/shared/predict_outputs/thread_sweep/threads_4/T29TPG_block_002_002.gpkg in 1.96 s  (201 polygons)
+
+[RSS] Final:                            2918.4 MB
+	Command being timed: "python -u /users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/distribute/predict_block.py"
+	User time (seconds): 712.73
+	System time (seconds): 21.91
+	Percent of CPU this job got: 320%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 3:48.91
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 3626824
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 2
+	Minor (reclaiming a frame) page faults: 3630778
+	Voluntary context switches: 9144
+	Involuntary context switches: 1585
+	Swaps: 0
+	File system inputs: 16
+	File system outputs: 2800
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+
+============================================================
+=== Sweep complete. Pull the per-thread inference timing with:
+===   grep -E 'THREADS=|Total infer time' <this .out file>
+============================================================
+
+* ----------------------------------------------------------------
+* Running EPILOG for thread_sweep on Thu Jun  4 00:08:28 WEST 2026
+* ----------------------------------------------------------------
