@@ -234,6 +234,17 @@ export BLOCK_OUTPUT_DIR="${BLOCK_OUTPUT_DIR:-${OUTPUT_DIR}/block_outputs}"
 export FINAL_OUTPUT_DIR="${FINAL_OUTPUT_DIR:-${OUTPUT_DIR}/final_outputs}"
 mkdir -p "$OUTPUT_DIR" "$LOG_DIR" "$BLOCK_OUTPUT_DIR" "$FINAL_OUTPUT_DIR"
 
+# ── Tee this script's own output to a log file ────────────────────────────
+# Everything printed from here on (grid discovery, date/cluster resolution,
+# the run banner, the submitted job IDs) goes to both the terminal and
+# $LOG_DIR/submit_tile.log so the submission summary is recoverable later.
+# Placed right after the dirs exist; the few input-validation errors above
+# this point still go to the terminal only (they fail before any log dir is
+# known). Truncates per run so a re-submit's log reflects that submission.
+SUBMIT_LOG="$LOG_DIR/submit_tile.log"
+exec > >(tee "$SUBMIT_LOG") 2>&1
+_tee_pid=$!   # wait on this at the end so tee flushes before the script exits
+
 # ── Discover block grid shape via a quick venv invocation ─────────────────
 # (Reads the HDF5 once on the login node; cheap — just opens attrs and
 # the xs/ys arrays.)
@@ -436,6 +447,9 @@ ARRAY_JOB_ID=$(
 echo "Submitted array job:      $ARRAY_JOB_ID  (array ${ARRAY_SPEC}%${MAX_CONCURRENT}, ${THREADS} cpu/task)"
 
 # ── Submit aggregator (depends on array success) ──────────────────────────
+# Pass the array job id through so the aggregator can read the array's earliest
+# block start time from sacct and report the end-to-end tile wall time.
+export ARRAY_JOB_ID
 AGGR_JOB_ID=$(
     sbatch --parsable \
         --dependency=afterok:"$ARRAY_JOB_ID" \
@@ -452,3 +466,9 @@ echo "Per-block logs:    $LOG_DIR/predict_block_<task_id>.out"
 echo "Aggregator log:    $LOG_DIR/aggregate.out"
 echo "Per-block outputs: $BLOCK_OUTPUT_DIR/  (.npz + .gpkg)"
 echo "Final outputs:     $FINAL_OUTPUT_DIR/  (.gpkg .parquet .npz .tif)"
+echo "Submission log:    $SUBMIT_LOG"
+
+# Close the redirected stdout/stderr and wait for the tee process to drain so
+# the final lines aren't clipped when the script exits.
+exec >&- 2>&-
+wait "$_tee_pid" 2>/dev/null || true
