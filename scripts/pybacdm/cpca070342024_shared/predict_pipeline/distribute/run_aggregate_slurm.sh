@@ -4,11 +4,11 @@
 # on the per-block array job, so this only runs once every block .npz is
 # on disk.
 
-#SBATCH --time=02:00:00
+#SBATCH --time=00:30:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=1
-#SBATCH --partition=fct
+#SBATCH --cpus-per-task=3
+#SBATCH --partition=dgt
 #SBATCH --account=cpca070342024
 #SBATCH --qos=cpca070342024
 

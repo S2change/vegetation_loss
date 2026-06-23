@@ -1,0 +1,37 @@
+* ----------------------------------------------------------------
+* Running PROLOG for subset_hdf5 on Mon Jun 22 10:39:56 WEST 2026
+*    JOB_NAME                : subset_hdf5
+*    JOB_ID                  : 296296
+*    JOB_PARTITION           : dgt
+*    JOB_USER                : domwelsh
+*    JOB_ACCOUNT             : cpca070342024
+*    JOB_QOS                 : cpca070342024
+*    NODE_LIST               : hpc014
+*    SLURM_NNODES            : 1
+*    SLURM_NPROCS            : 1
+*    SLURM_NTASKS            : 1
+*    SLURM_CPUS_ON_NODE      : 1
+*    SLURM_TASKS_PER_NODE    : 1
+*    SLURM_JOB_CPUS_PER_NODE : 1
+*    SLURM_MEM_PER_CPU       : 5333
+*    SUBMIT_HOST             : ui102.d.incd.pt
+*    WORK_DIR                : /users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/small_test_area
+*    JOB_SCRIPT              : /users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/small_test_area/run_subset.sh
+* ----------------------------------------------------------------
+Running: python /users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/small_test_area/subset_hdf5_to_block.py --src /users1/dgt/hdf5_2023/T29TNF.h5 --gpkg /users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/small_test_area/northern_test_area.gpkg --out /users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/small_test_area/hdf5_files/T29TNF_testblock.h5
+Source: T29TNF.h5
+  chips: 1510  ts: 86  bands: 10
+  polygon bounds: (554380, 4530580, 564620, 4540820)
+  cell source blocks: rows 5..6 cols 3..4  (2x2 = LIVE area)
+  pad: 1 block ring(s)
+Kept 256 chips, rebased grid rows [0..15] cols [0..15]
+  new bounds L,B,R,T: 535610, 4518100, 576570, 4559060
+
+Wrote /users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/small_test_area/hdf5_files/T29TNF_testblock.h5
+
+  >> The polygon's LIVE area spans 2x2 blocks, NW block at (row=1, col=1).
+     Run block rows 1..2, cols 1..2.
+
+* ----------------------------------------------------------------
+* Running EPILOG for subset_hdf5 on Mon Jun 22 10:53:25 WEST 2026
+* ----------------------------------------------------------------

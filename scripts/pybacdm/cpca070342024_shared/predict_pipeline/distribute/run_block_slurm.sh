@@ -10,7 +10,7 @@
 #SBATCH --ntasks-per-node=1
 # NOTE: --cpus-per-task is set on the sbatch command line by submit_tile.sh
 # (to match $THREADS), NOT here, so the two never drift apart.
-#SBATCH --partition=fct
+#SBATCH --partition=dgt
 #SBATCH --account=cpca070342024
 #SBATCH --qos=cpca070342024
 
