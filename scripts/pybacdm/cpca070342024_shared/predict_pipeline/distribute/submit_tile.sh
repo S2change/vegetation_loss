@@ -381,6 +381,9 @@ if [[ -n "${BLOCK_ROWS:-}" || -n "${BLOCK_COLS:-}" ]]; then
         done
     done
     ARRAY_SPEC="${ARRAY_IDS%,}"           # strip trailing comma
+    # Space-separated index list for the block-error report (which array tasks
+    # to expect). Same set as ARRAY_SPEC, just space- not comma-separated.
+    EXPECTED_ARRAY_IDS="${ARRAY_SPEC//,/ }"
     N_SELECTED=$(( (ROW_HI-ROW_LO+1) * (COL_HI-COL_LO+1) ))
     # Tell the aggregator which sub-rectangle to expect + crop to.
     export PROCESS_ROW_LO="$ROW_LO" PROCESS_ROW_HI="$ROW_HI"
@@ -388,9 +391,11 @@ if [[ -n "${BLOCK_ROWS:-}" || -n "${BLOCK_COLS:-}" ]]; then
     SELECT_DESC="rows ${ROW_LO}-${ROW_HI} cols ${COL_LO}-${COL_HI} (${N_SELECTED} blocks)"
 else
     ARRAY_SPEC="0-${LAST_IDX}"
+    EXPECTED_ARRAY_IDS="$(seq 0 "$LAST_IDX" | tr '\n' ' ')"
     N_SELECTED=$N_BLOCKS
     SELECT_DESC="all ${N_BLOCKS} blocks"
 fi
+export EXPECTED_ARRAY_IDS
 
 echo "Tile:           $TILE_ID"
 echo "Model:          $MODEL"
@@ -446,10 +451,26 @@ ARRAY_JOB_ID=$(
 )
 echo "Submitted array job:      $ARRAY_JOB_ID  (array ${ARRAY_SPEC}%${MAX_CONCURRENT}, ${THREADS} cpu/task)"
 
-# ── Submit aggregator (depends on array success) ──────────────────────────
-# Pass the array job id through so the aggregator can read the array's earliest
-# block start time from sacct and report the end-to-end tile wall time.
+# Pass the array job id through so downstream jobs (block-error report,
+# aggregator) can query sacct for per-task state and the array's start time.
 export ARRAY_JOB_ID
+
+# ── Submit block-error report (runs after the array, success OR not) ───────
+# afterany (not afterok) so this ALWAYS runs once the blocks finish, even when
+# some fail — that's the case where the afterok aggregator silently never
+# starts. Writes logs/block_errors.txt listing any block that didn't complete.
+ERR_JOB_ID=$(
+    sbatch --parsable \
+        --dependency=afterany:"$ARRAY_JOB_ID" \
+        --export=ALL \
+        --output="$LOG_DIR/block_errors.out" \
+        --error="$LOG_DIR/block_errors.err" \
+        --job-name="blkerr_${TILE_ID}" \
+        "$DISTRIBUTE_DIR/run_block_errors_slurm.sh"
+)
+echo "Submitted block-error job: $ERR_JOB_ID  (afterany:$ARRAY_JOB_ID)"
+
+# ── Submit aggregator (depends on array success) ──────────────────────────
 AGGR_JOB_ID=$(
     sbatch --parsable \
         --dependency=afterok:"$ARRAY_JOB_ID" \
@@ -463,6 +484,7 @@ echo "Submitted aggregator job: $AGGR_JOB_ID  (afterok:$ARRAY_JOB_ID)"
 echo
 echo "Watch with:  squeue -u \$USER"
 echo "Per-block logs:    $LOG_DIR/predict_block_<task_id>.out"
+echo "Block-error report: $LOG_DIR/block_errors.txt  (which blocks, if any, failed)"
 echo "Aggregator log:    $LOG_DIR/aggregate.out"
 echo "Per-block outputs: $BLOCK_OUTPUT_DIR/  (.npz + .gpkg)"
 echo "Final outputs:     $FINAL_OUTPUT_DIR/  (.gpkg .parquet .npz .tif)"
