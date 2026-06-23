@@ -18,7 +18,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
-#SBATCH --partition=fct
+#SBATCH --partition=dgt
 #SBATCH --account=cpca070342024
 #SBATCH --qos=cpca070342024
 
