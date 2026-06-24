@@ -49,8 +49,6 @@ def write_voted_block(output_dir: str,
                       world_origin_y: float,
                       pixel_res: float,
                       threshold: int,
-                      ndvi_before: np.ndarray | None = None,
-                      ndvi_after: np.ndarray | None = None,
                       ) -> str:
     """Write one block's voted output to a compressed .npz file.
 
@@ -73,11 +71,6 @@ def write_voted_block(output_dir: str,
         UTM position of the LIVE area's NW corner + pixel size in metres.
     threshold : int
         Vote threshold used to produce `labels`. Stored for traceability.
-    ndvi_before, ndvi_after : (n_dates, H, W) float32 or None
-        Optional per-pixel before/after NDVI aligned to `labels`. When given,
-        both are stored in the .npz (keys `ndvi_before` / `ndvi_after`); when
-        None they are omitted entirely so blocks without NDVI stay small and
-        readers can detect absence via the key set.
 
     Returns
     -------
@@ -95,23 +88,6 @@ def write_voted_block(output_dir: str,
             f"labels first axis ({labels.shape[0]})"
         )
 
-    # Optional NDVI: both sides must be present together and match `labels`'
-    # shape so the per-pixel arrays stay aligned with the prediction.
-    extra = {}
-    if (ndvi_before is None) != (ndvi_after is None):
-        raise ValueError(
-            "ndvi_before and ndvi_after must be given together (or both None)"
-        )
-    if ndvi_before is not None:
-        for name, arr in (("ndvi_before", ndvi_before),
-                          ("ndvi_after", ndvi_after)):
-            if arr.shape != labels.shape:
-                raise ValueError(
-                    f"{name} shape {arr.shape} must match labels {labels.shape}"
-                )
-        extra["ndvi_before"] = ndvi_before.astype(np.float32, copy=False)
-        extra["ndvi_after"] = ndvi_after.astype(np.float32, copy=False)
-
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     path = voted_path_for_block(output_dir, tile_id, block_row, block_col)
 
@@ -126,7 +102,6 @@ def write_voted_block(output_dir: str,
         world_origin_y=np.float64(world_origin_y),
         pixel_res=np.float64(pixel_res),
         threshold=np.uint8(threshold),
-        **extra,
     )
     return path
 

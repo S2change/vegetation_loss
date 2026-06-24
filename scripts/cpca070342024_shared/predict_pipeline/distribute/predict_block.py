@@ -51,12 +51,6 @@ set them without re-templating Python source):
                       timesteps aren't pulled into memory. Empty/unset on either
                       side = no bound there. submit_tile.sh defaults these to
                       START_DATE / END_DATE (the cluster window).
-    OUTPUT_NDVI       Set to 1 to also compute per-pixel before/after NDVI
-                      from each date's composite and store it in the block
-                      .npz (keys ndvi_before / ndvi_after, float32, LIVE grid,
-                      NDVI_NODATA=-9999 where input was nodata). The aggregator
-                      stitches it into the tile .npz + per-date NDVI GeoTIFFs.
-                      Off by default.
     DATE_CLUSTERS     Serialized date clusters (set by submit_tile.sh when
                       USE_DATE_CLUSTERS=1). Format: clusters ';'-separated,
                       ISO dates within a cluster ','-separated, e.g.
@@ -98,7 +92,6 @@ from composite_shift_chips import (
     create_before_after_composites,
     generate_shifted_chips,
 )
-from composite_shift_chips.ndvi import compute_ndvi_composites
 # Imported from the submodule (not the package __init__) so rasterio stays off
 # the core composite import path; only pulled in when actually writing TIFs.
 from composite_shift_chips.write_composite_tifs import write_block_composite_tifs
@@ -239,13 +232,6 @@ def main() -> None:
     # shrinking the time axis. Unset (default) = use every raw timestep.
     date_clusters = parse_date_clusters(os.environ.get("DATE_CLUSTERS", ""))
 
-    # Optional per-pixel before/after NDVI alongside the change prediction.
-    # When on, NDVI is computed from each date's before/after composite (LIVE
-    # area) and stored in the block .npz next to `labels`; the aggregator
-    # stitches it into the tile .npz + per-date NDVI GeoTIFFs. Off by default.
-    output_ndvi = (os.environ.get("OUTPUT_NDVI", "0")
-                   not in ("0", "", "false", "False"))
-
     # Bounds check the block coordinates against the HDF5's grid shape so
     # a misconfigured array index fails fast with a clear message instead
     # of read_block raising an opaque slice-bounds error.
@@ -275,7 +261,6 @@ def main() -> None:
           f"{f'per-class ({MODEL}.CLOSING_RADII)' if closing_radius is None else closing_radius}")
     print(f"Min patch m^2:  {min_patch_m2}")
     print(f"Date clusters:  {len(date_clusters) if date_clusters else 'off (raw timesteps)'}")
-    print(f"Output NDVI:    {'on' if output_ndvi else 'off'}")
     print(f"\n[RSS] After imports:                   {rss_mb():7.1f} MB")
 
     # ── Step 1: read chip block ───────────────────────────────────────────
@@ -350,18 +335,6 @@ def main() -> None:
     print(f"  Step 3 time: {time.perf_counter() - t0:.2f} s")
     print(f"[RSS] After composites:                {rss_mb():7.1f} MB")
 
-    # ── Optional: per-pixel before/after NDVI (LIVE area) ─────────────────
-    # Computed from the composites while they're in memory, for every target
-    # date (skipped dates -> all-nodata, matching the labels). Stored in the
-    # block .npz alongside labels so each pixel carries pre/post greenness.
-    ndvi_before = ndvi_after = None
-    if output_ndvi:
-        ndvi_before, ndvi_after = compute_ndvi_composites(
-            composites, valid_dates_mask, nodata=input_nodata,
-        )
-        print(f"  NDVI: before/after {ndvi_before.shape} float32 "
-              f"({2 * ndvi_before.nbytes / 1e6:.1f} MB)")
-
     # ── Optional: dump before/after composite GeoTIFFs for inspection ──────
     # Gated by WRITE_COMPOSITE_TIFS (default off) — these are 10-band 1280x1280
     # rasters per (date, side), not needed for the production pipeline. Written
@@ -410,8 +383,6 @@ def main() -> None:
             world_origin_y=position.world_origin_y,
             pixel_res=position.pixel_res,
             threshold=vote_threshold,
-            ndvi_before=ndvi_before,
-            ndvi_after=ndvi_after,
         )
         _write_empty_block_gpkg(
             output_dir, tile_id, block_row, block_col,
@@ -562,8 +533,6 @@ def main() -> None:
         world_origin_y=position.world_origin_y,
         pixel_res=position.pixel_res,
         threshold=vote_threshold,
-        ndvi_before=ndvi_before,
-        ndvi_after=ndvi_after,
     )
     write_s = time.perf_counter() - t0
     npz_bytes = os.path.getsize(npz_path)
