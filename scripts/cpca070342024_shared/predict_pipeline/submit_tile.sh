@@ -252,6 +252,13 @@ MODELS_DIR="$PIPELINE_ROOT/models"
 # VENV=... on the command line.
 VENV="${VENV:-$PIPELINE_ROOT/.venv}"
 export VENV
+# Clear any inherited PYTHONPATH. On this cluster the CVMFS Python env can put
+# its own site-packages (/cvmfs/.../lib/cpu/python3.10) on PYTHONPATH, which
+# sits AHEAD of the venv on sys.path and shadows venv packages — e.g. an old
+# typing_extensions that breaks the venv's torch (`TypeIs` import). The
+# per-command `PYTHONPATH=$MODELS_DIR/$SHARED_DIR python ...` calls below set it
+# fresh for those invocations, so this unset doesn't affect them.
+unset PYTHONPATH
 
 # ── Resolve TARGET_DATES (+ DATE_CLUSTERS) ────────────────────────────────
 # Three mutually exclusive sources, captured into vars first (not piped

@@ -20,6 +20,11 @@ module load gcc13/openmpi/4.1.6
 # fallback derives the same path from this script's location: it lives in
 # processes/distribute/, so the pipeline root (holding .venv) is two levels up.
 source "${VENV:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/.venv}/bin/activate"
+# Clear any inherited PYTHONPATH: the CVMFS Python env puts its own
+# site-packages on PYTHONPATH, which sits AHEAD of the venv on sys.path and
+# shadows venv packages (numpy/h5py/typing_extensions load from /cvmfs, which
+# breaks the venv's torch via the `TypeIs` import).
+unset PYTHONPATH
 
 : "${DISTRIBUTE_DIR:?DISTRIBUTE_DIR must be exported by submit_tile.sh}"
 python "$DISTRIBUTE_DIR/aggregate_tile.py"
