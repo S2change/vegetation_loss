@@ -29,7 +29,10 @@ set -euo pipefail
 
 module purge
 module load gcc13/openmpi/4.1.6
-source "${VENV:-/users1/cpca070342024/shared/vchips/venv}/bin/activate"
+# VENV (predict_pipeline/.venv) — fall back to a path derived from
+# SLURM_SUBMIT_DIR (the submit cwd; the spool copy makes BASH_SOURCE unreliable
+# here) or this script's dir, two levels up to the pipeline root.
+source "${VENV:-$(cd "${SLURM_SUBMIT_DIR:-$(dirname "${BASH_SOURCE[0]}")}/../.." && pwd)/.venv}/bin/activate"
 
 # ── Experiment config ──────────────────────────────────────────────────────
 # SLURM copies the batch script into /var/spool/slurmd/jobXXXX/ before

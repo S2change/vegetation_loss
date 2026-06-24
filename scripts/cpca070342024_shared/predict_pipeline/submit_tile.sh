@@ -246,7 +246,12 @@ PIPELINE_ROOT="$(cd "$(dirname "$0")" && pwd)"
 DISTRIBUTE_DIR="$PIPELINE_ROOT/processes/distribute"
 SHARED_DIR="$PIPELINE_ROOT/processes"
 MODELS_DIR="$PIPELINE_ROOT/models"
-VENV="${VENV:-/users1/cpca070342024/shared/vchips/venv}"
+# Python venv with the pipeline's dependencies (see requirements.txt). Defaults
+# to predict_pipeline/.venv/ — the venv living at the pipeline root. Exported so
+# the SLURM wrappers (run_*_slurm.sh) activate the same one. Override by setting
+# VENV=... on the command line.
+VENV="${VENV:-$PIPELINE_ROOT/.venv}"
+export VENV
 
 # ── Resolve TARGET_DATES (+ DATE_CLUSTERS) ────────────────────────────────
 # Three mutually exclusive sources, captured into vars first (not piped

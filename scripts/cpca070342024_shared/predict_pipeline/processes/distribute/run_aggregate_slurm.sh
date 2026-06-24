@@ -16,7 +16,10 @@ set -euo pipefail
 
 module purge
 module load gcc13/openmpi/4.1.6
-source "${VENV:-/users1/cpca070342024/shared/vchips/venv}/bin/activate"
+# VENV is normally exported by submit_tile.sh (predict_pipeline/.venv). The
+# fallback derives the same path from this script's location: it lives in
+# processes/distribute/, so the pipeline root (holding .venv) is two levels up.
+source "${VENV:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/.venv}/bin/activate"
 
 : "${DISTRIBUTE_DIR:?DISTRIBUTE_DIR must be exported by submit_tile.sh}"
 python "$DISTRIBUTE_DIR/aggregate_tile.py"

@@ -21,7 +21,10 @@ module load gcc13/openmpi/4.1.6
 # Do NOT `module load python/3.10` — see predict_testing/run_predict_slurm.sh
 # for the typing_extensions / torch CVMFS gotcha.
 
-source "${VENV:-/users1/cpca070342024/shared/vchips/venv}/bin/activate"
+# VENV is normally exported by submit_tile.sh (predict_pipeline/.venv). The
+# fallback derives the same path from this script's location: it lives in
+# processes/distribute/, so the pipeline root (holding .venv) is two levels up.
+source "${VENV:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/.venv}/bin/activate"
 
 # Pin all thread pools to $THREADS. submit_tile.sh exports THREADS and
 # allocates a matching --cpus-per-task, so the process has that many real
