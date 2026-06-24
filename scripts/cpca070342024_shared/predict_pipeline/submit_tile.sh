@@ -236,14 +236,16 @@ _tee_pid=$!   # wait on this at the end so tee flushes before the script exits
 # ── Discover block grid shape via a quick venv invocation ─────────────────
 # (Reads the HDF5 once on the login node; cheap — just opens attrs and
 # the xs/ys arrays.)
-DISTRIBUTE_DIR="$(cd "$(dirname "$0")" && pwd)"
-# SHARED_DIR = processes/ (parent of distribute/): the python-path root for the
-# shared subpackages (input_setup, composite_shift_chips, postprocess).
-SHARED_DIR="$(dirname "$DISTRIBUTE_DIR")"
-# Model packages live under predict_pipeline/models/ — a sibling of processes/,
-# i.e. one level ABOVE SHARED_DIR. Imported by bare name with this dir on
-# PYTHONPATH (matches predict_block.py's sys.path setup).
-MODELS_DIR="$(dirname "$SHARED_DIR")/models"
+# This script lives at the pipeline root (predict_pipeline/). Everything else
+# is addressed relative to it:
+#   processes/distribute/  SLURM wrappers + Python entry points (DISTRIBUTE_DIR)
+#   processes/             python-path root for shared subpackages (SHARED_DIR:
+#                          input_setup, composite_shift_chips, postprocess)
+#   models/                model packages, imported by bare name (MODELS_DIR)
+PIPELINE_ROOT="$(cd "$(dirname "$0")" && pwd)"
+DISTRIBUTE_DIR="$PIPELINE_ROOT/processes/distribute"
+SHARED_DIR="$PIPELINE_ROOT/processes"
+MODELS_DIR="$PIPELINE_ROOT/models"
 VENV="${VENV:-/users1/cpca070342024/shared/vchips/venv}"
 
 # ── Resolve TARGET_DATES (+ DATE_CLUSTERS) ────────────────────────────────
