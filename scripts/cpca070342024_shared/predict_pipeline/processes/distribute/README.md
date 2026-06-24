@@ -16,9 +16,9 @@ Submitting the submit_tile.sh file with the required inputs will run the entire 
 In this example subission, the first 5 inputs (TILE_ID, TILE_HDF5, OUTPUT_DIR, START_DATE, END_DATE) are the required inputs that need to be added for every run. The last 4 inputs (MAX_COMPOSITE_DAYS, BLOCK_ROWS, BLOCK_COLS, WRITE_COMPOSITE_TIFS) are optional inputs. This example submission is a submission used for testing only a few blocks from a small HDF5 file. Unless doing a very specific run, only the required inputs are needed when processing a full tile.
 
 ```
-/users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/distribute/submit_tile.sh \
+/users1/cpca070342024/shared/vegetation_loss/scripts/cpca070342024_shared/predict_pipeline/submit_tile.sh \
     TILE_ID=T29TPE \
-    TILE_HDF5_PATH=/users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/small_test_area/T29TPE_testblock.h5 \
+    TILE_HDF5_PATH=/users1/cpca070342024/shared/vegetation_loss/scripts/cpca070342024_shared/predict_pipeline/small_test_area/T29TPE_testblock.h5 \
 	OUTPUT_DIR=/users1/cpca070342024/shared/predict_outputs/12_T29TPE_new_run \
     START_DATE=2023-02-01 \
 	END_DATE=2023-10-01 \
@@ -102,14 +102,14 @@ here is an error — they are computed per tile.
 ### Example submissions
 ```
 # All *.h5 in a directory:
-/users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/distribute/submit_tiles_batch.sh \
+/users1/cpca070342024/shared/vegetation_loss/scripts/cpca070342024_shared/predict_pipeline/submit_tiles_batch.sh \
     BASE_OUTPUT_DIR=/users1/cpca070342024/shared/predict_outputs/13_summer2023 \
     TILE_DIR=/users1/dgt/hdf5/ \
     START_DATE=2023-07-01 END_DATE=2023-09-15 \
     USE_DATE_CLUSTERS=1 MAX_THETA=5 MAX_CLUSTER_AMPLITUDE=5
 
 # An explicit subset (TILE_DIR defaults to /users1/dgt/hdf5/):
-/users1/cpca070342024/shared/vegetation_loss/scripts/pybacdm/cpca070342024_shared/predict_pipeline/distribute/submit_tiles_batch.sh \
+/users1/cpca070342024/shared/vegetation_loss/scripts/cpca070342024_shared/predict_pipeline/submit_tiles_batch.sh \
     BASE_OUTPUT_DIR=/users1/cpca070342024/shared/predict_outputs/13_summer2023 \
     TILES="T29SNB T29TPE T29TPG" \
     START_DATE=2023-07-01 END_DATE=2023-09-15

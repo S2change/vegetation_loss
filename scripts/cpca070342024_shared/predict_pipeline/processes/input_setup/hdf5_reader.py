@@ -20,13 +20,12 @@ The live area sits at `block[..., GHOST:GHOST+LIVE_H, GHOST:GHOST+LIVE_W]`
 and the ghost ring surrounds it. This 2-D layout makes shift extraction in
 `composite_shift_chips` a matter of simple slicing.
 
-Stretch is fused into the read path: by default each chip-timestep is
+Stretch is fused into the read path: if called, each chip-timestep is
 converted from uint16 to uint8 via the same per-band q02/q98 logic the
 training data used (mirrors
-`pybacdm/shared/bacdm/data/dataset_swin_GZ._to_uint8`), and the block is
-uint8 with nodata 255. Pass `stretch=False` to `read_block` / `iter_blocks`
-to skip the stretch and keep the block as raw uint16 (nodata = the source
-`nodata_val`, usually 65535) — for callers wanting native reflectance.
+`predict_pipeline/models/bacdm/data/dataset_swin_GZ._to_uint8`), and the block is
+uint8 with nodata 255. When `stretch=False` it keep the block as raw uint16 
+(nodata = the source `nodata_val`, usually 65535) — for callers wanting native reflectance.
 
 Distribution: `read_block(block_row, block_col)` is the unit of work for a
 SLURM array task. `iter_blocks` is a convenience for single-node runs.
@@ -279,7 +278,7 @@ def read_block(hdf5_path: str,
                block_col: int,
                ts_start_ordinal: Optional[int] = DEFAULT_TS_START_ORDINAL,
                ts_end_ordinal:   Optional[int] = DEFAULT_TS_END_ORDINAL,
-               stretch: bool = True,
+               stretch: bool = False,
                ) -> tuple[np.ndarray, np.ndarray, BlockPosition]:
     """Read one block (live 4x4 + 128-px ghost ring).
 
@@ -292,7 +291,7 @@ def read_block(hdf5_path: str,
     ts_start_ordinal, ts_end_ordinal : int or None
         Ordinal-date range to keep along the time axis. None on either side
         means "no bound on that side."
-    stretch : bool (default True)
+    stretch : bool (default False)
         When True, each chip is converted to uint8 via the per-band q02/q98
         percentile stretch (the training-data preprocessing). When False, the
         block keeps the source uint16 data unchanged — useful for callers that
