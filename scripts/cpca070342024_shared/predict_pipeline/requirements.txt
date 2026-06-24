@@ -1,0 +1,18 @@
+# ── Core (always needed) ──────────────────────────────────────────────────
+numpy==1.26.4
+h5py==3.13.0
+scipy==1.15.2
+rasterio==1.4.3
+shapely==2.1.0
+geopandas==1.0.1
+pandas==2.2.1
+psutil==6.1.1
+segmentation-models-pytorch
+# torch/torchvision: pin to your cluster's CUDA/CPU build
+torch==2.7.1
+torchvision==0.22.1
+
+# ── Model-specific: ONLY the bacdm (Swin-YNet) model ──────────────────────
+# Not needed if you only run MODEL=enet_16bit / enet_8bit (the defaults).
+einops==0.7.0
+timm==1.0.17

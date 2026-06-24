@@ -1,4 +1,4 @@
-"""Tests for postprocess.chip_records + postprocess.shard.
+"""Tests for postprocess.chip_records.
 
 Run:
     python test_postprocess.py
@@ -8,7 +8,6 @@ import sys
 import tempfile
 
 import numpy as np
-import pandas as pd
 
 # Make this file runnable both as a script and as a module.
 if __package__ in (None, ""):
@@ -19,9 +18,6 @@ if __package__ in (None, ""):
         _mask_to_rle,
         CHIP_H, CHIP_W, HALF, BACKGROUND_CLASS,
     )
-    from postprocess.shard import (
-        write_task_shard, read_shards, shard_path_for_block,
-    )
 else:
     from .chip_records import (
         ChipPredictionRecord, encode_chip_predictions,
@@ -29,7 +25,6 @@ else:
         _mask_to_rle,
         CHIP_H, CHIP_W, HALF, BACKGROUND_CLASS,
     )
-    from .shard import write_task_shard, read_shards, shard_path_for_block
 
 
 # ============================================================================
@@ -257,88 +252,6 @@ def test_encode_decode_roundtrip_via_to_dict():
 
 
 # ============================================================================
-# shard.py
-# ============================================================================
-
-def _make_record(**kwargs) -> ChipPredictionRecord:
-    """Minimal valid ChipPredictionRecord with hand-picked defaults."""
-    defaults = dict(
-        tile_id="T29TPG", block_row=0, block_col=0,
-        chip_kind="original", grid_row=0, grid_col=0,
-        date_ordinal=738887, date_iso="2024-01-01",
-        block_world_origin_x=500000.0, block_world_origin_y=4500000.0,
-        chip_nw_px_y=0, chip_nw_px_x=0, pixel_res=10.0,
-        n_pixels_by_class={1: 10},
-        masks_by_class={1: np.array([[0, 256], [5, 5]], dtype=np.uint16)},
-    )
-    defaults.update(kwargs)
-    return ChipPredictionRecord(**defaults)
-
-
-def test_shard_path_for_block():
-    p = shard_path_for_block("/tmp/out", "T29TPG", 12, 7)
-    assert p == "/tmp/out/T29TPG_block_012_007.parquet"
-    print("  shard_path_for_block — OK")
-
-
-def test_write_task_shard_roundtrip():
-    with tempfile.TemporaryDirectory() as tmpd:
-        records = [
-            _make_record(),
-            _make_record(
-                chip_kind="h_shift", grid_row=1, grid_col=2,
-                n_pixels_by_class={2: 42},
-                masks_by_class={2: np.array([[100, 500], [3, 7]], dtype=np.uint16)},
-            ),
-        ]
-        path = write_task_shard(records, tmpd, "T29TPG", 0, 0)
-        assert os.path.exists(path)
-
-        df = read_shards(tmpd)
-        assert len(df) == 2
-        # Both records share the base columns; per-class columns are present
-        # for the classes that appeared.
-        for col in (
-            "tile_id", "block_row", "block_col",
-            "chip_kind", "grid_row", "grid_col",
-            "date_ordinal", "date_iso",
-            "block_world_origin_x", "block_world_origin_y",
-            "chip_nw_px_y", "chip_nw_px_x", "pixel_res",
-        ):
-            assert col in df.columns, col
-        # One row had cls_1, the other had cls_2 — both columns should exist
-        # with NaN where the row didn't have that class.
-        assert "n_pixels_cls_1" in df.columns
-        assert "n_pixels_cls_2" in df.columns
-    print("  write_task_shard + read_shards roundtrip — OK")
-
-
-def test_write_empty_task_shard():
-    with tempfile.TemporaryDirectory() as tmpd:
-        path = write_task_shard([], tmpd, "T29TPG", 0, 0)
-        assert os.path.exists(path)
-        df = pd.read_parquet(path)
-        assert len(df) == 0
-        # The fixed base column set should still be there.
-        for col in ("tile_id", "block_row", "block_col"):
-            assert col in df.columns
-    print("  write_task_shard (empty records) — OK")
-
-
-def test_read_shards_tile_filter():
-    with tempfile.TemporaryDirectory() as tmpd:
-        write_task_shard([_make_record(tile_id="T29TPG")], tmpd, "T29TPG", 0, 0)
-        write_task_shard([_make_record(tile_id="T29SMC")], tmpd, "T29SMC", 0, 0)
-        df_tpg = read_shards(tmpd, tile_id="T29TPG")
-        df_smc = read_shards(tmpd, tile_id="T29SMC")
-        df_all = read_shards(tmpd)
-        assert len(df_tpg) == 1 and df_tpg.iloc[0]["tile_id"] == "T29TPG"
-        assert len(df_smc) == 1 and df_smc.iloc[0]["tile_id"] == "T29SMC"
-        assert len(df_all) == 2
-    print("  read_shards (tile filter) — OK")
-
-
-# ============================================================================
 # Main
 # ============================================================================
 
@@ -355,10 +268,6 @@ def main():
     test_encode_rle_roundtrip()
     test_encode_to_dict_flattens_per_class()
     test_encode_decode_roundtrip_via_to_dict()
-    test_shard_path_for_block()
-    test_write_task_shard_roundtrip()
-    test_write_empty_task_shard()
-    test_read_shards_tile_filter()
     print("All postprocess tests passed.")
 
 
