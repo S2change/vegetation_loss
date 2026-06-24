@@ -48,7 +48,7 @@
 #                       65535) — for models that scale natively
 #                       (efficientnet_b2_16bit_pipeline). u8 applies the
 #                       q02/q98 stretch (uint8, nodata 255) — bacdm /
-#                       efficientnet_b2. Match this to the model: a u16 model
+#                       enet_8bit. Match this to the model: a u16 model
 #                       on u8 data (or vice versa) silently produces garbage.
 #   THREADS=2           CPU threads per task. Also sets --cpus-per-task so the
 #                       allocation matches. A thread sweep showed ~95% scaling
@@ -61,7 +61,7 @@
 #   BATCH_SIZE=8        model batch size.
 #   VOTE_CLASSES=1,2    non-bg class IDs to vote on. 1 = Cuts, 2 = Fires. Class
 #                       names are in the model package's config (e.g.
-#                       bacdm/AAA_Configs.py, efficientnet_b2/configs.py).
+#                       bacdm/AAA_Configs.py, enet_8bit/configs.py).
 #   VOTE_THRESHOLD=2    min votes per pixel to keep a detection.
 #   TARGET_STEP_DAYS=45 spacing (days) between generated dates when using the
 #                       START_DATE/END_DATE span form (ignored if TARGET_DATES
@@ -169,7 +169,7 @@ fi
 # below.
 export MODEL="${MODEL:-efficientnet_b2_16bit_pipeline}"
 # Input data dtype for the read->composite->shift chain. u8 applies
-# the q02/q98 stretch (uint8, nodata 255) — bacdm / efficientnet_b2. u16 (default)
+# the q02/q98 stretch (uint8, nodata 255) — bacdm / enet_8bit. u16 (default)
 # keeps raw uint16 reflectance (nodata 65535) — for models that scale natively
 # (e.g. efficientnet_b2_16bit_pipeline). Validate now so a typo fails at submit.
 export DATA_DTYPE="${DATA_DTYPE:-u16}"

@@ -51,7 +51,7 @@ In this example subission, the first 5 inputs (TILE_ID, TILE_HDF5, OUTPUT_DIR, S
 | `MAX_CONCURRENT` | `8` (int) | Max array tasks running at once (`--array %N` cap). With `THREADS`, keep `THREADS*MAX_CONCURRENT` well under the node's core count to avoid memory-bandwidth saturation. |
 | `WEIGHTS_PATH` | model package's `DEFAULT_WEIGHTS` (path) | `.pth` checkpoint. Default is a checkpoint inside the model dir. |
 | `BATCH_SIZE` | `8` (int) | Model batch size. |
-| `VOTE_CLASSES` | `1,2` (comma-sep ints) | Non-bg class IDs to vote on. 1 = Cuts, 2 = Fires. Class names are in the model package's config (e.g. `bacdm/AAA_Configs.py`, `efficientnet_b2/configs.py`). |
+| `VOTE_CLASSES` | `1,2` (comma-sep ints) | Non-bg class IDs to vote on. 1 = Cuts, 2 = Fires. Class names are in the model package's config (e.g. `bacdm/AAA_Configs.py`, `enet_8bit/configs.py`). |
 | `VOTE_THRESHOLD` | `2` (int) | Min votes per pixel to keep a detection. |
 | `TARGET_STEP_DAYS` | `45` (int, days) | Spacing (days) between generated dates when using the `START_DATE`/`END_DATE` span form (ignored if `TARGET_DATES` is given explicitly or `USE_DATE_CLUSTERS=1`). |
 | `USE_DATE_CLUSTERS` | `1` (bool: 0\|1) | When 1 (default), cluster the tile's acquisition calendar over `START_DATE..END_DATE`: the cluster-gap midpoints become the target dates and each block's timesteps are collapsed to one min-composite per cluster before compositing (cloud-suppressing temporal summary). Requires `START_DATE`+`END_DATE`; `TARGET_DATES` must NOT be set (the dates are derived). Set 0 to use raw timesteps with the fixed-cadence / explicit `TARGET_DATES` paths instead. |

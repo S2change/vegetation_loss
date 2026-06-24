@@ -20,14 +20,14 @@ set them without re-templating Python source):
 
   Optional
     MODEL             Model package directory name under <shared>/ (default
-                      "bacdm"; e.g. "efficientnet_b2"). The package must
+                      "bacdm"; e.g. "enet_8bit"). The package must
                       expose predict.load_model / predict_before_after_chips
                       and DEFAULT_WEIGHTS — see bacdm/__init__.py for the
                       interface contract.
     WEIGHTS_PATH      Path to the model's .pth checkpoint. Defaults to the
                       model package's DEFAULT_WEIGHTS.
     DATA_DTYPE        "u8" (default) reads blocks with the q02/q98 stretch
-                      (uint8, nodata 255) — bacdm / efficientnet_b2. "u16"
+                      (uint8, nodata 255) — bacdm / enet_8bit. "u16"
                       keeps raw uint16 reflectance (nodata 65535) — for
                       models that scale natively (efficientnet_b2_16bit_
                       pipeline). Controls the read->composite->shift chain,
@@ -80,7 +80,7 @@ import psutil
 import torch
 
 # Make the model packages importable. They sit next to distribute/ under
-# <shared>/ (bacdm/, efficientnet_b2/, ...), so we put <shared>/ on the path.
+# <shared>/ (bacdm/, enet_8bit/, ...), so we put <shared>/ on the path.
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent))                          # shared/ (for <model>.*)
 
@@ -207,7 +207,7 @@ def main() -> None:
 
     # Input data dtype for the whole read->composite->shift chain. "u8"
     # (default) reads blocks with the per-band q02/q98 percentile stretch
-    # (uint8, nodata 255) — what the bacdm / efficientnet_b2 models expect.
+    # (uint8, nodata 255) — what the bacdm / enet_8bit models expect.
     # "u16" keeps raw uint16 reflectance (nodata 65535) — for models trained
     # on native reflectance (e.g. efficientnet_b2_16bit_pipeline), which scale
     # by 10000 internally. The model itself doesn't read this knob; it only

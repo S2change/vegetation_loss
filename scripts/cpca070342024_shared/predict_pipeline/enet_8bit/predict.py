@@ -44,7 +44,7 @@ _STD  = torch.tensor(configs.NORM_STD).view(-1, 1, 1)    # (10, 1, 1)
 # component removal) lives in postprocess.chip_records.postprocess_prediction,
 # shared across all models and applied by predict_block.py after this module
 # returns raw labels. configs.CLOSING_RADII / MIN_PATCH_SIZE feed it via the
-# efficientnet_b2 package (see efficientnet_b2/__init__.py).
+# enet_8bit package (see enet_8bit/__init__.py).
 
 
 # ── Preprocessing ─────────────────────────────────────────────────────────────
