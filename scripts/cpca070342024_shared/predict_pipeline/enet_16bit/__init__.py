@@ -1,4 +1,4 @@
-"""EfficientNet-B2 U-Net model package (select with MODEL=efficientnet_b2_16bit_pipeline).
+"""EfficientNet-B2 U-Net model package, 16-bit (select with MODEL=enet_16bit).
 
 Every model package under predict_pipeline/ exposes the same interface so
 the distribute/ pipeline can swap models via the MODEL env var:
@@ -16,7 +16,7 @@ the login node just to resolve defaults.
 """
 from pathlib import Path as _Path
 
-MODEL_NAME = "efficientnet_b2_16bit_pipeline"
+MODEL_NAME = "enet_16bit"
 MODEL_DIR = _Path(__file__).resolve().parent
 
 # Default checkpoint, used when the WEIGHTS_PATH env var is unset.

@@ -35,18 +35,17 @@
 #       USE_DATE_CLUSTERS=0 TARGET_DATES=2025-11-15,2025-12-01
 #
 # Optional knobs (KEY=VALUE):
-#   MODEL=efficientnet_b2_16bit_pipeline
-#                       model package directory name under <shared>/ (the
+#   MODEL=enet_16bit    model package directory name under <shared>/ (the
 #                       parent of distribute/). Each model package exposes the
 #                       same interface (predict.load_model,
 #                       predict.predict_before_after_chips, DEFAULT_WEIGHTS,
 #                       CLOSING_RADII — see bacdm/__init__.py for the
 #                       contract), so switching model is just e.g.
-#                       MODEL=bacdm. Default: efficientnet_b2_16bit_pipeline.
+#                       MODEL=bacdm. Default: enet_16bit.
 #   DATA_DTYPE=u16      input data dtype for the read->composite->shift chain.
 #                       u16 (default) keeps raw uint16 reflectance (nodata
 #                       65535) — for models that scale natively
-#                       (efficientnet_b2_16bit_pipeline). u8 applies the
+#                       (enet_16bit). u8 applies the
 #                       q02/q98 stretch (uint8, nodata 255) — bacdm /
 #                       enet_8bit. Match this to the model: a u16 model
 #                       on u8 data (or vice versa) silently produces garbage.
@@ -167,11 +166,11 @@ fi
 # Model package (directory name under <shared>/). Validated — and the
 # default WEIGHTS_PATH resolved from it — once SHARED_DIR/VENV are known
 # below.
-export MODEL="${MODEL:-efficientnet_b2_16bit_pipeline}"
+export MODEL="${MODEL:-enet_16bit}"
 # Input data dtype for the read->composite->shift chain. u8 applies
 # the q02/q98 stretch (uint8, nodata 255) — bacdm / enet_8bit. u16 (default)
 # keeps raw uint16 reflectance (nodata 65535) — for models that scale natively
-# (e.g. efficientnet_b2_16bit_pipeline). Validate now so a typo fails at submit.
+# (e.g. enet_16bit). Validate now so a typo fails at submit.
 export DATA_DTYPE="${DATA_DTYPE:-u16}"
 case "$DATA_DTYPE" in
     u8|uint8|8|u16|uint16|16) ;;

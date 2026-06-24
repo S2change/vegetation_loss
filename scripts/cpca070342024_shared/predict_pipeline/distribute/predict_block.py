@@ -209,7 +209,7 @@ def main() -> None:
     # (default) reads blocks with the per-band q02/q98 percentile stretch
     # (uint8, nodata 255) — what the bacdm / enet_8bit models expect.
     # "u16" keeps raw uint16 reflectance (nodata 65535) — for models trained
-    # on native reflectance (e.g. efficientnet_b2_16bit_pipeline), which scale
+    # on native reflectance (e.g. enet_16bit), which scale
     # by 10000 internally. The model itself doesn't read this knob; it only
     # controls how the block is read + carried up to the model call.
     _dtype_env = os.environ.get("DATA_DTYPE", "u8").strip().lower()
