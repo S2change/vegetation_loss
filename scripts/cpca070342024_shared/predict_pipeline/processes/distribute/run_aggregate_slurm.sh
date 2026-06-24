@@ -56,3 +56,48 @@ if [[ -n "${ARRAY_JOB_ID:-}" ]]; then
 else
     echo "Total tile wall time: ARRAY_JOB_ID not set; cannot compute."
 fi
+
+# ── End-to-end tile CPU time ──────────────────────────────────────────────
+# Total processor time actually consumed across the whole tile — every block
+# task PLUS this aggregator — summed from sacct's TotalCPU (user+sys per step).
+# This is the compute burned, distinct from the wall time above (which is just
+# elapsed clock time). Best-effort; one line; never fails the job.
+#
+# TotalCPU prints as [DD-]HH:MM:SS[.mmm]; _cpu_secs converts one such value to
+# whole seconds. We sum over the array job's task rows and the aggregator's own
+# job, skipping the parent/.batch/.extern sub-step rows sacct also emits.
+_cpu_secs() {  # echo a TotalCPU field ("[DD-]HH:MM:SS[.ms]") as integer seconds
+    local v="$1" days=0 rest hh mm ss
+    [[ -z "$v" || "$v" == "CPUTime" ]] && { echo 0; return; }
+    if [[ "$v" == *-* ]]; then days="${v%%-*}"; rest="${v#*-}"; else rest="$v"; fi
+    rest="${rest%%.*}"                     # drop fractional seconds
+    IFS=: read -r hh mm ss <<< "$rest"
+    # pad missing fields when sacct emits MM:SS only
+    [[ -z "$ss" ]] && { ss="$mm"; mm="$hh"; hh=0; }
+    echo $(( 10#$days*86400 + 10#$hh*3600 + 10#$mm*60 + 10#$ss ))
+}
+
+_sum_totalcpu() {  # sum TotalCPU over a job's per-task rows (skip sub-steps)
+    local jobid="$1" total=0 line
+    while IFS='|' read -r jid tcpu; do
+        # keep real job/task rows; drop ".batch"/".extern"/"...0" step rows
+        [[ "$jid" == *.* ]] && continue
+        total=$(( total + $(_cpu_secs "$tcpu") ))
+    done < <(sacct -j "$jobid" --format=JobID,TotalCPU --noheader --parsable2 2>/dev/null)
+    echo "$total"
+}
+
+if [[ -n "${ARRAY_JOB_ID:-}" ]]; then
+    blocks_cpu="$(_sum_totalcpu "$ARRAY_JOB_ID")"
+    aggr_cpu="$(_sum_totalcpu "${SLURM_JOB_ID:-}")"
+    cpu=$(( blocks_cpu + aggr_cpu ))
+    if (( cpu > 0 )); then
+        printf 'Total tile CPU time (all blocks + aggregator): %02d:%02d:%02d (%d s), tile %s\n' \
+            $(( cpu / 3600 )) $(( (cpu % 3600) / 60 )) $(( cpu % 60 )) \
+            "$cpu" "$TILE_ID"
+    else
+        echo "Total tile CPU time: no TotalCPU found in sacct for job $ARRAY_JOB_ID."
+    fi
+else
+    echo "Total tile CPU time: ARRAY_JOB_ID not set; cannot compute."
+fi
