@@ -1,5 +1,5 @@
 ## Data available to download
-- DL_MBPV_v1: . Fields: "date_iso" in format "yyyy-mm-dd", and "class_id" which takes values 1 ("Cuts") and 2 ("Fires").
+- DL_MBPV_v1: `DL_MBPV_v1_20230201_20230501_T5_A10.zip`. Fields: "date_iso" in format "yyyy-mm-dd", and "class_id" which takes values 1 ("Cuts") and 2 ("Fires"). This is Geopackage file with predictions for Portugal for the time period 2023-02-01 to 2023-05-01 (February, March and April 2023)
 - CCD_MBPV_v1: `MBPV_v1.7z` zipped file (open with `7-zip` and password). It includes 12 bimensal maps for 2023-2024 (see below), each one with predicted vegetation loss polygons for the whole Portugal with the following fields: 
 fid,
 date_value,
