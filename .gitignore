@@ -22,3 +22,5 @@ scripts/chips/copy_chips_S2_dates.py
 *.gpkg-wal
 
 scripts/pybacdm/cpca070342024_shared/predict_pipeline/postprocess/CCDC_Mask_dissolve.gpkg
+
+scripts/cpca070342024_shared/predict_pipeline/**/test_*.py
