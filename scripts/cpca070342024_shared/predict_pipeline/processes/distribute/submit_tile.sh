@@ -35,8 +35,8 @@
 #       USE_DATE_CLUSTERS=0 TARGET_DATES=2025-11-15,2025-12-01
 #
 # Optional knobs (KEY=VALUE):
-#   MODEL=enet_16bit    model package directory name under <shared>/ (the
-#                       parent of distribute/). Each model package exposes the
+#   MODEL=enet_16bit    model package directory name under <shared>/models/
+#                       (sibling of distribute/). Each model package exposes the
 #                       same interface (predict.load_model,
 #                       predict.predict_before_after_chips, DEFAULT_WEIGHTS,
 #                       CLOSING_RADII — see bacdm/__init__.py for the
@@ -237,7 +237,13 @@ _tee_pid=$!   # wait on this at the end so tee flushes before the script exits
 # (Reads the HDF5 once on the login node; cheap — just opens attrs and
 # the xs/ys arrays.)
 DISTRIBUTE_DIR="$(cd "$(dirname "$0")" && pwd)"
+# SHARED_DIR = processes/ (parent of distribute/): the python-path root for the
+# shared subpackages (input_setup, composite_shift_chips, postprocess).
 SHARED_DIR="$(dirname "$DISTRIBUTE_DIR")"
+# Model packages live under predict_pipeline/models/ — a sibling of processes/,
+# i.e. one level ABOVE SHARED_DIR. Imported by bare name with this dir on
+# PYTHONPATH (matches predict_block.py's sys.path setup).
+MODELS_DIR="$(dirname "$SHARED_DIR")/models"
 VENV="${VENV:-/users1/cpca070342024/shared/vchips/venv}"
 
 # ── Resolve TARGET_DATES (+ DATE_CLUSTERS) ────────────────────────────────
@@ -291,19 +297,19 @@ export TARGET_DATES
 export DATE_CLUSTERS
 
 # ── Validate the model package + resolve default weights ──────────────────
-# A model package is any <SHARED_DIR>/<name>/ with a predict.py. When
+# A model package is any <MODELS_DIR>/<name>/ with a predict.py. When
 # WEIGHTS_PATH is unset, ask the package for its DEFAULT_WEIGHTS
-if [[ ! -f "$SHARED_DIR/$MODEL/predict.py" ]]; then
-    echo "Unknown MODEL '$MODEL' — no $SHARED_DIR/$MODEL/predict.py" >&2
+if [[ ! -f "$MODELS_DIR/$MODEL/predict.py" ]]; then
+    echo "Unknown MODEL '$MODEL' — no $MODELS_DIR/$MODEL/predict.py" >&2
     echo "Available model packages:" >&2
-    for p in "$SHARED_DIR"/*/predict.py; do
+    for p in "$MODELS_DIR"/*/predict.py; do
         [[ -f "$p" ]] && echo "  $(basename "$(dirname "$p")")" >&2
     done
     exit 1
 fi
 if [[ -z "${WEIGHTS_PATH:-}" ]]; then
     WEIGHTS_PATH="$(
-        PYTHONPATH="$SHARED_DIR" "$VENV/bin/python" -c "
+        PYTHONPATH="$MODELS_DIR" "$VENV/bin/python" -c "
 import importlib
 print(importlib.import_module('$MODEL').DEFAULT_WEIGHTS)
 "

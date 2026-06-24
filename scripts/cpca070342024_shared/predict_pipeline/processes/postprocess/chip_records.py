@@ -61,23 +61,24 @@ def _model_pkg():
     """Import the active model package (MODEL env var, default 'bacdm').
 
     Mirrors the resolution polygonize.py does, so the chip-level close reads
-    the SAME per-class radii as the block-level close. Model packages live
-    next to distribute/ + postprocess/ under <shared>/.
+    the SAME per-class radii as the block-level close. Model packages live in
+    predict_pipeline/models/ — two levels up from this file
+    (processes/postprocess/ -> predict_pipeline/) then /models.
     """
     model = os.environ.get("MODEL", "bacdm")
     import sys
-    shared = str(Path(__file__).resolve().parent.parent)
-    if shared not in sys.path:
-        sys.path.insert(0, shared)
+    models_dir = str(Path(__file__).resolve().parent.parent.parent / "models")
+    if models_dir not in sys.path:
+        sys.path.insert(0, models_dir)
     try:
         return importlib.import_module(model)
     except ImportError as exc:
         available = sorted(
-            p.parent.name for p in Path(shared).glob("*/predict.py")
+            p.parent.name for p in Path(models_dir).glob("*/predict.py")
         )
         raise SystemExit(
             f"[chip_records] Could not import model package '{model}': {exc}\n"
-            f"Available model packages: {available}"
+            f"Available model packages under {models_dir}: {available}"
         )
 
 

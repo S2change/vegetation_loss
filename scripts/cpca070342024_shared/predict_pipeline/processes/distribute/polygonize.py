@@ -36,24 +36,25 @@ CONNECTIVITY = 4
 # close in <model>.predict.postprocess_prediction so the two stages can't
 # drift. They come from the active model package — selected by the MODEL
 # env var (same knob predict_block.py uses to pick the model), defaulting
-# to bacdm. Model packages sit next to distribute/ under <shared>/, so put
-# <shared>/ on the path here.
+# to bacdm. Model packages live in predict_pipeline/models/ — two levels up
+# from this file (processes/distribute/ -> predict_pipeline/) then /models —
+# so put that dir on the path here.
 import importlib as _importlib
 import os as _os
 import sys as _sys
 from pathlib import Path
-_sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+_MODELS_DIR = Path(__file__).resolve().parent.parent.parent / "models"
+_sys.path.insert(0, str(_MODELS_DIR))
 _MODEL = _os.environ.get("MODEL", "bacdm")
 try:
     _model_pkg = _importlib.import_module(_MODEL)
 except ImportError as _exc:
     _available = sorted(
-        p.parent.name
-        for p in (Path(__file__).resolve().parent.parent).glob("*/predict.py")
+        p.parent.name for p in _MODELS_DIR.glob("*/predict.py")
     )
     raise SystemExit(
         f"[polygonize] Could not import model package '{_MODEL}': {_exc}\n"
-        f"Available model packages: {_available}"
+        f"Available model packages under {_MODELS_DIR}: {_available}"
     )
 DEFAULT_CLOSING_RADII = getattr(_model_pkg, "CLOSING_RADII", {})
 # Fallback radius for classes absent from CLOSING_RADII.

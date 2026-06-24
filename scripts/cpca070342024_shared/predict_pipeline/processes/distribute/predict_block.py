@@ -19,8 +19,8 @@ set them without re-templating Python source):
                       "2025-11-15,2025-12-01".
 
   Optional
-    MODEL             Model package directory name under <shared>/ (default
-                      "bacdm"; e.g. "enet_8bit"). The package must
+    MODEL             Model package directory name under <shared>/models/
+                      (default "bacdm"; e.g. "enet_8bit"). The package must
                       expose predict.load_model / predict_before_after_chips
                       and DEFAULT_WEIGHTS — see bacdm/__init__.py for the
                       interface contract.
@@ -79,10 +79,16 @@ import numpy as np
 import psutil
 import torch
 
-# Make the model packages importable. They sit next to distribute/ under
-# <shared>/ (bacdm/, enet_8bit/, ...), so we put <shared>/ on the path.
-_HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(_HERE.parent))                          # shared/ (for <model>.*)
+# Layout: predict_pipeline/{processes/{distribute, input_setup,
+# composite_shift_chips, postprocess}, models/{bacdm, enet_8bit, ...}}.
+# Put processes/ on the path for the shared subpackages, and models/ (one level
+# above processes/) for the model packages, which are imported by their bare
+# name via the MODEL env var.
+_HERE = Path(__file__).resolve().parent                        # processes/distribute
+_PROCESSES = _HERE.parent                                      # processes/
+_MODELS_DIR = _PROCESSES.parent / "models"                     # predict_pipeline/models
+sys.path.insert(0, str(_PROCESSES))                            # shared subpackages
+sys.path.insert(0, str(_MODELS_DIR))                           # model packages
 
 from input_setup import (
     read_block, get_block_grid_shape,
@@ -106,7 +112,7 @@ from polygonize import (
 )
 
 # ── Model selection ──────────────────────────────────────────────────────────
-# MODEL names a model package directory under <shared>/ (default bacdm).
+# MODEL names a model package directory under <shared>/models/ (default bacdm).
 # Every model package exposes the same interface — predict.load_model,
 # predict.predict_before_after_chips, DEFAULT_WEIGHTS, CLOSING_RADII — see
 # bacdm/__init__.py for the contract. polygonize (imported above) reads the
@@ -117,11 +123,11 @@ try:
     _model_predict = importlib.import_module(f"{MODEL}.predict")
 except ImportError as exc:
     _available = sorted(
-        p.parent.name for p in _HERE.parent.glob("*/predict.py")
+        p.parent.name for p in _MODELS_DIR.glob("*/predict.py")
     )
     raise SystemExit(
         f"[predict_block] Could not import model package '{MODEL}': {exc}\n"
-        f"Available model packages under {_HERE.parent}: {_available}"
+        f"Available model packages under {_MODELS_DIR}: {_available}"
     )
 load_model = _model_predict.load_model
 predict_before_after_chips = _model_predict.predict_before_after_chips
