@@ -1,1 +1,1 @@
-- `test_real_hdf5_chip_chunked.py` performs tests on a "real" `hdf5` file created with `create_hdf5.py` from `geotiff` files at CNCA. The `hdf5` file is supposedly chip-chunked.
+
