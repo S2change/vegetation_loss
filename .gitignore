@@ -24,3 +24,4 @@ scripts/chips/copy_chips_S2_dates.py
 scripts/pybacdm/cpca070342024_shared/predict_pipeline/postprocess/CCDC_Mask_dissolve.gpkg
 
 scripts/cpca070342024_shared/predict_pipeline/**/test_*.py
+scripts/cpca070342024_shared/predict_pipeline/inspect_hdf5.py
