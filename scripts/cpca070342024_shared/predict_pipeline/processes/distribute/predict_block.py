@@ -272,6 +272,12 @@ def main() -> None:
     print(f"Input dtype:    {'uint16 (raw, nodata 65535)' if not stretch else 'uint8 (stretched, nodata 255)'}")
     print(f"Weights:        {weights_path}")
     print(f"Output dir:     {output_dir}")
+    print(f"Cluster window: "
+          f"{os.environ.get('START_DATE') or 'unset'} -> "
+          f"{os.environ.get('END_DATE') or 'unset'}")
+    print(f"Read window:    "
+          f"{os.environ.get('READ_START_DATE') or 'unbounded'} -> "
+          f"{os.environ.get('READ_END_DATE') or 'unbounded'}")
     print(f"Target dates:   {[date.fromordinal(int(d)).isoformat() for d in target_dates]}")
     print(f"Max comp. days: {max_composite_days if max_composite_days is not None else 'unbounded'}")
     print(f"Batch size:     {batch_size}")
@@ -295,9 +301,6 @@ def main() -> None:
     read_start_ord = _read_ordinal("READ_START_DATE")
     read_end_ord   = _read_ordinal("READ_END_DATE")
     print(f"\nStep 1: reading chip-block from HDF5...")
-    print(f"  Read window:  "
-          f"{os.environ.get('READ_START_DATE') or 'unbounded'} -> "
-          f"{os.environ.get('READ_END_DATE') or 'unbounded'}")
     t0 = time.perf_counter()
     block, ts, position = read_block(hdf5_path, block_row, block_col,
                                      ts_start_ordinal=read_start_ord,
