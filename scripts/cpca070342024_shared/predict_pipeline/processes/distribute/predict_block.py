@@ -635,7 +635,11 @@ def _write_block_gpkg(rows: list, output_dir: str, tile_id: str,
     import geopandas as gpd
     if rows:
         gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=crs)
-        gdf = gdf[_GPKG_COLUMNS]
+        # Keep the fixed schema, plus `confidence` when the rows carry it
+        # (OUTPUT_CONFIDENCE=1) — otherwise it would be silently dropped here.
+        cols = _GPKG_COLUMNS + (["confidence"] if "confidence" in gdf.columns
+                                else [])
+        gdf = gdf[cols]
     else:
         gdf = gpd.GeoDataFrame(
             columns=_GPKG_COLUMNS, geometry="geometry", crs=crs,
