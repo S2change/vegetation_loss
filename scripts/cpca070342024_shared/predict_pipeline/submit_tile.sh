@@ -256,6 +256,7 @@ _tee_pid=$!   # wait on this at the end so tee flushes before the script exits
 #   models/                model packages, imported by bare name (MODELS_DIR)
 PIPELINE_ROOT="$(cd "$(dirname "$0")" && pwd)"
 DISTRIBUTE_DIR="$PIPELINE_ROOT/processes/distribute"
+TILE_POSTPROCESS_DIR="$PIPELINE_ROOT/processes/tile_postprocess"
 SHARED_DIR="$PIPELINE_ROOT/processes"
 MODELS_DIR="$PIPELINE_ROOT/models"
 # Python venv with the pipeline's dependencies (see requirements.txt). Defaults
@@ -490,6 +491,8 @@ ERR_JOB_ID=$(
 echo "Submitted block-error job: $ERR_JOB_ID  (afterany:$ARRAY_JOB_ID)"
 
 # ── Submit aggregator (depends on array success) ──────────────────────────
+export TILE_POSTPROCESS_DIR
+
 AGGR_JOB_ID=$(
     sbatch --parsable \
         --dependency=afterok:"$ARRAY_JOB_ID" \
@@ -497,7 +500,7 @@ AGGR_JOB_ID=$(
         --output="$LOG_DIR/aggregate.out" \
         --error="$LOG_DIR/aggregate.err" \
         --job-name="aggr_${TILE_ID}" \
-        "$DISTRIBUTE_DIR/run_aggregate_slurm.sh"
+        "$TILE_POSTPROCESS_DIR/run_aggregate_slurm.sh"
 )
 echo "Submitted aggregator job: $AGGR_JOB_ID  (afterok:$ARRAY_JOB_ID)"
 echo

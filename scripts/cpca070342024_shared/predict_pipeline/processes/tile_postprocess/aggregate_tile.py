@@ -53,8 +53,8 @@ except ImportError:
     _HAVE_H5PY = False
 
 _HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(_HERE.parent))   # shared/
-sys.path.insert(0, str(_HERE))          # distribute/
+sys.path.insert(0, str(_HERE.parent))   # processes/ (for `postprocess` package)
+sys.path.insert(0, str(_HERE))          # tile_postprocess/
 
 from postprocess.voted_output import read_voted_block
 from postprocess.vote import LIVE_H, LIVE_W

@@ -16,9 +16,7 @@ set -euo pipefail
 
 module purge
 module load gcc13/openmpi/4.1.6
-# VENV is normally exported by submit_tile.sh (predict_pipeline/.venv). The
-# fallback derives the same path from this script's location: it lives in
-# processes/distribute/, so the pipeline root (holding .venv) is two levels up.
+# venv fallback incase not shared from submit_tile.sh
 source "${VENV:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/.venv}/bin/activate"
 # Clear any inherited PYTHONPATH: the CVMFS Python env puts its own
 # site-packages on PYTHONPATH, which sits AHEAD of the venv on sys.path and
@@ -26,8 +24,8 @@ source "${VENV:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/.venv}/bin/a
 # breaks the venv's torch via the `TypeIs` import).
 unset PYTHONPATH
 
-: "${DISTRIBUTE_DIR:?DISTRIBUTE_DIR must be exported by submit_tile.sh}"
-python "$DISTRIBUTE_DIR/aggregate_tile.py"
+: "${TILE_POSTPROCESS_DIR:?TILE_POSTPROCESS_DIR must be exported by submit_tile.sh}"
+python "$TILE_POSTPROCESS_DIR/aggregate_tile.py"
 
 echo "Aggregator finished for tile $TILE_ID."
 
