@@ -75,24 +75,18 @@ Entregáveis:
   * E3.1 – Manual de utilização operacional da metodologia implementada na cadeia de produção da DGT. [Entregável 3.1 (pdf), outubro 2024](documents/deliverables/Entregavel_3.1_v3.pdf).
   * E3.2 – Demonstrador prático: mapas nacionais vetoriais a delimitar manchas de perda recente de floresta e mato superiores a 0.5 ha com uma frequência bimestral relativos a um período contínuo de dois anos entre 2023 e 2025. [Entregável 3.2 (pdf)](documents/deliverables/Entregavel_3_2_v1.pdf).
   * E3.3 – Relatório de validação dos mapas nacionais. [Entregável 3.3 (pdf), novembro 2025](documents/deliverables/Entregavel_3_3_AB_v1.pdf).
-  * E3.4 – Aplicação informática que possa ser integrada na cadeia de produção da DGT:
+  * E3.4 – Aplicação informática que possa ser integrada na cadeia de produção da DGT. [Entregável 3.4 (pdf), novembro 2025, revisto em junho de 2026](documents/deliverables/Entregavel_3_4_aplicacao_informatica.pdf).
 
-    Os scripts (que foram desenvolvidos para serem compatíveis com o pipeline de processamento de dados Sentinel-2 em ambiente HPC) estão disponíveis neste repositório. Em particular, foi criado e testado o código para as  tarefas abaixo:
-    - Processamento da série temporal para Portugal Continental 2017-2024 e aplicação do algoritmo de deteção de alteração CCD, cujo output é um conjunto de ficheiros em formato `parquet` em que cada linha corresponde a um pixel Sentinel-2 e a um segmento identificado pelo algoritmo. O processamento foi aplicado aos pixels pertencentes à máscara de potenciais perdas de vegetação para Portugal Continental fornecida pela DGT (aprox. 500 M pixels Sentinel 2 com resolução 10 m). [Script](scripts/pyccd)
-    - Conversão dos resultado os formato `parquet` para mapas bimestrais em formato `geotiff`. Cada pixel agora possui quatro bandas: [Script](scripts/visualisations/ccd_to_raster.py): `last_tEnd`: data final do segmento antes da quebra; `last_tBreak`: data da quebra mais recente;  `is_break`: indicador booleano que sinaliza se ocorreu uma alteração: `1` se for uma quebra conhecida, `0` se não houve alteração, `-1` se não for possível determinar se ocorreu uma quebra ou um aumento (casos em que o segmento pós-quebra não foi formado); `ndvi_last_tEnd`: valor do NDVI calculado em last_tEnd.
-    - Criação de mapas vectoriais bimestrais a partir dos mapas raster. [Script](scripts/visualisations/graph_raster_to_polygons.py)
-    - Criação dos mapas nacionais bimestrais de perdas de vegetação. [Script](scripts/visualisations/ccd_polygons_to_national_maps.py)
-    - Validação: ver entregável em **E3.3** com links para scripts.
       
 **Tarefa 4** – Adaptação e implementação operacional na cadeia de produção da DGT de uma metodologia automática com base em imagens de satélite para a identificação sistemática do agente causador das perdas recentes de floresta e mato delimitadas no produto da tarefa 3, com uma periodicidade de pelo menos dois meses.
 
 *Duração: Meses 13-24*
 
 Entregáveis:
-  * E4.1 – Manual de utilização operacional da metodologia implementada na cadeia de produção da DGT. [Entregável 4.1 (pdf), novembro 2025](documents/deliverables/Entregavel_41_nov_2025.pdf).
-  * E4.2 – Demonstrador prático: mapas nacionais a identificar o agente causador das perdas recentes de floresta e mato superiores a 0.5 ha produzidas na tarefa 3.
-  * E4.3 – Relatório de validação dos mapas nacionais.
-  * E4.4 – Aplicação informática que possa ser integrada na cadeia de produção da DGT. 
+  * E4.1 – Manual de utilização operacional da metodologia implementada na cadeia de produção da DGT. [Entregável 4.1 (pdf), novembro 2025, revisto junho 2026](documents/deliverables/Entregavel_41_nov_2025.pdf).
+  * E4.2 – Demonstrador prático: mapas nacionais a identificar o agente causador das perdas recentes de floresta e mato superiores a 0.5 ha produzidas na tarefa 3. [Entregável 4.2 (pdf), junho 2026](documents/deliverables/Entregavel_42.pdf).
+  * E4.3 – Relatório de validação dos mapas nacionais. [Entregável 4.3 (pdf), junho 2026](documents/deliverables/Entregavel_43.pdf).
+  * E4.4 – Aplicação informática que possa ser integrada na cadeia de produção da DGT. [Entregável 4.4 (pdf), junho 2026](documents/deliverables/Entregavel_44.pdf).
 
 ## Aditamentos (setembro 2025 e março 2026)
 
