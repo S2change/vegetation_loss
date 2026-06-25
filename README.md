@@ -97,12 +97,9 @@ Ver [cronograma](cronograma_aditamento_contrato_set_2025.png).
 
 ## Produtos e sumário de resultados
 
-<details markdown="block">
-<summary> Bases de dados de referência e produtos cartográficos de perdas de vegetação </summary>
 
-* [Link](data_info)
-* [Sumário de resultados](documents/deliverables/Entregavel_resumo.pdf)
+- [Link](data_info)
+- [Sumário de resultados](documents/deliverables/Entregavel_resumo.pdf)
 
-</details>
 
 
