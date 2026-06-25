@@ -83,25 +83,21 @@ Entregáveis:
 *Duração: Meses 13-24*
 
 Entregáveis:
-  * E4.1 – Manual de utilização operacional da metodologia implementada na cadeia de produção da DGT. [Entregável 4.1 (pdf), novembro 2025, revisto junho 2026](documents/deliverables/Entregavel_41_nov_2025.pdf).
-  * E4.2 – Demonstrador prático: mapas nacionais a identificar o agente causador das perdas recentes de floresta e mato superiores a 0.5 ha produzidas na tarefa 3. [Entregável 4.2 (pdf), junho 2026](documents/deliverables/Entregavel_42.pdf).
-  * E4.3 – Relatório de validação dos mapas nacionais. [Entregável 4.3 (pdf), junho 2026](documents/deliverables/Entregavel_43.pdf).
-  * E4.4 – Aplicação informática que possa ser integrada na cadeia de produção da DGT. [Entregável 4.4 (pdf), junho 2026](documents/deliverables/Entregavel_44.pdf).
+  * E4.1 – Manual de utilização operacional da metodologia implementada na cadeia de produção da DGT. [Entregável 4.1 (pdf), novembro 2025, revisto junho 2026](documents/deliverables/Entregavel_41_jun_2026.pdf).
+  * E4.2 – Demonstrador prático: mapas nacionais a identificar o agente causador das perdas recentes de floresta e mato superiores a 0.5 ha produzidas na tarefa 3. [Entregável 4.2 (pdf), junho 2026](documents/deliverables/Entregavel_42_jun_2026.pdf).
+  * E4.3 – Relatório de validação dos mapas nacionais. [Entregável 4.3 (pdf), junho 2026](documents/deliverables/entregavel_4_3_validacao_mapas_nacionais_v0.pdf).
+  * E4.4 – Aplicação informática que possa ser integrada na cadeia de produção da DGT. [Entregável 4.4 (pdf), junho 2026](documents/deliverables/Entregavel_4_4_aplicacao_informatica_jun_2026.pdf).
 
 ## Aditamentos (setembro 2025 e março 2026)
 
 - Entregáveis E2.3, E3.2, E3.3 e E4.1; contrato 20/4/2025; aditamento: 20/11/2025 (10% do valor contratado)
 - Entregáveis E3.4, E4.2, E4.3 e E4.4; contrato 19/10/2025; aditamento: 30/06/2026 (10% do valor contratado)
 
-Ver [cronograma](cronograma_aditamento_contrato_set_2025.png).
+## Produtos e sumário de resultados
 
-## Produtos
 
-<details markdown="block">
-<summary> Bases de dados de referência e produtos cartográficos de perdas de vegetação </summary>
+- [Link](data_info)
+- [Sumário de resultados](documents/deliverables/Entregavel_resumo.pdf)
 
-* [Link](data_info)
-
-</details>
 
 
