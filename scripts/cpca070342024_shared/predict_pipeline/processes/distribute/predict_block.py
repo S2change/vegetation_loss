@@ -238,6 +238,20 @@ def main() -> None:
     # shrinking the time axis. Unset (default) = use every raw timestep.
     date_clusters = parse_date_clusters(os.environ.get("DATE_CLUSTERS", ""))
 
+    # Optional per-pixel / per-patch change confidence. When OUTPUT_CONFIDENCE
+    # is on, the model returns a per-pixel change-prob (0–100), votes carry it
+    # through, and finalize emits a per-pixel mean confidence that polygonize
+    # averages into a per-patch confidence attribute. Only enet_16bit supports
+    # the model-side return today; guard so other models fail loudly rather
+    # than silently dropping it. Off by default.
+    output_confidence = (os.environ.get("OUTPUT_CONFIDENCE", "0")
+                         not in ("0", "", "false", "False"))
+    if output_confidence and MODEL != "enet_16bit":
+        raise SystemExit(
+            f"[predict_block] OUTPUT_CONFIDENCE=1 is only supported by "
+            f"MODEL=enet_16bit, not '{MODEL}'."
+        )
+
     # Bounds check the block coordinates against the HDF5's grid shape so
     # a misconfigured array index fails fast with a clear message instead
     # of read_block raising an opaque slice-bounds error.
@@ -267,6 +281,7 @@ def main() -> None:
           f"{f'per-class ({MODEL}.CLOSING_RADII)' if closing_radius is None else closing_radius}")
     print(f"Min patch m^2:  {min_patch_m2}")
     print(f"Date clusters:  {len(date_clusters) if date_clusters else 'off (raw timesteps)'}")
+    print(f"Confidence:     {'on (0-100 per pixel/patch)' if output_confidence else 'off'}")
     print(f"\n[RSS] After imports:                   {rss_mb():7.1f} MB")
 
     # ── Step 1: read chip block ───────────────────────────────────────────
@@ -425,17 +440,19 @@ def main() -> None:
     kind_counts: Counter[str] = Counter()
 
     voters: dict[int, VoteAccumulator] = {
-        int(d): VoteAccumulator(classes=vote_classes)
+        int(d): VoteAccumulator(classes=vote_classes,
+                                track_confidence=output_confidence)
         for d in target_dates[valid_dates_mask]
     }
 
     def vote_one(label_map: np.ndarray, chip_kind: str,
-                 grid_position: tuple[int, int], date_ordinal: int) -> None:
+                 grid_position: tuple[int, int], date_ordinal: int,
+                 prob_map: np.ndarray | None = None) -> None:
         nonlocal t_vote_total
         gr, gc = grid_position
         nw_y, nw_x = chip_nw_pixel_offset(chip_kind, gr, gc)
         t0 = time.perf_counter()
-        voters[date_ordinal].add(label_map, nw_y, nw_x)
+        voters[date_ordinal].add(label_map, nw_y, nw_x, prob_map=prob_map)
         t_vote_total += time.perf_counter() - t0
 
     pair_iter = generate_shifted_chips(
@@ -457,7 +474,12 @@ def main() -> None:
         # size filtering deferred to the block/master stages where patches are
         # whole. Per-class radii come from the active MODEL package, matching
         # the block-level close (polygonize.close_labels).
-        labels = predict_before_after_chips(before, after, model)
+        if output_confidence:
+            labels, confs = predict_before_after_chips(
+                before, after, model, return_confidence=True)
+        else:
+            labels = predict_before_after_chips(before, after, model)
+            confs = None
         t_inference_total += time.perf_counter() - t0
         t0 = time.perf_counter()
         labels = np.stack([
@@ -466,12 +488,14 @@ def main() -> None:
         ])
         t_postprocess_total += time.perf_counter() - t0
         n_pairs += len(batch)
-        for p, label in zip(batch, labels):
+        for i, (p, label) in enumerate(zip(batch, labels)):
             kind_counts[p.chip_kind] += 1
             uniq, cnts = np.unique(label, return_counts=True)
             for u, c in zip(uniq, cnts):
                 class_counts[int(u)] += int(c)
-            vote_one(label, p.chip_kind, p.grid_position, p.date_ordinal)
+            prob_map = confs[i] if confs is not None else None
+            vote_one(label, p.chip_kind, p.grid_position, p.date_ordinal,
+                     prob_map=prob_map)
         batch.clear()
 
     for pair in pair_iter:
@@ -504,11 +528,14 @@ def main() -> None:
     # Resolution: write per-target-date labels, filling invalid dates with
     # zeros (matching the early-exit path above). Same shape regardless
     # of which dates had data.
-    voted_labels = np.zeros(
-        (len(target_dates),
-         voters[next(iter(voters))].live_h,
-         voters[next(iter(voters))].live_w),
-        dtype=np.uint8,
+    _live_h = voters[next(iter(voters))].live_h
+    _live_w = voters[next(iter(voters))].live_w
+    voted_labels = np.zeros((len(target_dates), _live_h, _live_w), dtype=np.uint8)
+    # Per-pixel confidence (0–100, 255=nodata) parallel to voted_labels, only
+    # when tracking. Invalid/zero-filled dates stay all-nodata.
+    voted_confidence = (
+        np.full((len(target_dates), _live_h, _live_w), 255, dtype=np.uint8)
+        if output_confidence else None
     )
     print(f"\nStep 5b: voting (threshold={vote_threshold}, classes={vote_classes})")
     for i, d in enumerate(target_dates):
@@ -516,7 +543,11 @@ def main() -> None:
         if ordinal in voters:
             acc = voters[ordinal]
             n_votes = acc.n_votes_by_class()
-            voted_labels[i] = acc.finalize(threshold=vote_threshold)
+            if output_confidence:
+                voted_labels[i], voted_confidence[i] = acc.finalize(
+                    threshold=vote_threshold, return_confidence=True)
+            else:
+                voted_labels[i] = acc.finalize(threshold=vote_threshold)
             uniq, cnts = np.unique(voted_labels[i], return_counts=True)
             post = {int(u): int(c) for u, c in zip(uniq, cnts) if u != 0}
             iso = date.fromordinal(ordinal).isoformat()
@@ -539,6 +570,7 @@ def main() -> None:
         world_origin_y=position.world_origin_y,
         pixel_res=position.pixel_res,
         threshold=vote_threshold,
+        confidence=voted_confidence,
     )
     write_s = time.perf_counter() - t0
     npz_bytes = os.path.getsize(npz_path)
@@ -570,6 +602,8 @@ def main() -> None:
             world_origin_y=position.world_origin_y,
             pixel_res=position.pixel_res,
             min_area_m2=min_patch_m2,
+            confidence_2d=(voted_confidence[i]
+                           if voted_confidence is not None else None),
         )
         rows.extend(polygons_to_records(patches, tile_id))
 

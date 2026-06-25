@@ -49,6 +49,7 @@ def write_voted_block(output_dir: str,
                       world_origin_y: float,
                       pixel_res: float,
                       threshold: int,
+                      confidence: np.ndarray | None = None,
                       ) -> str:
     """Write one block's voted output to a compressed .npz file.
 
@@ -71,6 +72,10 @@ def write_voted_block(output_dir: str,
         UTM position of the LIVE area's NW corner + pixel size in metres.
     threshold : int
         Vote threshold used to produce `labels`. Stored for traceability.
+    confidence : (n_dates, LIVE_H, LIVE_W) uint8 or None
+        Optional per-pixel change confidence aligned to `labels` (0–100,
+        255 = no detection / nodata). Stored under key `confidence` only when
+        given, so confidence-off runs keep the original .npz schema.
 
     Returns
     -------
@@ -88,6 +93,17 @@ def write_voted_block(output_dir: str,
             f"labels first axis ({labels.shape[0]})"
         )
 
+    # Optional confidence raster: must match labels' shape so it stays aligned
+    # per pixel. Stored under `confidence` only when given.
+    extra = {}
+    if confidence is not None:
+        if confidence.shape != labels.shape:
+            raise ValueError(
+                f"confidence shape {confidence.shape} must match labels "
+                f"{labels.shape}"
+            )
+        extra["confidence"] = confidence.astype(np.uint8, copy=False)
+
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     path = voted_path_for_block(output_dir, tile_id, block_row, block_col)
 
@@ -102,6 +118,7 @@ def write_voted_block(output_dir: str,
         world_origin_y=np.float64(world_origin_y),
         pixel_res=np.float64(pixel_res),
         threshold=np.uint8(threshold),
+        **extra,
     )
     return path
 

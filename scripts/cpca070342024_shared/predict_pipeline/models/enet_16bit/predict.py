@@ -90,7 +90,7 @@ def load_model(weights_path, device=None):
 # ── Public inference API ──────────────────────────────────────────────────────
 
 def predict_before_after_chips(before_batch, after_batch, model_or_path,
-                               device=None):
+                               device=None, return_confidence=False):
     """Segment a batch of before/after 256×256 chip pairs.
 
     Returns RAW model output (argmax + any per-class threshold override).
@@ -108,12 +108,22 @@ def predict_before_after_chips(before_batch, after_batch, model_or_path,
                     Pass a pre-loaded model when calling this function repeatedly to avoid
                     reloading weights on every batch.
     device        : torch.device or None (auto-detected)
+    return_confidence : bool (default False)
+                    When True, also return a per-pixel change-confidence map
+                    (the softmax probability of the predicted class, ×100, as
+                    uint8 0–100). Off by default so callers that only need
+                    labels are unaffected.
 
     Returns
     -------
     labels : np.ndarray, shape (B, H, W), dtype uint8
              Predicted class index per pixel.
              0 = Background, 1 = Cuts, 2 = Fires  (see configs.CLASS_NAMES)
+    confidence : np.ndarray, shape (B, H, W), dtype uint8  (only if
+             return_confidence=True)
+             round(100 * softmax prob of the predicted class), gathered AFTER
+             the threshold overrides so it matches `labels`. 0 where the pixel
+             is Background (no change), 255 where nodata.
     """
     if device is None:
         device = torch.device(
@@ -161,4 +171,16 @@ def predict_before_after_chips(before_batch, after_batch, model_or_path,
 
     labels = pred.cpu().numpy().astype(np.uint8)
     labels[nodata_mask] = C.NODATA_UINT8
-    return labels
+    if not return_confidence:
+        return labels
+
+    # Per-pixel confidence: softmax prob of the (post-override) predicted
+    # class, gathered with the final `pred` so it stays consistent with the
+    # labels. Stored as uint8 0–100 (×100, rounded); 0 where Background (no
+    # change), 255 (NODATA_UINT8) where input was nodata.
+    pred_prob = torch.gather(probs, 1, pred.unsqueeze(1)).squeeze(1)  # (B,H,W)
+    conf = (pred_prob * 100.0).round().clamp_(0, 100).to(torch.uint8)
+    confidence = conf.cpu().numpy()
+    confidence[labels == 0] = 0          # 0 = Background (no change)
+    confidence[nodata_mask] = C.NODATA_UINT8
+    return labels, confidence

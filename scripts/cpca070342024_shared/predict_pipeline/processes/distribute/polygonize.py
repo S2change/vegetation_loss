@@ -22,6 +22,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from rasterio.features import shapes as rio_shapes
+from rasterio.features import rasterize as rio_rasterize
 from rasterio.transform import from_origin
 from scipy.ndimage import binary_closing
 from shapely.geometry import shape as shapely_shape
@@ -159,6 +160,9 @@ class PatchPolygon:
     centroid_x: float
     centroid_y: float
     geometry: BaseGeometry
+    # Mean per-pixel change-confidence over the patch (uint8 0–100), or None
+    # when confidence tracking is off. Carried through to the final vector.
+    confidence: int | None = None
 
 
 def block_transform(world_origin_x: float,
@@ -181,6 +185,7 @@ def labels_to_polygons(labels_2d: np.ndarray,
                        world_origin_y: float,
                        pixel_res: float,
                        min_area_m2: float = 0.0,
+                       confidence_2d: np.ndarray | None = None,
                        ) -> list[PatchPolygon]:
     """Polygonize one date's voted LIVE label map.
 
@@ -237,6 +242,19 @@ def labels_to_polygons(labels_2d: np.ndarray,
             if area_m2 < min_area_m2:
                 continue
             centroid = geom.centroid
+            # Mean confidence over this patch's pixels: rasterize the geometry
+            # back to the LIVE grid (same transform/shape, so it aligns with
+            # confidence_2d) and average the valid (0–100) confidence values.
+            patch_conf = None
+            if confidence_2d is not None:
+                patch_mask = rio_rasterize(
+                    [(geom, 1)], out_shape=labels_2d.shape,
+                    transform=transform, fill=0, dtype="uint8",
+                ).astype(bool)
+                vals = confidence_2d[patch_mask]
+                vals = vals[vals <= 100]          # drop 255 nodata
+                if vals.size:
+                    patch_conf = int(round(float(vals.mean())))
             out.append(PatchPolygon(
                 date_ordinal=int(date_ordinal),
                 class_id=cls_int,
@@ -245,6 +263,7 @@ def labels_to_polygons(labels_2d: np.ndarray,
                 centroid_x=float(centroid.x),
                 centroid_y=float(centroid.y),
                 geometry=geom,
+                confidence=patch_conf,
             ))
     return out
 
@@ -259,7 +278,7 @@ def polygons_to_records(patches: list[PatchPolygon],
     rows: list[dict] = []
     from datetime import date as _date
     for p in patches:
-        rows.append({
+        row = {
             "tile_id": tile_id,
             "date_ordinal": p.date_ordinal,
             "date_iso": _date.fromordinal(p.date_ordinal).isoformat(),
@@ -269,5 +288,10 @@ def polygons_to_records(patches: list[PatchPolygon],
             "centroid_x": p.centroid_x,
             "centroid_y": p.centroid_y,
             "geometry": p.geometry,
-        })
+        }
+        # Only emit the column when confidence was computed, so default
+        # (confidence-off) runs keep the original schema unchanged.
+        if p.confidence is not None:
+            row["confidence"] = p.confidence
+        rows.append(row)
     return rows

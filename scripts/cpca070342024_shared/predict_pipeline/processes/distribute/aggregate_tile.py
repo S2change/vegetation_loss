@@ -12,6 +12,8 @@ Runs once after all array tasks for a tile complete (gated by the SLURM
     single geometry (per date + class) via unary_union of edge-adjacent
     polygons. Schema: tile_id, date_ordinal, date_iso, class_id,
     n_pixels, area_m2, centroid_x/y, geometry (Polygon, in the tile CRS).
+    A `confidence` column (mean change-confidence 0–100 per patch) is added
+    when the predict step ran with OUTPUT_CONFIDENCE=1.
   - `{TILE_ID}_tile.parquet` (PRIMARY, analysis) — the same patches as
     GeoParquet for fast pandas/geopandas reads.
   - `{TILE_ID}_tile.npz` (AUXILIARY) — the dense `(n_dates, TILE_H, TILE_W)`
@@ -127,9 +129,16 @@ def _dissolve_block_polygons(block_gdf: gpd.GeoDataFrame,
     """
     px_area = float(pixel_res) * float(pixel_res)
     crs = block_gdf.crs
+    # Carry confidence through only if the block polygons have it (i.e. the
+    # predict step ran with OUTPUT_CONFIDENCE=1). When present, a merged patch's
+    # confidence is the n_pixels-weighted mean of the source block patches that
+    # compose it — so a large high-confidence patch isn't pulled down equally by
+    # a tiny low-confidence sliver welded on at a block seam.
+    has_conf = "confidence" in block_gdf.columns
+    out_columns = _VECTOR_COLUMNS + (["confidence"] if has_conf else [])
 
     if len(block_gdf) == 0:
-        return gpd.GeoDataFrame(columns=_VECTOR_COLUMNS, geometry="geometry",
+        return gpd.GeoDataFrame(columns=out_columns, geometry="geometry",
                                 crs=crs)
 
     rows: list[dict] = []
@@ -140,6 +149,9 @@ def _dissolve_block_polygons(block_gdf: gpd.GeoDataFrame,
         geoms = list(merged.geoms) if merged.geom_type == "MultiPolygon" \
             else [merged]
         iso = _date.fromordinal(int(ordinal)).isoformat()
+        # Source patches (with their confidence + n_pixels) for the weighted
+        # average; computed once per group, reused per exploded geom.
+        src = list(grp.itertuples(index=False)) if has_conf else None
         for geom in geoms:
             if geom.is_empty:
                 continue
@@ -147,7 +159,7 @@ def _dissolve_block_polygons(block_gdf: gpd.GeoDataFrame,
             if area_m2 < min_area_m2:
                 continue
             centroid = geom.centroid
-            rows.append({
+            row = {
                 "tile_id": tile_id,
                 "date_ordinal": int(ordinal),
                 "date_iso": iso,
@@ -157,13 +169,28 @@ def _dissolve_block_polygons(block_gdf: gpd.GeoDataFrame,
                 "centroid_x": float(centroid.x),
                 "centroid_y": float(centroid.y),
                 "geometry": geom,
-            })
+            }
+            if has_conf:
+                # n_pixels-weighted mean confidence over the source patches that
+                # fall inside this merged geom (a source patch belongs to the
+                # merged geom that contains its representative point).
+                num = den = 0.0
+                for s in src:
+                    c = getattr(s, "confidence", None)
+                    if c is None or (isinstance(c, float) and np.isnan(c)):
+                        continue
+                    if geom.intersects(s.geometry.representative_point()):
+                        w = float(s.n_pixels)
+                        num += float(c) * w
+                        den += w
+                row["confidence"] = (int(round(num / den)) if den > 0 else None)
+            rows.append(row)
 
     if not rows:
-        return gpd.GeoDataFrame(columns=_VECTOR_COLUMNS, geometry="geometry",
+        return gpd.GeoDataFrame(columns=out_columns, geometry="geometry",
                                 crs=crs)
     out = gpd.GeoDataFrame(rows, geometry="geometry", crs=crs)
-    return out[_VECTOR_COLUMNS]
+    return out[out_columns]
 
 
 def _read_hdf5_crs(hdf5_path: str | None) -> CRS | None:
