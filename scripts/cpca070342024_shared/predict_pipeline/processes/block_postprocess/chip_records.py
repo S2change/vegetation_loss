@@ -63,7 +63,7 @@ def _model_pkg():
     Mirrors the resolution polygonize.py does, so the chip-level close reads
     the SAME per-class radii as the block-level close. Model packages live in
     predict_pipeline/models/ — two levels up from this file
-    (processes/postprocess/ -> predict_pipeline/) then /models.
+    (processes/block_postprocess/ -> predict_pipeline/) then /models.
     """
     model = os.environ.get("MODEL", "bacdm")
     import sys

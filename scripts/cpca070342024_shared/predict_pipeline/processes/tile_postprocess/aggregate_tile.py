@@ -56,8 +56,8 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent))   # processes/ (for `postprocess` package)
 sys.path.insert(0, str(_HERE))          # tile_postprocess/
 
-from postprocess.voted_output import read_voted_block
-from postprocess.vote import LIVE_H, LIVE_W
+from block_postprocess.voted_output import read_voted_block
+from block_postprocess.vote import LIVE_H, LIVE_W
 
 
 # Output column order for the dissolved tile vector (.gpkg / .parquet).

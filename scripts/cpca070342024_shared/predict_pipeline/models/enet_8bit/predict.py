@@ -41,7 +41,7 @@ _MEAN = torch.tensor(configs.NORM_MEAN).view(-1, 1, 1)   # (10, 1, 1)
 _STD  = torch.tensor(configs.NORM_STD).view(-1, 1, 1)    # (10, 1, 1)
 
 # NOTE: chip-level post-processing (per-class morphological closing + small-
-# component removal) lives in postprocess.chip_records.postprocess_prediction,
+# component removal) lives in block_postprocess.chip_records.postprocess_prediction,
 # shared across all models and applied by predict_block.py after this module
 # returns raw labels. configs.CLOSING_RADII / MIN_PATCH_SIZE feed it via the
 # enet_8bit package (see enet_8bit/__init__.py).
@@ -118,7 +118,7 @@ def predict_before_after_chips(before_batch, after_batch, model_or_path,
     Returns RAW model output (argmax + any per-class threshold override).
     Chip-level post-processing — per-class morphological closing and small-
     component removal — is applied downstream by predict_block.py via the
-    shared postprocess.chip_records.postprocess_prediction, so every model
+    shared block_postprocess.chip_records.postprocess_prediction, so every model
     is cleaned up identically and the chip-level close matches the block-
     level one (polygonize.close_labels).
 

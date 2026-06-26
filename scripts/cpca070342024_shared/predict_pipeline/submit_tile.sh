@@ -252,7 +252,7 @@ _tee_pid=$!   # wait on this at the end so tee flushes before the script exits
 # is addressed relative to it:
 #   processes/distribute/  SLURM wrappers + Python entry points (DISTRIBUTE_DIR)
 #   processes/             python-path root for shared subpackages (SHARED_DIR:
-#                          input_setup, composite_shift_chips, postprocess)
+#                          input_setup, composite_shift_chips, block_postprocess)
 #   models/                model packages, imported by bare name (MODELS_DIR)
 PIPELINE_ROOT="$(cd "$(dirname "$0")" && pwd)"
 DISTRIBUTE_DIR="$PIPELINE_ROOT/processes/distribute"

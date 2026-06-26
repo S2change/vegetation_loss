@@ -80,7 +80,7 @@ import psutil
 import torch
 
 # Layout: predict_pipeline/{processes/{distribute, input_setup,
-# composite_shift_chips, postprocess}, models/{bacdm, enet_8bit, ...}}.
+# composite_shift_chips, block_postprocess}, models/{bacdm, enet_8bit, ...}}.
 # Put processes/ on the path for the shared subpackages, and models/ (one level
 # above processes/) for the model packages, which are imported by their bare
 # name via the MODEL env var.
@@ -101,7 +101,7 @@ from composite_shift_chips import (
 # Imported from the submodule (not the package __init__) so rasterio stays off
 # the core composite import path; only pulled in when actually writing TIFs.
 from composite_shift_chips.write_composite_tifs import write_block_composite_tifs
-from postprocess import (
+from block_postprocess import (
     chip_nw_pixel_offset,
     postprocess_prediction,
     VoteAccumulator,
@@ -395,7 +395,7 @@ def main() -> None:
               "+ empty .gpkg and exiting.")
         labels = np.zeros(
             (len(target_dates),
-             1024, 1024),  # default LIVE size — postprocess.vote.LIVE_H/W
+             1024, 1024),  # default LIVE size — block_postprocess.vote.LIVE_H/W
             dtype=np.uint8,
         )
         write_voted_block(
