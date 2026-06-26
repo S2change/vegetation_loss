@@ -88,6 +88,13 @@ identical and forwarded verbatim to each `submit_tile.sh` call. Per tile the wra
 derives `TILE_ID` (the `.h5` filename without extension) and
 `OUTPUT_DIR=<BASE_OUTPUT_DIR>/<TILE_ID>`.
 
+After every tile's aggregator finishes, the wrapper submits one final **grouping
+job** (`run_group_slurm.sh` → `group_final_outputs.py`) that merges all the per-tile
+`final_outputs/<TILE_ID>_tile.gpkg` files into a single combined
+`<BASE_OUTPUT_DIR>/<run_name>.gpkg`. It depends `afterany` on every tile's
+aggregator, so a tile that fails doesn't block the merge — the missing tile is
+reported and the rest are merged.
+
 ### Batch-only inputs:
 
 | KEY | DEFAULT VALUE (DTYPE) | DESCRIPTION |
@@ -95,6 +102,7 @@ derives `TILE_ID` (the `.h5` filename without extension) and
 | `BASE_OUTPUT_DIR` | (path) | **Required.** Per-tile output goes to `<BASE_OUTPUT_DIR>/<TILE_ID>/`. |
 | `TILE_DIR` | `/users1/dgt/hdf5/` (path) | Directory holding the tile `.h5` files. |
 | `TILES` | unset, all `*.h5` in `TILE_DIR` (space-sep str) | Explicit tile IDs to run, e.g. `"T29SNB T29TPE"`; each path = `<TILE_DIR>/<ID>.h5`. Unset = every `*.h5` in `TILE_DIR`. Missing files are skipped with a warning. |
+| `GROUP_RUN_NAME` | basename of `BASE_OUTPUT_DIR` (str) | Base name for the combined output. The grouping job writes `<BASE_OUTPUT_DIR>/<GROUP_RUN_NAME>.gpkg` merging every tile's detections. |
 
 Every other `KEY=VALUE` is passed straight through to each `submit_tile.sh` call (see
 the tables above for those). Passing `TILE_ID`, `TILE_HDF5_PATH`, or `OUTPUT_DIR`

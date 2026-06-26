@@ -503,6 +503,13 @@ AGGR_JOB_ID=$(
         "$TILE_POSTPROCESS_DIR/run_aggregate_slurm.sh"
 )
 echo "Submitted aggregator job: $AGGR_JOB_ID  (afterok:$ARRAY_JOB_ID)"
+
+# Record the aggregator job id to a file so a batch wrapper (submit_tiles_batch.sh)
+# can collect it and chain a run-level job (e.g. group_final_outputs) afterany on
+# every tile's aggregator. Stdout here is tee'd into the banner, so a file is the
+# clean machine-readable handoff. Written under LOG_DIR, which the batch knows.
+echo "$AGGR_JOB_ID" > "$LOG_DIR/aggregate_job_id.txt"
+
 echo
 echo "Watch with:  squeue -u \$USER"
 echo "Per-block logs:    $LOG_DIR/predict_block_<task_id>.out"
