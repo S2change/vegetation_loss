@@ -452,6 +452,10 @@ echo
 # Export N_COLS so the per-block wrapper can decode SLURM_ARRAY_TASK_ID.
 export N_COLS
 
+# Export grid/run shape + selection so the aggregator can write the 00_summary
+# (it runs last and reconstructs the run's inputs from the environment).
+export N_ROWS N_BLOCKS MAX_CONCURRENT SELECT_DESC
+
 # Export DISTRIBUTE_DIR so the wrappers can locate the Python entry points.
 # SLURM copies batch scripts into /var/spool/slurmd/jobXXXX/ before running,
 # so resolving via ${BASH_SOURCE[0]} inside the wrapper points at the spool,
