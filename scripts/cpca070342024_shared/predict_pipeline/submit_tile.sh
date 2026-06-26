@@ -84,12 +84,15 @@
 #   MIN_TILE_PATCH_M2=5000  master patch-area floor (m^2), post cross-block merge.
 #   MAX_COMPOSITE_DAYS  symmetric day-window around each break date for
 #                       before/after compositing (unset = unbounded).
-#   OUTPUT_CONFIDENCE=0 when 1 (enet_16bit only), also output a per-patch
-#                       change confidence (0-100): the model's softmax prob of
-#                       the predicted class, averaged over the votes that
-#                       passed threshold, then averaged over each patch. Adds a
+#   OUTPUT_CONFIDENCE=1 when on (default), also output a per-patch change
+#                       confidence (0-100): the model's softmax prob of the
+#                       predicted class, averaged over the votes that passed
+#                       threshold, then averaged over each patch. Adds a
 #                       `confidence` column to the final .gpkg/.parquet and a
-#                       per-pixel `confidence` array to the .npz. Default 0.
+#                       per-pixel `confidence` array to the .npz. Requires the
+#                       model's predict_before_after_chips to support it
+#                       (enet_16bit does); models that don't (bacdm/enet_8bit)
+#                       just run labels-only. Set 0 to force off. Default 1.
 #   READ_START_DATE / READ_END_DATE  clip the raw HDF5 timestep read to this
 #                       date range (YYYY-MM-DD) BEFORE loading the block into
 #                       memory. Default: START_DATE / END_DATE, so the read
@@ -197,11 +200,14 @@ export MIN_TILE_PATCH_M2="${MIN_TILE_PATCH_M2:-5000}"
 export READ_START_DATE="${READ_START_DATE-${START_DATE:-}}"
 export READ_END_DATE="${READ_END_DATE-${END_DATE:-}}"
 
-# Optional per-pixel / per-patch change confidence (enet_16bit only). When 1,
-# the model's softmax prob of the predicted class is voted through and averaged
-# into a per-patch `confidence` (0-100) column on the final .gpkg/.parquet, plus
-# a per-pixel `confidence` array in the block/tile .npz. Off by default.
-export OUTPUT_CONFIDENCE="${OUTPUT_CONFIDENCE:-0}"
+# Per-pixel / per-patch change confidence. On by default: the model's softmax
+# prob of the predicted class is voted through and averaged into a per-patch
+# `confidence` (0-100) column on the final .gpkg/.parquet, plus a per-pixel
+# `confidence` array in the block/tile .npz. Needs the model's
+# predict_before_after_chips to support it (enet_16bit does); models that don't
+# (bacdm/enet_8bit) run labels-only — predict_block detects this and degrades
+# gracefully. Set OUTPUT_CONFIDENCE=0 to force off.
+export OUTPUT_CONFIDENCE="${OUTPUT_CONFIDENCE:-1}"
 
 # Symmetric day-window (days) around each break date for before/after
 # compositing. Unset = unbounded (any timestep before/after the target). Only

@@ -68,6 +68,7 @@ Everything else (model architecture, ghost geometry, etc.) is fixed by
 the modules being imported.
 """
 import importlib
+import inspect
 import os
 import sys
 import time
@@ -238,19 +239,27 @@ def main() -> None:
     # shrinking the time axis. Unset (default) = use every raw timestep.
     date_clusters = parse_date_clusters(os.environ.get("DATE_CLUSTERS", ""))
 
-    # Optional per-pixel / per-patch change confidence. When OUTPUT_CONFIDENCE
-    # is on, the model returns a per-pixel change-prob (0–100), votes carry it
-    # through, and finalize emits a per-pixel mean confidence that polygonize
-    # averages into a per-patch confidence attribute. Only enet_16bit supports
-    # the model-side return today; guard so other models fail loudly rather
-    # than silently dropping it. Off by default.
-    output_confidence = (os.environ.get("OUTPUT_CONFIDENCE", "0")
+    # Per-pixel / per-patch change confidence. When on, the model returns a
+    # per-pixel change-prob (0–100), votes carry it through, and finalize emits
+    # a per-pixel mean confidence that polygonize averages into a per-patch
+    # confidence attribute. On by default — but it depends on the model's
+    # predict.predict_before_after_chips supporting a `return_confidence` kwarg.
+    # Models that don't (e.g. bacdm / enet_8bit) simply run labels-only: we
+    # detect support from the function signature and degrade gracefully with a
+    # notice rather than failing. Set OUTPUT_CONFIDENCE=0 to force it off.
+    output_confidence = (os.environ.get("OUTPUT_CONFIDENCE", "1")
                          not in ("0", "", "false", "False"))
-    if output_confidence and MODEL != "enet_16bit":
-        raise SystemExit(
-            f"[predict_block] OUTPUT_CONFIDENCE=1 is only supported by "
-            f"MODEL=enet_16bit, not '{MODEL}'."
-        )
+    if output_confidence:
+        try:
+            _supports_conf = "return_confidence" in inspect.signature(
+                predict_before_after_chips).parameters
+        except (TypeError, ValueError):
+            _supports_conf = False   # builtin / unintrospectable: assume no
+        if not _supports_conf:
+            print(f"[predict_block] OUTPUT_CONFIDENCE requested but MODEL="
+                  f"'{MODEL}' does not support it (no `return_confidence` in "
+                  f"predict_before_after_chips); continuing labels-only.")
+            output_confidence = False
 
     # Bounds check the block coordinates against the HDF5's grid shape so
     # a misconfigured array index fails fast with a clear message instead
@@ -478,8 +487,15 @@ def main() -> None:
         # whole. Per-class radii come from the active MODEL package, matching
         # the block-level close (polygonize.close_labels).
         if output_confidence:
-            labels, confs = predict_before_after_chips(
+            result = predict_before_after_chips(
                 before, after, model, return_confidence=True)
+            # Support models that accept the kwarg but still return only
+            # labels: unpack a (labels, confidence) pair when given, else treat
+            # the result as labels and run confidence-free for this batch.
+            if isinstance(result, tuple) and len(result) == 2:
+                labels, confs = result
+            else:
+                labels, confs = result, None
         else:
             labels = predict_before_after_chips(before, after, model)
             confs = None
