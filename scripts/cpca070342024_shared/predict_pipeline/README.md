@@ -95,6 +95,13 @@ job** (`run_group_slurm.sh` → `group_final_outputs.py`) that merges all the pe
 aggregator, so a tile that fails doesn't block the merge — the missing tile is
 reported and the rest are merged.
 
+The grouping job also writes a batch-level `<BASE_OUTPUT_DIR>/full_summary.txt`,
+rolling up each tile's per-tile summary: shared inputs, CPUs summed across tiles,
+batch wall/CPU time, and the single worst block- and aggregator-memory peaks
+across the whole batch (each tagged with the owning tile). Per tile, the
+aggregator writes `<OUTPUT_DIR>/logs/00_summary.txt` (and a machine-readable
+`00_summary.metrics` the batch rollup consumes).
+
 ### Batch-only inputs:
 
 | KEY | DEFAULT VALUE (DTYPE) | DESCRIPTION |

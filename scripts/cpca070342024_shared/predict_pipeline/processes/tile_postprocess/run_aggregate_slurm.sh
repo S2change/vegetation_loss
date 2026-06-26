@@ -138,6 +138,16 @@ if [[ -n "${SLURM_JOB_ID:-}" ]]; then
     aggr_alloc_kb="$(_alloc_mem_kb "$SLURM_JOB_ID")"
 fi
 
+# Count the block tasks that actually ran (array task rows, skip sub-steps), so
+# the batch rollup can compute block CPU-count as THREADS x tasks-run per tile.
+n_block_tasks=0
+if [[ -n "${ARRAY_JOB_ID:-}" ]]; then
+    n_block_tasks="$(
+        sacct -j "$ARRAY_JOB_ID" --format=JobID --noheader --parsable2 2>/dev/null \
+            | grep -E '^[0-9]+_[0-9]+$' | sort -u | wc -l | tr -d ' '
+    )"
+fi
+
 # ── echo the headline timing lines to the aggregator log (as before) ────────
 if [[ -n "$wall_secs" ]]; then
     echo "Total tile wall time (first block start -> aggregator finish): $(_fmt_hms "$wall_secs"), tile $TILE_ID"
@@ -212,3 +222,39 @@ SUMMARY="${LOG_DIR:-.}/00_summary.txt"
 } > "$SUMMARY"
 
 echo "Wrote run summary: $SUMMARY"
+
+# ── machine-readable metrics for the batch rollup ────────────────────────────
+# submit_tiles_batch.sh's grouping job reads one of these per tile and rolls
+# them into a batch-level 00_summary.txt. key=value, one per line — robust to
+# the human summary's layout changing. Shared inputs are written too so the
+# batch summary can show them once (they're identical across tiles).
+METRICS="${LOG_DIR:-.}/00_summary.metrics"
+{
+    echo "TILE_ID=${TILE_ID:-}"
+    echo "WALL_SECS=${wall_secs:-}"
+    echo "CPU_SECS=${cpu_secs:-}"
+    echo "THREADS=${THREADS:-}"
+    echo "N_BLOCK_TASKS=${n_block_tasks:-0}"
+    echo "AGGR_CPUS=${SLURM_CPUS_PER_TASK:-3}"
+    echo "BLOCKS_PEAK_KB=${blocks_peak_kb:-0}"
+    echo "BLOCKS_PEAK_ID=${blocks_peak_id:-}"
+    echo "BLOCKS_ALLOC_KB=${blocks_alloc_kb:-0}"
+    echo "AGGR_PEAK_KB=${aggr_peak_kb:-0}"
+    echo "AGGR_ALLOC_KB=${aggr_alloc_kb:-0}"
+    # Shared inputs (identical across a batch's tiles).
+    echo "MODEL=${MODEL:-}"
+    echo "DATA_DTYPE=${DATA_DTYPE:-}"
+    echo "START_DATE=${START_DATE:-}"
+    echo "END_DATE=${END_DATE:-}"
+    echo "READ_START_DATE=${READ_START_DATE:-}"
+    echo "READ_END_DATE=${READ_END_DATE:-}"
+    echo "DATE_CLUSTERS_N=$( [[ -n "${DATE_CLUSTERS:-}" ]] && printf '%s' "$DATE_CLUSTERS" | awk -F';' '{print NF}' || echo 0 )"
+    echo "VOTE_CLASSES=${VOTE_CLASSES:-}"
+    echo "VOTE_THRESHOLD=${VOTE_THRESHOLD:-}"
+    echo "BATCH_SIZE=${BATCH_SIZE:-}"
+    echo "MIN_PATCH_M2=${MIN_PATCH_M2:-}"
+    echo "MIN_TILE_PATCH_M2=${MIN_TILE_PATCH_M2:-}"
+    echo "MAX_COMPOSITE_DAYS=${MAX_COMPOSITE_DAYS:-}"
+    echo "OUTPUT_CONFIDENCE=${OUTPUT_CONFIDENCE:-0}"
+    echo "WEIGHTS_PATH=${WEIGHTS_PATH:-}"
+} > "$METRICS"
