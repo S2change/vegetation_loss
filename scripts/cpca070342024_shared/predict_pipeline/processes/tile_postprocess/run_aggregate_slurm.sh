@@ -16,8 +16,13 @@ set -euo pipefail
 
 module purge
 module load gcc13/openmpi/4.1.6
-# venv fallback incase not shared from submit_tile.sh
-source "${VENV:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/.venv}/bin/activate"
+# VENV is exported by submit_tile.sh. We do NOT derive it from ${BASH_SOURCE[0]}:
+# SLURM copies the batch script into /var/spool/slurmd/jobNNN/ before running it,
+# so BASH_SOURCE points at the spool copy and a "../.." fallback resolves to
+# /var/spool/.venv (wrong). Require it explicitly. For a standalone re-run, pass
+# it: `sbatch --export=ALL,VENV=/path/to/predict_pipeline/.venv,... run_aggregate_slurm.sh`.
+: "${VENV:?VENV must be exported by submit_tile.sh (or passed for a standalone re-run)}"
+source "$VENV/bin/activate"
 # Clear any inherited PYTHONPATH: the CVMFS Python env puts its own
 # site-packages on PYTHONPATH, which sits AHEAD of the venv on sys.path and
 # shadows venv packages (numpy/h5py/typing_extensions load from /cvmfs, which
@@ -75,16 +80,19 @@ _mem_to_kb() {  # sacct mem field ("4096K"/"512M"/"2G"/"1.5G") -> integer KB
     esac
 }
 
-# Peak MaxRSS across a job's task rows, returning "<kb>|<jobid-of-peak>". For an
-# array job the per-task rows are "<arrayid>_<task>"; we report which task (=
-# which block) owned the peak so an OOM-prone block is easy to find.
+# Peak MaxRSS across a job's rows, returning "<kb>|<jobid-of-peak>". sacct
+# records MaxRSS on the STEP rows (".batch"/".extern"/".0"), not the top-level
+# job/array-task row (which is usually blank for MaxRSS) — so unlike the CPU
+# sum, we must KEEP the step rows here. We strip any ".<step>" suffix when
+# reporting the id, so for an array job the peak is attributed to its task
+# ("<arrayid>_<task>" = which block). Top-level rows that happen to carry a
+# value are honoured too, so this works whichever way the cluster reports it.
 _peak_maxrss() {
     local jobid="$1" peak_kb=0 peak_id="" kb
     while IFS='|' read -r jid maxrss; do
-        [[ "$jid" == *.* ]] && continue            # skip .batch/.extern/steps
-        [[ -z "$maxrss" || "$maxrss" == "MaxRSS" ]] && continue
+        [[ -z "$maxrss" || "$maxrss" == "MaxRSS" || "$maxrss" == "0" ]] && continue
         kb="$(_mem_to_kb "$maxrss")"
-        if (( kb > peak_kb )); then peak_kb="$kb"; peak_id="$jid"; fi
+        if (( kb > peak_kb )); then peak_kb="$kb"; peak_id="${jid%%.*}"; fi
     done < <(sacct -j "$jobid" --format=JobID,MaxRSS --noheader --parsable2 2>/dev/null)
     echo "${peak_kb}|${peak_id}"
 }

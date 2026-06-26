@@ -63,6 +63,14 @@ fi
 TILE_POSTPROCESS_DIR="$SCRIPT_DIR/processes/tile_postprocess"
 RUN_GROUP="$TILE_POSTPROCESS_DIR/run_group_slurm.sh"
 
+# Resolve VENV from the pipeline root and export it (mirrors submit_tile.sh) so
+# the grouping job activates the right venv. SLURM copies batch scripts into
+# /var/spool/slurmd/jobNNN/, so the wrapper's own BASH_SOURCE-relative fallback
+# would resolve to /var/spool/.venv inside the job — exporting an absolute path
+# here avoids that. Override with VENV=... on the command line.
+VENV="${VENV:-$SCRIPT_DIR/.venv}"
+export VENV
+
 # ── Parse KEY=VALUE args ───────────────────────────────────────────────────
 # Wrapper-only keys are pulled out; everything else is collected for pass-
 # through. Reserved per-tile keys are rejected (computed per tile below).

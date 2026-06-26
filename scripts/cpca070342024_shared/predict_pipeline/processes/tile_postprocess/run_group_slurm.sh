@@ -18,8 +18,13 @@ set -euo pipefail
 
 module purge
 module load gcc13/openmpi/4.1.6
-# venv fallback incase not shared from submit_tiles_batch.sh
-source "${VENV:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/.venv}/bin/activate"
+# VENV is exported by submit_tiles_batch.sh. We do NOT derive it from
+# ${BASH_SOURCE[0]} here: SLURM copies the batch script into
+# /var/spool/slurmd/jobNNN/ before running it, so BASH_SOURCE points at the
+# spool copy and a "../.." fallback resolves to /var/spool/.venv (wrong).
+# Require it explicitly instead of falling back to a bad path.
+: "${VENV:?VENV must be exported by submit_tiles_batch.sh}"
+source "$VENV/bin/activate"
 # Clear any inherited PYTHONPATH: the CVMFS Python env puts its own
 # site-packages on PYTHONPATH, which sits AHEAD of the venv on sys.path and
 # shadows venv packages (numpy/h5py/typing_extensions load from /cvmfs).

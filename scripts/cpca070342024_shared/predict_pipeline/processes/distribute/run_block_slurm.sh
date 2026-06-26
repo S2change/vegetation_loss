@@ -21,10 +21,12 @@ module load gcc13/openmpi/4.1.6
 # Do NOT `module load python/3.10` — see predict_testing/run_predict_slurm.sh
 # for the typing_extensions / torch CVMFS gotcha.
 
-# VENV is normally exported by submit_tile.sh (predict_pipeline/.venv). The
-# fallback derives the same path from this script's location: it lives in
-# processes/distribute/, so the pipeline root (holding .venv) is two levels up.
-source "${VENV:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/.venv}/bin/activate"
+# VENV is exported by submit_tile.sh (predict_pipeline/.venv). We do NOT derive
+# it from ${BASH_SOURCE[0]}: SLURM copies the batch script into
+# /var/spool/slurmd/jobNNN/ before running it, so BASH_SOURCE points at the
+# spool copy and a "../.." fallback resolves to /var/spool/.venv (wrong).
+: "${VENV:?VENV must be exported by submit_tile.sh}"
+source "$VENV/bin/activate"
 # Clear any inherited PYTHONPATH: the CVMFS Python env puts its own
 # site-packages on PYTHONPATH, which sits AHEAD of the venv on sys.path and
 # shadows venv packages (numpy/h5py/typing_extensions load from /cvmfs, which
