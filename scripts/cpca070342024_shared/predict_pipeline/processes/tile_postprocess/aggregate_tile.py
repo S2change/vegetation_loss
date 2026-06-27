@@ -635,3 +635,10 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    # Emit this process's peak RSS so the wrapper can report aggregator memory in
+    # the run summary. sacct can't: the summary is written by the aggregator job
+    # while it's still running, so its own MaxRSS isn't flushed yet. ru_maxrss is
+    # the kernel's peak RSS for this process — in KiB on Linux (the cluster). The
+    # wrapper greps this exact "AGGREGATOR_PEAK_KB=" marker line.
+    import resource
+    print(f"AGGREGATOR_PEAK_KB={resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}")

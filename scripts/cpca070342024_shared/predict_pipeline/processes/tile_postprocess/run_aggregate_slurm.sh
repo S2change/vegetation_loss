@@ -30,7 +30,11 @@ source "$VENV/bin/activate"
 unset PYTHONPATH
 
 : "${TILE_POSTPROCESS_DIR:?TILE_POSTPROCESS_DIR must be exported by submit_tile.sh}"
-python "$TILE_POSTPROCESS_DIR/aggregate_tile.py"
+# Capture aggregate_tile.py's output (tee'd so the live log is unchanged) so we
+# can read its "AGGREGATOR_PEAK_KB=" marker — the aggregator's own peak RSS,
+# which sacct can't give us here (its MaxRSS isn't flushed while it's running).
+_aggr_out="$(mktemp)"
+python "$TILE_POSTPROCESS_DIR/aggregate_tile.py" 2>&1 | tee "$_aggr_out"
 
 echo "Aggregator finished for tile $TILE_ID."
 
@@ -140,11 +144,17 @@ if [[ -n "${ARRAY_JOB_ID:-}" ]]; then
     IFS='|' read -r blocks_peak_kb blocks_peak_id < <(_peak_maxrss "$ARRAY_JOB_ID")
     blocks_alloc_kb="$(_alloc_mem_kb "$ARRAY_JOB_ID")"
 fi
+# Aggregator's own peak: read the AGGREGATOR_PEAK_KB marker that aggregate_tile.py
+# emitted (its ru_maxrss = kernel peak RSS, in KiB on Linux). This measures the
+# Python process that does the memory-heavy stitch — sacct can't, since this
+# job's MaxRSS isn't flushed while it's still running (that was the n/a cause).
 aggr_peak_kb=0; aggr_alloc_kb=0
+aggr_peak_kb="$(grep -oE 'AGGREGATOR_PEAK_KB=[0-9]+' "$_aggr_out" 2>/dev/null | tail -n1 | cut -d= -f2)"
+[[ -z "$aggr_peak_kb" ]] && aggr_peak_kb=0
 if [[ -n "${SLURM_JOB_ID:-}" ]]; then
-    IFS='|' read -r aggr_peak_kb _ < <(_peak_maxrss "$SLURM_JOB_ID")
     aggr_alloc_kb="$(_alloc_mem_kb "$SLURM_JOB_ID")"
 fi
+rm -f "$_aggr_out"
 
 # Count the block tasks that actually ran (array task rows, skip sub-steps), so
 # the batch rollup can compute block CPU-count as THREADS x tasks-run per tile.
