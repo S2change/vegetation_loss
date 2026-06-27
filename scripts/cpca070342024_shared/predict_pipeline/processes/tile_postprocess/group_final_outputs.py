@@ -114,7 +114,7 @@ def write_batch_summary() -> None:
             metrics.append(m)
 
     if not metrics:
-        print("No per-tile metrics found; skipping batch 00_summary.txt.")
+        print("No per-tile metrics found; skipping batch full_summary.txt.")
         return
 
     def f(m, k, default=0.0):
@@ -161,7 +161,6 @@ def write_batch_summary() -> None:
     lines.append(f"  Patch floors:    block {inp.get('MIN_PATCH_M2','?')} m^2 / "
                  f"tile {inp.get('MIN_TILE_PATCH_M2','?')} m^2")
     lines.append(f"  Max comp. days:  {inp.get('MAX_COMPOSITE_DAYS') or 'unbounded'}")
-    lines.append(f"  Confidence:      {inp.get('OUTPUT_CONFIDENCE','0')}")
     lines.append(f"  Weights:         {inp.get('WEIGHTS_PATH','?')}")
     lines.append("")
     lines.append("── Resources (summed across tiles) ─────────────────────────────────")
@@ -187,10 +186,10 @@ def write_batch_summary() -> None:
     if worst_aggr and f(worst_aggr, "AGGR_PEAK_KB") > 0:
         pk = f(worst_aggr, "AGGR_PEAK_KB")
         al = f(worst_aggr, "AGGR_ALLOC_KB")
-        lines.append(f"  Aggregation:     {_gib(pk)} GiB of {_gib(al)} GiB allocated "
+        lines.append(f"  Tile Aggregation:     {_gib(pk)} GiB of {_gib(al)} GiB allocated "
                      f"({_pct(pk, al)}%)  [tile {worst_aggr.get('TILE_ID','?')}]")
     else:
-        lines.append("  Aggregation:     n/a (no MaxRSS in metrics)")
+        lines.append("  Tile Aggregation:     n/a (no MaxRSS in metrics)")
     lines.append(bar)
 
     summary_path.write_text("\n".join(lines) + "\n")

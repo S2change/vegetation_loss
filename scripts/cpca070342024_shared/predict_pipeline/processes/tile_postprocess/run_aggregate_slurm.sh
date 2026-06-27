@@ -206,7 +206,6 @@ SUMMARY="${LOG_DIR:-.}/00_summary.txt"
     echo "  Batch size:      ${BATCH_SIZE:-?}"
     echo "  Patch floors:    block ${MIN_PATCH_M2:-?} m^2 / tile ${MIN_TILE_PATCH_M2:-?} m^2"
     echo "  Max comp. days:  ${MAX_COMPOSITE_DAYS:-unbounded}"
-    echo "  Confidence:      ${OUTPUT_CONFIDENCE:-0}"
     echo "  Weights:         ${WEIGHTS_PATH:-?}"
     echo
     echo "── Resources ───────────────────────────────────────────────────────"
@@ -232,9 +231,9 @@ SUMMARY="${LOG_DIR:-.}/00_summary.txt"
         echo "  Blocks (peak):   n/a (no MaxRSS in sacct)"
     fi
     if (( aggr_peak_kb > 0 )); then
-        echo "  Aggregation:     $(_kb_to_gib "$aggr_peak_kb") GiB of $(_kb_to_gib "$aggr_alloc_kb") GiB allocated ($(_pct "$aggr_peak_kb" "$aggr_alloc_kb")%)"
+        echo "  Block Aggregation:     $(_kb_to_gib "$aggr_peak_kb") GiB of $(_kb_to_gib "$aggr_alloc_kb") GiB allocated ($(_pct "$aggr_peak_kb" "$aggr_alloc_kb")%)"
     else
-        echo "  Aggregation:     n/a (no MaxRSS in sacct)"
+        echo "  Block Aggregation:     n/a (no MaxRSS in sacct)"
     fi
     echo "════════════════════════════════════════════════════════════════════"
 } > "$SUMMARY"
