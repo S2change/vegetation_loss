@@ -74,16 +74,14 @@
 #                       must NOT be set (the dates are derived). Set 0 to use
 #                       raw timesteps with the fixed-cadence / explicit
 #                       TARGET_DATES paths instead.
-#   MAX_THETA           clustering tuning (USE_DATE_CLUSTERS=1 only): max gap
-#                       (days) for single-link merging. Unset = the determine
-#                       script's default (10).
-#   MAX_CLUSTER_AMPLITUDE  clustering tuning (USE_DATE_CLUSTERS=1 only): max
-#                       span (days) a single cluster may cover. Unset = the
-#                       determine script's default (15).
+#   MAX_THETA=5         clustering tuning (USE_DATE_CLUSTERS=1 only): max gap
+#                       (days) for single-link merging.
+#   MAX_CLUSTER_AMPLITUDE=10  clustering tuning (USE_DATE_CLUSTERS=1 only): max
+#                       span (days) a single cluster may cover.
 #   MIN_PATCH_M2=2500   block-level patch-area floor (m^2), firm.
 #   MIN_TILE_PATCH_M2=5000  master patch-area floor (m^2), post cross-block merge.
-#   MAX_COMPOSITE_DAYS  symmetric day-window around each break date for
-#                       before/after compositing (unset = unbounded).
+#   MAX_COMPOSITE_DAYS=45  symmetric day-window around each break date for
+#                       before/after compositing (set empty = unbounded).
 #   OUTPUT_CONFIDENCE=1 when on (default), also output a per-patch change
 #                       confidence (0-100): the model's softmax prob of the
 #                       predicted class, averaged over the votes that passed
@@ -140,13 +138,12 @@ USE_DATE_CLUSTERS="${USE_DATE_CLUSTERS:-1}"
 _clusters_on=0
 case "$USE_DATE_CLUSTERS" in 1|true|True|yes) _clusters_on=1 ;; esac
 
-# Clustering tuning (only used when USE_DATE_CLUSTERS=1). Left empty by default
-# so determine_clusters_of_dates.py applies its own MAX_THETA /
-# MAX_CLUSTER_AMPLITUDE; when set, they are passed through as CLI flags below.
+# Clustering tuning (only used when USE_DATE_CLUSTERS=1). Passed through as CLI
+# flags to determine_clusters_of_dates.py below.
 #   MAX_THETA              max gap (days) for single-link merging.
 #   MAX_CLUSTER_AMPLITUDE  max span (days) a single cluster may cover.
-MAX_THETA="${MAX_THETA:-}"
-MAX_CLUSTER_AMPLITUDE="${MAX_CLUSTER_AMPLITUDE:-}"
+MAX_THETA="${MAX_THETA:-5}"
+MAX_CLUSTER_AMPLITUDE="${MAX_CLUSTER_AMPLITUDE:-10}"
 
 # Target dates: three mutually exclusive sources, all resolved (with Python)
 # in the "Resolve TARGET_DATES" block below. Validate the inputs here.
@@ -210,10 +207,11 @@ export READ_END_DATE="${READ_END_DATE-${END_DATE:-}}"
 export OUTPUT_CONFIDENCE="${OUTPUT_CONFIDENCE:-1}"
 
 # Symmetric day-window (days) around each break date for before/after
-# compositing. Unset = unbounded (any timestep before/after the target). Only
-# exported when the caller sets it, so predict_block sees None when unset.
-if [[ -n "${MAX_COMPOSITE_DAYS:-}" ]]; then
-    export MAX_COMPOSITE_DAYS
+# compositing. Defaults to 45; set empty (MAX_COMPOSITE_DAYS=) for unbounded
+# (any timestep before/after the target), in which case predict_block sees None.
+export MAX_COMPOSITE_DAYS="${MAX_COMPOSITE_DAYS-45}"
+if [[ -z "$MAX_COMPOSITE_DAYS" ]]; then
+    unset MAX_COMPOSITE_DAYS
 fi
 
 # CPU threads per task. Exported so the array wrapper sizes its thread pools
