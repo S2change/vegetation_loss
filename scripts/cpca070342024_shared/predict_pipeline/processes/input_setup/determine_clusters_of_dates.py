@@ -207,16 +207,20 @@ def aggregate_block_dates(block, ts_kept, position,
             ) from None
 
         # Per-pixel, per-band min across the cluster's timesteps, ignoring
-        # nodata. nodata is the dtype's max sentinel (255 / 65535), so a plain
-        # min already prefers any real value over nodata, and collapses to
-        # nodata only where every timestep is nodata. Promote to int for the
-        # masked-min so the sentinel arithmetic can't wrap on uint.
-        sub = block[idxs].astype(np.int64)          # (n, 10, H, W)
-        sub[sub == nodata] = np.iinfo(np.int64).max  # mask nodata out of min
-        mins = sub.min(axis=0)                       # (10, H, W)
-        all_nodata = mins == np.iinfo(np.int64).max
+        # nodata. We stay in the block's native dtype (no int64 promotion — that
+        # made a 4x copy of each cluster's slice, a real memory spike on big
+        # reads). Mask nodata up to the dtype's max so .min() skips it; then any
+        # pixel that was nodata in EVERY timestep is reset to nodata. The
+        # all-nodata test checks the source (not `mins == max`), so a real pixel
+        # that legitimately equals the dtype max isn't misread as nodata, and a
+        # custom `nodata` != dtype-max is handled correctly.
+        sub_src = block[idxs]                         # (n, 10, H, W) native dtype
+        sub = sub_src.copy()
+        sub[sub == nodata] = np.iinfo(block.dtype).max  # mask nodata out of min
+        mins = sub.min(axis=0)                        # (10, H, W) native dtype
+        all_nodata = (sub_src == nodata).all(axis=0)
         mins[all_nodata] = nodata
-        composites.append(mins.astype(block.dtype))
+        composites.append(mins)
 
         medians.append(int(np.median(cluster)))
 
