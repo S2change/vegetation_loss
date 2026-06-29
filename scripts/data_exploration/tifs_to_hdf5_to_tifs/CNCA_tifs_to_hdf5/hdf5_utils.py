@@ -8,7 +8,6 @@ from datetime import date, datetime, timezone
 
 BAND_NAMES= ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8a", "B11", "B12"]
 TILE_NAMES = ['T29SMC', 'T29TQF', 'T29SMD', 'T29TQG', 'T29SNB', 'T29TME', 'T29SNC', 'T29SND', 'T29SPB', 'T29SPC', 'T29TNE', 'T29SPD', 'T29TNF', 'T29TNG', 'T29TPE', 'T29TPF', 'T29TPG']
-TILE_NAMES = ['T29TPG']
 
 INPUT_NODATA_VAL = 65535
 OUTPUT_NODATA_VAL = 65535
@@ -21,10 +20,9 @@ MAX_CLOUD_COVER_PT = 0.6 # (proportion: 0.6=60%) file_metadata only stores times
 FOLDER_S2 = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testes_cnca_filtar_hdf5_nuvems\exemplos_geotiff_CNCA" # 2025/S2B_MSIL2A_.../S2B_MSIL2A_...tif+S2B_MSIL1C_..._mask_omni.tif
 FOLDER_PT_MASKS = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testes_cnca_filtar_hdf5_nuvems\exemplos_geotiff_CNCA\Mascara_PT_S2" # mask_T29SMC.tif, etc
 FOLDER_HDF5 = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testes_cnca_filtar_hdf5_nuvems\exemplos_geotiff_CNCA\hdf5"
+FOLDER_LOGS = r"C:\Users\mlc\Downloads\temp\test_tif_to_hdf5\testes_cnca_filtar_hdf5_nuvems\exemplos_geotiff_CNCA\hdf5"
 
 # Date filters
-# create_hdf5.py uses MIN_DATE and MAX_DATE to create the original hdf5 file 
-# append_hdf5.py overwrites MIN_DATE as the most recent date in the existing hdf5 file
 MIN_DATE = None #date(2025, 1, 1) 
 MAX_DATE = None #date(2025,6,30)
 
@@ -35,7 +33,7 @@ CHIP_SIDE = 256        # pixels per chip side
 PIXEL_RES = 10         # Sentinel-2 native resolution, metres
 ####################################################
 """
-    File structure:
+    Input file structure:
 
     |--- mascaras_PT_S2/
        |--- mask_T29SMC.tif : pixels of interest have value 0
@@ -132,8 +130,8 @@ def extract_s2_aquisition_day_from_s2_folder_name(f):
 
     Folders acquired on the same calendar day for the same tile are grouped
     together regardless of satellite (S2A/S2B/S2C) or exact acquisition time:
-      'S2B_MSIL2A_20250813-110619_N0511_R137_T29TPG_20250813T133202' -> '20250813_T29TPG'
-      'S2A_MSIL2A_20250813-112131_N0511_R037_T29TPG_20250813T141914' -> '20250813_T29TPG'
+      'S2B_MSIL2A_20250813-110619_N0511_R137_T29TPG_20250813T133202' -> 'S2_MSIL2A_20250813_T29TPG'
+      'S2A_MSIL2A_20250813-112131_N0511_R037_T29TPG_20250813T141914' -> 'S2_MSIL2A_20250813_T29TPG'
     """
     parts = f.split('_')
     if len(parts) < 3:
@@ -268,6 +266,7 @@ def parse_filter_sort_files(folder_s2, folder_pt_mask, tile, min_date=None, max_
     """
    
     file_metadata = []
+    all_metrics   = {}   # s2_prefix -> log metrics for every processed entry
 
     #0. path for PT_mask file: pixels of interest have value 0
     path_pt_mask= determine_pt_mask_file(folder_pt_mask,tile)
@@ -309,6 +308,9 @@ def parse_filter_sort_files(folder_s2, folder_pt_mask, tile, min_date=None, max_
     for _, folder_paths in sorted(folders_dict.items()):
         combined_cloud_mask = None
         combined_b2 = None
+        a0s = []   # clear-pixel count per input folder (band-2 non-NoData)
+        a1s = []   # cloud-pixel count per input folder (mask_omni == 1)
+
         for fp in folder_paths:
             # PT_CLOUD_MASK
             cloud_mask_files = [
@@ -325,10 +327,11 @@ def parse_filter_sort_files(folder_s2, folder_pt_mask, tile, min_date=None, max_
                 break
             with rasterio.open(os.path.join(fp, cloud_mask_files[0])) as src:
                 mask = src.read(1)
-                combined_cloud_mask = mask if combined_cloud_mask is None else np.maximum(combined_cloud_mask, mask)
+            a1s.append(int((mask == 1).sum()))
+            combined_cloud_mask = mask if combined_cloud_mask is None else np.maximum(combined_cloud_mask, mask)
         if combined_cloud_mask is None:
             continue
-        
+
         for fp in folder_paths:
             # B2
             band_files = [
@@ -345,21 +348,29 @@ def parse_filter_sort_files(folder_s2, folder_pt_mask, tile, min_date=None, max_
                 break
             with rasterio.open(os.path.join(fp, band_files[0])) as src:
                 b2 = src.read(1)
-                combined_b2 = b2 if combined_b2 is None else np.minimum(combined_b2, b2)
+            a0s.append(int((b2 < 65535).sum()))
+            combined_b2 = b2 if combined_b2 is None else np.minimum(combined_b2, b2)
         if combined_b2 is None:
             continue
-        # pt_pixel_count = int((pt_mask == 0).sum())
-        a0=int((combined_b2 < 65535).sum()) # number of pixels in PT, in available orbits, and not masked as clouds
-        a1=int((combined_cloud_mask ==1).sum()) # number of pixels in PT, in available orbits, and masked as clouds
-        count_orbit_pixels_pt= a0+a1 # total number of pixels in available orbits
-        # Determine if combined  has no non-cloud pixels in PT, in the orbits
-        number_clear_pixels_in_PT = a0 #int(((combined_b2 < 65535) & (pt_mask == 0)).sum())
-        #combined_cloud_pixels_pt=int((combined_cloud_mask == 1).sum())
-        #cloud_cover = combined_cloud_pixels_pt / pt_pixel_count if pt_pixel_count > 0 else None
-        #cloud_cover = (1-number_clear_pixels_in_PT/ pt_pixel_count) if pt_pixel_count > 0 else None
-        cloud_cover = (1-number_clear_pixels_in_PT/ count_orbit_pixels_pt) if count_orbit_pixels_pt > 0 else None
-        
-         
+
+        # Aggregate metrics
+        a0 = int((combined_b2 < 65535).sum())
+        a1 = int((combined_cloud_mask == 1).sum())
+        count_orbit_pixels_pt  = a0 + a1
+        number_clear_pixels_in_PT = a0
+        cloud_cover = (1 - number_clear_pixels_in_PT / count_orbit_pixels_pt) if count_orbit_pixels_pt > 0 else None
+
+        # Per-folder metrics — keyed by folder basename for use in the log
+        per_folder = {}
+        for i, fp in enumerate(folder_paths):
+            n_clear = a0s[i]
+            n_orbit = a0s[i] + a1s[i]
+            per_folder[os.path.basename(fp)] = {
+                'clear_pixel_count_pt':  n_clear,
+                'count_orbit_pixels_pt': n_orbit,
+                'cloud_cover_pt':        round(1 - n_clear / n_orbit, 4) if n_orbit > 0 else None,
+            }
+
         parsed = extract_s2_prefix_dt_timestamp_ms_from_S2_folder_name(os.path.basename(folder_paths[0]))
         if parsed is None:
             continue
@@ -368,6 +379,16 @@ def parse_filter_sort_files(folder_s2, folder_pt_mask, tile, min_date=None, max_
         s2_original_files = '__'.join(
             os.path.basename(fp) for fp in folder_paths
         )
+
+        # Record metrics for every entry (accepted or rejected) for the log
+        all_metrics[s2_prefix] = {
+            'filename':              s2_prefix,
+            'cloud_cover_pt':        cloud_cover,
+            'pixel_count_pt':        pt_pixel_count,
+            'clear_pixel_count_pt':  number_clear_pixels_in_PT,
+            'count_orbit_pixels_pt': count_orbit_pixels_pt,
+            'per_folder':            per_folder,
+        }
 
         print(s2_prefix," has",number_clear_pixels_in_PT,"clear pixels in PT in a total of ",pt_pixel_count," PT pixels, with ",count_orbit_pixels_pt, " within orbits")
         if number_clear_pixels_in_PT>0:
@@ -399,4 +420,65 @@ def parse_filter_sort_files(folder_s2, folder_pt_mask, tile, min_date=None, max_
             })
 
     file_metadata.sort(key=lambda x: x['timestamp_ms'])
-    return file_metadata
+    return file_metadata, folders_dict, all_metrics
+
+
+def write_tile_log(folders_dict, all_metrics, log_path,
+                   stored_prefixes=None, append=False):
+    """Write a CSV log of all S2 folders discovered in this run.
+
+    One row per original S2 acquisition folder.  Columns 'S2_filename',
+    'cloud_cover_pt', etc. are filled for every entry whose metrics were
+    successfully computed (accepted or rejected); they are empty only for
+    folders that could not be parsed (missing cloud-mask file, etc.).
+
+    Parameters
+    ----------
+    folders_dict     : dict       — s2_prefix -> list of full folder paths
+    all_metrics      : dict       — s2_prefix -> metrics dict (third element
+                       returned by parse_filter_sort_files)
+    log_path         : str        — full path for the .csv file
+    stored_prefixes  : set or None — s2_prefixes that were written to the HDF5
+                       in this run; used to set the 'stored_in_hdf5' field
+    append           : bool       — if True, rows are appended; header is
+                       written only when the file does not yet exist
+    """
+    import csv
+
+    if stored_prefixes is None:
+        stored_prefixes = set()
+
+    fieldnames = [
+        'S2_original', 'aggregated', 'stored_in_hdf5',
+        'S2_filename', 'cloud_cover_pt', 'pixel_count_pt',
+        'clear_pixel_count_pt', 'count_orbit_pixels_pt',
+        'cloud_cover_pt_pf', 'clear_pixel_count_pt_pf', 'count_orbit_pixels_pt_pf',
+    ]
+    write_header = (not append) or (not os.path.exists(log_path))
+    mode = 'a' if append else 'w'
+
+    with open(log_path, mode, newline='', encoding='utf-8') as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        if write_header:
+            writer.writeheader()
+        for s2_prefix, folder_paths in sorted(folders_dict.items()):
+            is_aggregated = 1 if len(folder_paths) > 1 else 0
+            is_stored     = 1 if s2_prefix in stored_prefixes else 0
+            m = all_metrics.get(s2_prefix)
+            for fp in folder_paths:
+                folder_name = os.path.basename(fp)
+                pf = m.get('per_folder', {}).get(folder_name) if m else None
+                writer.writerow({
+                    'S2_original':              folder_name,
+                    'aggregated':               is_aggregated,
+                    'stored_in_hdf5':           is_stored,
+                    'S2_filename':              m['filename']                                              if m  else '',
+                    'cloud_cover_pt':           round(m['cloud_cover_pt'], 4) if m  and m['cloud_cover_pt']  is not None else '',
+                    'pixel_count_pt':           m['pixel_count_pt']           if m  else '',
+                    'clear_pixel_count_pt':     m['clear_pixel_count_pt']     if m  else '',
+                    'count_orbit_pixels_pt':    m['count_orbit_pixels_pt']    if m  else '',
+                    'cloud_cover_pt_pf':        round(pf['cloud_cover_pt'], 4) if pf and pf['cloud_cover_pt'] is not None else '',
+                    'clear_pixel_count_pt_pf':  pf['clear_pixel_count_pt']    if pf else '',
+                    'count_orbit_pixels_pt_pf': pf['count_orbit_pixels_pt']   if pf else '',
+                })
+    print(f"  Log {'appended' if append else 'written'}: {log_path}")
