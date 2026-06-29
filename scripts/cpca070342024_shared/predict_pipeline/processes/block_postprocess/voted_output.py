@@ -123,11 +123,22 @@ def write_voted_block(output_dir: str,
     return path
 
 
-def read_voted_block(path: str) -> dict:
+def read_voted_block(path: str, keys=None) -> dict:
     """Read one .npz back into a plain dict.
 
     Convenience wrapper that turns np.savez's NpzFile into a regular dict
     so callers don't need to remember to close the file.
+
+    Parameters
+    ----------
+    keys : iterable of str or None
+        When given, load ONLY these array keys (silently skipping any not in
+        the file) instead of every key. Lets a caller avoid materializing
+        arrays it won't use — e.g. the tile aggregator skips the dense
+        per-pixel `confidence` array, which roughly halves its read memory
+        when blocks were written with OUTPUT_CONFIDENCE=1. None (default) loads
+        every key, preserving the original behaviour.
     """
     with np.load(path) as npz:
-        return {k: npz[k] for k in npz.files}
+        wanted = npz.files if keys is None else [k for k in keys if k in npz.files]
+        return {k: npz[k] for k in wanted}

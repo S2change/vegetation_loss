@@ -437,9 +437,19 @@ def main() -> None:
     blocks: list[dict] = []
     rows_seen: list[int] = []
     cols_seen: list[int] = []
+    # Keys the aggregator actually uses. We deliberately DON'T load the dense
+    # per-pixel `confidence` array (present when blocks ran OUTPUT_CONFIDENCE=1):
+    # the aggregator never reads it — per-patch confidence comes from the block
+    # .gpkg columns, not this array — and it's the same size as `labels`, so
+    # skipping it roughly halves the read-in memory that was driving the OOM.
+    _BLOCK_KEYS = (
+        "labels", "block_row", "block_col",
+        "world_origin_x", "world_origin_y",
+        "target_dates", "classes", "threshold", "pixel_res",
+    )
     _rss_line("start of main")
     for p in paths:
-        d = read_voted_block(str(p))
+        d = read_voted_block(str(p), keys=_BLOCK_KEYS)
         blocks.append(d)
         rows_seen.append(int(d["block_row"]))
         cols_seen.append(int(d["block_col"]))
