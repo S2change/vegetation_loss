@@ -11,12 +11,12 @@ from datetime import date, datetime, timezone
 FOLDER_S2 = r"path_to_folder_with_all_geotiff_files" # 2025/S2B_MSIL2A_.../S2B_MSIL2A_...tif+S2B_MSIL1C_..._mask_omni.tif
 FOLDER_PT_MASKS = r"...\Mascara_PT_S2" # mask_T29SMC.tif, etc
 FOLDER_HDF5 = r"users1/dgt/hdf5" # to store hdf5 files and log files
-FOLDER_LOGS = r"users1/dgt/hdf5"
+FOLDER_LOGS = r"users1/dgt/hdf5" # to store hdf5 files and log files
+############################################################################################################################
 
 # Date filters
 MIN_DATE = None #date(2025, 1, 1) 
 MAX_DATE = None #date(2025,6,30)
-############################################################################################################################
 
 BAND_NAMES= ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8a", "B11", "B12"]
 TILE_NAMES = ['T29SMC', 'T29TQF', 'T29SMD', 'T29TQG', 'T29SNB', 'T29TME', 'T29SNC', 'T29SND', 'T29SPB', 'T29SPC', 'T29TNE', 'T29SPD', 'T29TNF', 'T29TNG', 'T29TPE', 'T29TPF', 'T29TPG']
