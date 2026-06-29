@@ -52,6 +52,32 @@ try:
 except ImportError:
     _HAVE_H5PY = False
 
+# Optional per-step RSS tracing. psutil gives current RSS; `resource` gives the
+# kernel's peak (high-water mark). Both optional so the aggregator never fails
+# for lack of them. _rss() = current MB, _peak() = peak-so-far MB.
+try:
+    import psutil
+    _PROC = psutil.Process()
+except ImportError:
+    _PROC = None
+import resource as _resource
+
+
+def _rss() -> float:
+    """Current resident set size in MB (0.0 if psutil unavailable)."""
+    return _PROC.memory_info().rss / 1e6 if _PROC is not None else 0.0
+
+
+def _peak() -> float:
+    """Peak RSS so far in MB (ru_maxrss is KiB on Linux)."""
+    return _resource.getrusage(_resource.RUSAGE_SELF).ru_maxrss / 1024.0
+
+
+def _rss_line(label: str) -> None:
+    """Print '[RSS] <label>: cur=… peak=…' so a run shows which step owns the
+    high-water mark — the aggregator's single AGGREGATOR_PEAK_KB can't."""
+    print(f"[RSS] {label:32s} cur={_rss():8.1f} MB  peak={_peak():8.1f} MB")
+
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent))   # processes/ (for `postprocess` package)
 sys.path.insert(0, str(_HERE))          # tile_postprocess/
@@ -411,11 +437,13 @@ def main() -> None:
     blocks: list[dict] = []
     rows_seen: list[int] = []
     cols_seen: list[int] = []
+    _rss_line("start of main")
     for p in paths:
         d = read_voted_block(str(p))
         blocks.append(d)
         rows_seen.append(int(d["block_row"]))
         cols_seen.append(int(d["block_col"]))
+    _rss_line(f"after reading {len(blocks)} block .npz")
 
     min_row, max_row = min(rows_seen), max(rows_seen)
     min_col, max_col = min(cols_seen), max(cols_seen)
@@ -556,6 +584,7 @@ def main() -> None:
     print(f"  Read {len(gpkg_paths)} block .gpkg ({len(block_gdf)} polygons) "
           f"in {time.perf_counter() - t0:.2f} s")
     del block_gdfs   # release the per-block frames; concat holds the data now
+    _rss_line("after reading block .gpkg")
 
     print("\nDissolving boundary-straddling patches per (date, class)...")
     print(f"  Master patch-area floor: {min_tile_patch_m2} m^2 (post-merge)")
@@ -566,6 +595,7 @@ def main() -> None:
     print(f"  {len(block_gdf)} block polygons -> {len(tile_gdf)} merged "
           f"patches in {time.perf_counter() - t0:.2f} s")
     del block_gdf    # the merged tile_gdf is all we need from here
+    _rss_line("after dissolve")
     if len(tile_gdf) > 0:
         per_class = tile_gdf.groupby(["class_id", "date_iso"])["n_pixels"].agg(
             ["count", "sum"]
@@ -587,6 +617,7 @@ def main() -> None:
     print(f"      {parquet_path}")
     print(f"  ({len(tile_gdf)} patches in {time.perf_counter() - t0:.2f} s)")
     del tile_gdf
+    _rss_line("after writing tile gpkg/parquet")
 
     # ── Step B: per-date stitch + GeoTIFF (+ optional dense .npz) ──────────
     # Stitch ONE date at a time into a (tile_h, tile_w) canvas, print its
@@ -626,10 +657,12 @@ def main() -> None:
             tile_origin_x, tile_origin_y, ref_pres, crs,
         ))
     write_tif_s = time.perf_counter() - t0
+    _rss_line("after per-date stitch + TIFs")
     # Per-block labels are fully consumed now; free them before the block-grid
     # step (which only needs metadata).
     for b in blocks:
         b.pop("labels", None)
+    _rss_line("after freeing block labels")
     total_tif_bytes = sum(os.path.getsize(p) for p in tif_paths)
     print(f"\n  Wrote {len(tif_paths)} GeoTIFF(s) in {write_tif_s:.2f} s "
           f"(total {total_tif_bytes / 1024:.1f} KB)")
