@@ -72,6 +72,27 @@ STRETCH_HIGH_PCT = 98.0
 DEFAULT_TS_START_ORDINAL: Optional[int] = None
 DEFAULT_TS_END_ORDINAL:   Optional[int] = None
 
+# HDF5 raw-data chunk cache (rdcc_nbytes) for the block readers. The rechunker
+# (rechunk_hdf5_chip_oriented.py) writes `values` LZF-compressed with chunks of
+# (T_CHUNK=48, 10, CHIP_PIXELS) — one chunk per chip spanning 48 timesteps,
+# ≈ 48*10*65536*2 ≈ 63 MB uncompressed. HDF5 decompresses a WHOLE chunk to serve
+# any element in it. The readers here read each chip's slab once (chip-outer
+# order), so this cache mainly lets a chip whose window spans >1 time-chunk reuse
+# a chunk across bands/timesteps within that single read rather than across
+# clusters. Sized to a couple of chunks (256 MB ceiling, not a fixed alloc);
+# bigger than the default 1 MB so a single chip read isn't fighting eviction.
+_RDCC_NBYTES = 256 * 1024 * 1024
+# rdcc_nslots should be a prime ≫ the number of chunks that can fit in the
+# cache, to keep the cache's hash table collision-free.
+_RDCC_NSLOTS = 1009
+
+
+def _open_block_hdf5(hdf5_path: str) -> h5py.File:
+    """Open an HDF5 for block reading with an enlarged chunk cache
+    (see `_RDCC_NBYTES`)."""
+    return h5py.File(hdf5_path, "r",
+                     rdcc_nbytes=_RDCC_NBYTES, rdcc_nslots=_RDCC_NSLOTS)
+
 
 # ============================================================================
 # DATA TYPES
@@ -252,6 +273,107 @@ def _read_chip(values, ts_indices: np.ndarray, flat_chip_idx: int,
     return chip_u16
 
 
+def _min_composite_ignoring_nodata(slab: np.ndarray, nodata) -> np.ndarray:
+    """Per-pixel/per-band min over axis 0, ignoring `nodata`, in native dtype.
+
+    `slab` is (n, ...) of the block's dtype. Returns (...) where each element is
+    the min over the n entries that aren't `nodata`; elements that are `nodata`
+    in EVERY entry stay `nodata`. Stays in the native dtype (no int64 promotion,
+    which would 4x the slab) — mirrors `aggregate_block_dates`.
+    """
+    is_nodata = (slab == nodata)
+    all_nodata = is_nodata.all(axis=0)
+    # Mask nodata up to the dtype max so .min() skips it.
+    masked = np.where(is_nodata, np.iinfo(slab.dtype).max, slab)
+    mins = masked.min(axis=0)
+    mins[all_nodata] = nodata
+    return mins
+
+
+def _block_chip_placements(chip_y_start: int, chip_x_start: int):
+    """Yield the chip-placement specs for one block's live 4x4 + ghost ring.
+
+    Each yielded tuple is
+        (chip_grid_y, chip_grid_x, src_y_slice, src_x_slice,
+         dst_y_slice, dst_x_slice)
+    meaning: the source chip at chip-grid (chip_grid_y, chip_grid_x)
+    contributes its `[src_y_slice, src_x_slice]` sub-region to the block at
+    `[dst_y_slice, dst_x_slice]`. There are 36 specs: 16 full inner chips, 16
+    edge-strip halves (4 per side), and 4 corner quadrants. This is the single
+    source of truth for block geometry, shared by `_fill_block_from_chips`
+    (read-then-place) and `read_block_clustered` (read-once, composite-per-
+    cluster, then place) so both stay in lockstep.
+    """
+    full = slice(0, CHIP_SIZE)
+    # 16 inner chips (full 256x256) at the live area.
+    for r in range(LIVE_ROWS):
+        for c in range(LIVE_COLS):
+            y0 = GHOST + r * CHIP_SIZE
+            x0 = GHOST + c * CHIP_SIZE
+            yield (chip_y_start + r, chip_x_start + c, full, full,
+                   slice(y0, y0 + CHIP_SIZE), slice(x0, x0 + CHIP_SIZE))
+    # Top edge strip: bottom 128 px of the row above the live area.
+    for c in range(LIVE_COLS):
+        x0 = GHOST + c * CHIP_SIZE
+        yield (chip_y_start - 1, chip_x_start + c,
+               slice(CHIP_SIZE - GHOST, CHIP_SIZE), full,
+               slice(0, GHOST), slice(x0, x0 + CHIP_SIZE))
+    # Bottom edge strip: top 128 px of the row below the live area.
+    for c in range(LIVE_COLS):
+        x0 = GHOST + c * CHIP_SIZE
+        yield (chip_y_start + LIVE_ROWS, chip_x_start + c,
+               slice(0, GHOST), full,
+               slice(GHOST + LIVE_H, BLOCK_H), slice(x0, x0 + CHIP_SIZE))
+    # Left edge strip: right 128 px of the col left of the live area.
+    for r in range(LIVE_ROWS):
+        y0 = GHOST + r * CHIP_SIZE
+        yield (chip_y_start + r, chip_x_start - 1,
+               full, slice(CHIP_SIZE - GHOST, CHIP_SIZE),
+               slice(y0, y0 + CHIP_SIZE), slice(0, GHOST))
+    # Right edge strip: left 128 px of the col right of the live area.
+    for r in range(LIVE_ROWS):
+        y0 = GHOST + r * CHIP_SIZE
+        yield (chip_y_start + r, chip_x_start + LIVE_COLS,
+               full, slice(0, GHOST),
+               slice(y0, y0 + CHIP_SIZE), slice(GHOST + LIVE_W, BLOCK_W))
+    # 4 corner quadrants (128x128 each).
+    yield (chip_y_start - 1, chip_x_start - 1,
+           slice(CHIP_SIZE - GHOST, CHIP_SIZE), slice(CHIP_SIZE - GHOST, CHIP_SIZE),
+           slice(0, GHOST), slice(0, GHOST))                                # NW
+    yield (chip_y_start - 1, chip_x_start + LIVE_COLS,
+           slice(CHIP_SIZE - GHOST, CHIP_SIZE), slice(0, GHOST),
+           slice(0, GHOST), slice(GHOST + LIVE_W, BLOCK_W))                  # NE
+    yield (chip_y_start + LIVE_ROWS, chip_x_start - 1,
+           slice(0, GHOST), slice(CHIP_SIZE - GHOST, CHIP_SIZE),
+           slice(GHOST + LIVE_H, BLOCK_H), slice(0, GHOST))                  # SW
+    yield (chip_y_start + LIVE_ROWS, chip_x_start + LIVE_COLS,
+           slice(0, GHOST), slice(0, GHOST),
+           slice(GHOST + LIVE_H, BLOCK_H), slice(GHOST + LIVE_W, BLOCK_W))   # SE
+
+
+def _fill_block_from_chips(block: np.ndarray, values, chip_lookup: dict,
+                           chip_y_start: int, chip_x_start: int,
+                           ts_indices: np.ndarray, nodata_val: int,
+                           stretch: bool) -> None:
+    """Splice the live 4x4 + 128-px ghost ring into a pre-allocated `block`.
+
+    Reads each chip's slab for the given `ts_indices` and writes it into the
+    correct region of `block` (shape `(len(ts_indices), 10, BLOCK_H, BLOCK_W)`,
+    already NODATA-filled by the caller). Missing chip-grid positions are left
+    as-is (nodata). Used by `read_block`; the placement geometry comes from
+    `_block_chip_placements` so it stays in lockstep with the clustered reader.
+    """
+    n_ts = len(ts_indices)
+    for cy, cx, sys_, sxs, dys, dxs in _block_chip_placements(chip_y_start,
+                                                              chip_x_start):
+        flat_chip_idx = chip_lookup.get((cy, cx))
+        if flat_chip_idx is None:
+            continue
+        chip = _read_chip(values, ts_indices, flat_chip_idx,
+                          n_ts, nodata_val, stretch=stretch)
+        block[:, :, dys, dxs] = chip[:, :, sys_, sxs]
+
+
 def get_block_grid_shape(hdf5_path: str) -> tuple[int, int]:
     """Return (n_block_rows, n_block_cols) for the tile in `hdf5_path`.
 
@@ -317,7 +439,7 @@ def read_block(hdf5_path: str,
     chip_y_start = block_row * LIVE_ROWS
     chip_x_start = block_col * LIVE_COLS
 
-    with h5py.File(hdf5_path, "r") as h5f:
+    with _open_block_hdf5(hdf5_path) as h5f:
         chip_lookup, ts_all, nodata_val = _read_chip_grid_metadata(h5f)
         values = h5f["values"]
 
@@ -345,89 +467,9 @@ def read_block(hdf5_path: str,
         block = np.full((n_ts, 10, BLOCK_H, BLOCK_W), block_nodata,
                         dtype=block_dtype)
 
-        # ── 16 inner chips (full 256x256) ────────────────────────────────
-        # Placed at block[..., GHOST + 256r : GHOST + 256(r+1),
-        #                       GHOST + 256c : GHOST + 256(c+1)].
-        for r in range(LIVE_ROWS):
-            for c in range(LIVE_COLS):
-                flat_chip_idx = chip_lookup.get((chip_y_start + r, chip_x_start + c))
-                if flat_chip_idx is None:
-                    continue
-                chip = _read_chip(values, ts_indices, flat_chip_idx,
-                                  n_ts, nodata_val, stretch=stretch)
-                y0 = GHOST + r * CHIP_SIZE
-                x0 = GHOST + c * CHIP_SIZE
-                block[:, :, y0:y0 + CHIP_SIZE, x0:x0 + CHIP_SIZE] = chip
-
-        # ── Top edge strip: 4 chips from chip-grid row (chip_y_start - 1),
-        # cols (chip_x_start + 0..3). Their BOTTOM 128 px go into the top
-        # strip at block[..., 0:GHOST, GHOST + 256c : GHOST + 256(c+1)].
-        for c in range(LIVE_COLS):
-            flat_chip_idx = chip_lookup.get((chip_y_start - 1, chip_x_start + c))
-            if flat_chip_idx is None:
-                continue
-            chip = _read_chip(values, ts_indices, flat_chip_idx,
-                              n_ts, nodata_val, stretch=stretch)
-            x0 = GHOST + c * CHIP_SIZE
-            block[:, :, 0:GHOST, x0:x0 + CHIP_SIZE] = chip[:, :, CHIP_SIZE - GHOST:, :]
-
-        # ── Bottom edge strip: chip-grid row (chip_y_start + 4). Their TOP
-        # 128 px go into the bottom strip.
-        for c in range(LIVE_COLS):
-            flat_chip_idx = chip_lookup.get((chip_y_start + LIVE_ROWS, chip_x_start + c))
-            if flat_chip_idx is None:
-                continue
-            chip = _read_chip(values, ts_indices, flat_chip_idx,
-                              n_ts, nodata_val, stretch=stretch)
-            x0 = GHOST + c * CHIP_SIZE
-            block[:, :, GHOST + LIVE_H:, x0:x0 + CHIP_SIZE] = chip[:, :, :GHOST, :]
-
-        # ── Left edge strip: chip-grid col (chip_x_start - 1). Their RIGHT
-        # 128 px go into the left strip.
-        for r in range(LIVE_ROWS):
-            flat_chip_idx = chip_lookup.get((chip_y_start + r, chip_x_start - 1))
-            if flat_chip_idx is None:
-                continue
-            chip = _read_chip(values, ts_indices, flat_chip_idx,
-                              n_ts, nodata_val, stretch=stretch)
-            y0 = GHOST + r * CHIP_SIZE
-            block[:, :, y0:y0 + CHIP_SIZE, 0:GHOST] = chip[:, :, :, CHIP_SIZE - GHOST:]
-
-        # ── Right edge strip: chip-grid col (chip_x_start + 4). Their LEFT
-        # 128 px go into the right strip.
-        for r in range(LIVE_ROWS):
-            flat_chip_idx = chip_lookup.get((chip_y_start + r, chip_x_start + LIVE_COLS))
-            if flat_chip_idx is None:
-                continue
-            chip = _read_chip(values, ts_indices, flat_chip_idx,
-                              n_ts, nodata_val, stretch=stretch)
-            y0 = GHOST + r * CHIP_SIZE
-            block[:, :, y0:y0 + CHIP_SIZE, GHOST + LIVE_W:] = chip[:, :, :, :GHOST]
-
-        # ── 4 corner chips: each contributes the 128x128 quadrant adjacent
-        # to the live area.
-        corners = [
-            # (chip_grid_y, chip_grid_x, src_y_slice, src_x_slice, dst_y_slice, dst_x_slice)
-            (chip_y_start - 1, chip_x_start - 1,
-             slice(CHIP_SIZE - GHOST, CHIP_SIZE), slice(CHIP_SIZE - GHOST, CHIP_SIZE),
-             slice(0, GHOST), slice(0, GHOST)),                              # NW
-            (chip_y_start - 1, chip_x_start + LIVE_COLS,
-             slice(CHIP_SIZE - GHOST, CHIP_SIZE), slice(0, GHOST),
-             slice(0, GHOST), slice(GHOST + LIVE_W, BLOCK_W)),                # NE
-            (chip_y_start + LIVE_ROWS, chip_x_start - 1,
-             slice(0, GHOST), slice(CHIP_SIZE - GHOST, CHIP_SIZE),
-             slice(GHOST + LIVE_H, BLOCK_H), slice(0, GHOST)),                # SW
-            (chip_y_start + LIVE_ROWS, chip_x_start + LIVE_COLS,
-             slice(0, GHOST), slice(0, GHOST),
-             slice(GHOST + LIVE_H, BLOCK_H), slice(GHOST + LIVE_W, BLOCK_W)),  # SE
-        ]
-        for cy, cx, sys_, sxs, dys, dxs in corners:
-            flat_chip_idx = chip_lookup.get((cy, cx))
-            if flat_chip_idx is None:
-                continue
-            chip = _read_chip(values, ts_indices, flat_chip_idx,
-                              n_ts, nodata_val, stretch=stretch)
-            block[:, :, dys, dxs] = chip[:, :, sys_, sxs]
+        _fill_block_from_chips(block, values, chip_lookup,
+                               chip_y_start, chip_x_start,
+                               ts_indices, nodata_val, stretch)
 
     position = BlockPosition(
         block_row=block_row,
@@ -439,6 +481,159 @@ def read_block(hdf5_path: str,
         pixel_res=pixel_res,
     )
     return block, ts_kept, position
+
+
+# ============================================================================
+# PUBLIC API: read_block_clustered
+# ============================================================================
+
+def read_block_clustered(hdf5_path: str,
+                         block_row: int,
+                         block_col: int,
+                         list_of_date_clusters_ordinal,
+                         ts_start_ordinal: Optional[int] = DEFAULT_TS_START_ORDINAL,
+                         ts_end_ordinal:   Optional[int] = DEFAULT_TS_END_ORDINAL,
+                         stretch: bool = False,
+                         ) -> tuple[np.ndarray, np.ndarray, BlockPosition]:
+    """Read one block, min-compositing per date cluster as we go.
+
+    Functionally equivalent to `read_block(...)` followed by
+    `aggregate_block_dates(..., list_of_date_clusters_ordinal)`, but never
+    materializes the full `(n_ts, 10, BLOCK_H, BLOCK_W)` array.
+
+    Read order is chip-outer: each of the block's ~36 source chips is read
+    exactly ONCE (all of its windowed timesteps), then reduced to one min-
+    composite per cluster and placed into the cluster's slice of the pre-
+    allocated `(n_clusters, 10, BLOCK_H, BLOCK_W)` output. Reading once per chip
+    matters because the HDF5 stores `values` LZF-compressed with a whole chip's
+    time axis in one chunk: a cluster-outer order would re-decompress every
+    chip's chunk once per cluster (the block's ~36 chunks far exceed any chunk
+    cache), making it several-fold slower. Peak full-res memory is one chip's
+    time slab `(n_window_ts, 10, CHIP_SIZE, CHIP_SIZE)` (~1.3 MB * n_ts) plus
+    the `(n_clusters, ...)` output — far below the old full-block `O(n_ts)`
+    spike, since n_clusters << n_ts on a large date range.
+
+    Parameters
+    ----------
+    list_of_date_clusters_ordinal : list[list[int]]
+        Clusters of ordinal dates (e.g. from `determine_clusters_of_dates`).
+        Clusters are filtered to the dates actually present in this block's
+        kept timesteps (after the [ts_start_ordinal, ts_end_ordinal] window);
+        empty clusters are dropped. The remaining clusters' MEDIAN dates become
+        the output timesteps, sorted chronologically — matching
+        `aggregate_block_dates`.
+    Other parameters as `read_block`.
+
+    Returns
+    -------
+    block_out : (n_clusters, 10, BLOCK_H, BLOCK_W)
+        One min-composite per surviving cluster, chronological by median date.
+        dtype/nodata match `read_block` (uint8/255 stretched, else uint16/file
+        nodata).
+    ts_out : (n_clusters,) int64
+        Median ordinal date per cluster, aligned to axis 0.
+    position : BlockPosition
+
+    Raises
+    ------
+    ValueError
+        If no clustered dates fall in the window (mirrors read_block's empty
+        check) so callers get a clear error rather than an empty block.
+    """
+    chip_y_start = block_row * LIVE_ROWS
+    chip_x_start = block_col * LIVE_COLS
+
+    with _open_block_hdf5(hdf5_path) as h5f:
+        chip_lookup, ts_all, nodata_val = _read_chip_grid_metadata(h5f)
+        values = h5f["values"]
+
+        pixel_res = float(h5f.attrs.get("pixel_res", 10.0))   # type: ignore[arg-type]
+        world_origin_x, world_origin_y = _compute_block_world_origin(
+            h5f, chip_lookup, chip_y_start, chip_x_start,
+            pixel_res, CHIP_SIZE,
+        )
+
+        # Window-filter the file's timesteps once, then map ordinal date ->
+        # its absolute index into `values` so each cluster can be read directly
+        # without ever reading the whole window.
+        window_indices = _select_timesteps(ts_all, ts_start_ordinal, ts_end_ordinal)
+        if len(window_indices) == 0:
+            raise ValueError(
+                f"No timesteps in [{ts_start_ordinal}, {ts_end_ordinal}]; "
+                f"file spans ordinals [{int(ts_all.min())}, {int(ts_all.max())}]."
+            )
+        window_ords = ts_all[window_indices].astype(np.int64)
+        # First absolute index per ordinal date (dates can repeat in principle).
+        date_to_abs_idx: dict[int, int] = {}
+        for abs_idx, ordv in zip(window_indices.tolist(), window_ords.tolist()):
+            date_to_abs_idx.setdefault(int(ordv), int(abs_idx))
+
+        # Restrict each cluster to dates present in this block's window; drop
+        # clusters left empty (a block whose ts window is narrower than the tile
+        # calendar can legitimately miss whole clusters).
+        block_clusters = []
+        for cluster in list_of_date_clusters_ordinal:
+            kept = [int(d) for d in cluster if int(d) in date_to_abs_idx]
+            if kept:
+                block_clusters.append(kept)
+        if not block_clusters:
+            raise ValueError(
+                "None of the clustered dates are in this block's kept "
+                "timesteps — check the START/END window matches the tile."
+            )
+
+        # Output: one composite per surviving cluster, chronological by median.
+        medians = [int(np.median(cl)) for cl in block_clusters]
+        order = np.argsort(medians, kind="stable")
+        block_clusters = [block_clusters[i] for i in order]
+        ts_out = np.array([medians[i] for i in order], dtype=np.int64)
+
+        block_dtype = np.uint8 if stretch else np.uint16
+        block_nodata = NODATA_U8 if stretch else nodata_val
+        n_clusters = len(block_clusters)
+        block_out = np.full((n_clusters, 10, BLOCK_H, BLOCK_W), block_nodata,
+                            dtype=block_dtype)
+
+        # The union of timesteps actually used across all surviving clusters,
+        # read once per chip. Map each used ordinal -> its row in the per-chip
+        # slab, then express each cluster as local rows into that slab.
+        used_ords = sorted({d for cl in block_clusters for d in cl})
+        chip_ts_indices = np.array([date_to_abs_idx[d] for d in used_ords],
+                                   dtype=np.int64)
+        ord_to_local = {d: i for i, d in enumerate(used_ords)}
+        cluster_local_rows = [
+            np.array([ord_to_local[d] for d in cl], dtype=np.int64)
+            for cl in block_clusters
+        ]
+
+        # Chip-outer: read each source chip once (all used timesteps), then
+        # reduce to one min-composite per cluster and place it. Reading once per
+        # chip avoids re-decompressing its LZF time-chunk per cluster.
+        n_used = len(chip_ts_indices)
+        for cy, cx, sys_, sxs, dys, dxs in _block_chip_placements(chip_y_start,
+                                                                  chip_x_start):
+            flat_chip_idx = chip_lookup.get((cy, cx))
+            if flat_chip_idx is None:
+                continue   # missing chip — block_out stays nodata there
+            # (n_used, 10, CHIP_SIZE, CHIP_SIZE) for this chip, sub-sliced to the
+            # region this placement contributes.
+            chip = _read_chip(values, chip_ts_indices, flat_chip_idx,
+                              n_used, nodata_val, stretch=stretch)
+            region = chip[:, :, sys_, sxs]
+            for k, rows in enumerate(cluster_local_rows):
+                block_out[k, :, dys, dxs] = _min_composite_ignoring_nodata(
+                    region[rows], block_nodata)
+
+    position = BlockPosition(
+        block_row=block_row,
+        block_col=block_col,
+        chip_y_start=chip_y_start,
+        chip_x_start=chip_x_start,
+        world_origin_x=world_origin_x,
+        world_origin_y=world_origin_y,
+        pixel_res=pixel_res,
+    )
+    return block_out, ts_out, position
 
 
 # ============================================================================

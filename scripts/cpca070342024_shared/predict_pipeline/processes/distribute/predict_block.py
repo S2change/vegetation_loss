@@ -92,8 +92,8 @@ sys.path.insert(0, str(_PROCESSES))                            # shared subpacka
 sys.path.insert(0, str(_MODELS_DIR))                           # model packages
 
 from input_setup import (
-    read_block, get_block_grid_shape,
-    aggregate_block_dates, parse_date_clusters,
+    read_block, read_block_clustered, get_block_grid_shape,
+    parse_date_clusters,
 )
 from composite_shift_chips import (
     create_before_after_composites,
@@ -309,49 +309,44 @@ def main() -> None:
         return date.fromisoformat(v).toordinal() if v not in (None, "") else None
     read_start_ord = _read_ordinal("READ_START_DATE")
     read_end_ord   = _read_ordinal("READ_END_DATE")
-    print(f"\nStep 1: reading chip-block from HDF5...")
-    t0 = time.perf_counter()
-    block, ts, position = read_block(hdf5_path, block_row, block_col,
-                                     ts_start_ordinal=read_start_ord,
-                                     ts_end_ordinal=read_end_ord,
-                                     stretch=stretch)
-    print(f"  block: shape={block.shape}  dtype={block.dtype}  "
-          f"{block.nbytes / 1e6:.1f} MB")
-    print(f"  ts:    {date.fromordinal(int(ts[0]))} -> "
-          f"{date.fromordinal(int(ts[-1]))}  ({len(ts)} timesteps)")
-    print(f"  Step 1 time: {time.perf_counter() - t0:.2f} s")
-    print(f"[RSS] After chip-block:                {rss_mb():7.1f} MB")
 
-    # ── Step 2b: temporal cluster-aggregation (optional) ──────────────────
-    # Collapse the block's raw timesteps into one min-composite per date
-    # cluster (ts -> cluster medians) before compositing. The clusters were
-    # computed once by submit_tile.sh from the tile calendar and exported as
-    # DATE_CLUSTERS. Clusters whose dates fall entirely outside this block's
-    # kept timesteps are dropped here so a block with a narrower ts window
-    # still aggregates cleanly.
     if date_clusters:
-        kept = set(int(t) for t in ts)
-        block_clusters = [
-            [d for d in cl if int(d) in kept] for cl in date_clusters
-        ]
-        block_clusters = [cl for cl in block_clusters if cl]
-        if not block_clusters:
-            raise SystemExit(
-                "[predict_block] DATE_CLUSTERS set but none of the clustered "
-                "dates are in this block's kept timesteps — check the "
-                "START/END window matches the tile."
-            )
-        print(f"\nStep 2b: aggregating {len(ts)} timesteps into "
-              f"{len(block_clusters)} date-cluster composite(s)...")
+        # ── Step 1+2b (clustered): stream-read + min-composite per cluster ──
+        # When date clustering is on, read ONE cluster's timesteps at a time
+        # and reduce it to a single min-composite immediately, so the full
+        # (n_ts, 10, 1280, 1280) array is never materialized. Peak full-res
+        # memory is O(largest cluster) instead of O(all timesteps in window) —
+        # the fix for OOM on large date ranges, which collapse to a handful of
+        # cluster composites anyway. Equivalent to the old read_block +
+        # aggregate_block_dates pair, minus the memory spike.
+        print(f"\nStep 1+2b: streaming {len(date_clusters)} date cluster(s) "
+              f"(read + min-composite per cluster)...")
         t0 = time.perf_counter()
-        block, ts, position = aggregate_block_dates(
-            block, ts, position, block_clusters, nodata=input_nodata,
+        block, ts, position = read_block_clustered(
+            hdf5_path, block_row, block_col, date_clusters,
+            ts_start_ordinal=read_start_ord,
+            ts_end_ordinal=read_end_ord,
+            stretch=stretch,
         )
         print(f"  block: shape={block.shape}  dtype={block.dtype}  "
               f"{block.nbytes / 1e6:.1f} MB")
         print(f"  ts:    {[date.fromordinal(int(t)).isoformat() for t in ts]}")
-        print(f"  Step 2b time: {time.perf_counter() - t0:.2f} s")
+        print(f"  Step 1+2b time: {time.perf_counter() - t0:.2f} s")
         print(f"[RSS] After cluster-aggregation:       {rss_mb():7.1f} MB")
+    else:
+        # ── Step 1 (raw): read every timestep in the window ───────────────
+        print(f"\nStep 1: reading chip-block from HDF5...")
+        t0 = time.perf_counter()
+        block, ts, position = read_block(hdf5_path, block_row, block_col,
+                                         ts_start_ordinal=read_start_ord,
+                                         ts_end_ordinal=read_end_ord,
+                                         stretch=stretch)
+        print(f"  block: shape={block.shape}  dtype={block.dtype}  "
+              f"{block.nbytes / 1e6:.1f} MB")
+        print(f"  ts:    {date.fromordinal(int(ts[0]))} -> "
+              f"{date.fromordinal(int(ts[-1]))}  ({len(ts)} timesteps)")
+        print(f"  Step 1 time: {time.perf_counter() - t0:.2f} s")
+        print(f"[RSS] After chip-block:                {rss_mb():7.1f} MB")
 
     # ── Step 3: per-pixel before/after compositing ────────────────────────
     print(f"\nStep 3: compositing for {len(target_dates)} target date(s)...")

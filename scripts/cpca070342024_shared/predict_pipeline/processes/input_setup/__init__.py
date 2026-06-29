@@ -19,6 +19,7 @@ the live area's top-left.
 """
 from .hdf5_reader import (
     read_block,
+    read_block_clustered,
     iter_blocks,
     get_block_grid_shape,
     dry_run,
@@ -44,6 +45,7 @@ from .determine_clusters_of_dates import (
 
 __all__ = [
     "read_block",
+    "read_block_clustered",
     "iter_blocks",
     "get_block_grid_shape",
     "dry_run",
