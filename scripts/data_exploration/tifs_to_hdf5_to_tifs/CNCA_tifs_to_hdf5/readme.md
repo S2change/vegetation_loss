@@ -18,7 +18,7 @@
   - PT mask files, e.g. `mask_T29TPG.tif`
 - HDF5 chunks: (12,10,n_slots=256*256), open for appending new timestamps; COORDS_NODATA=-9999
 - From the original geotiff tiles, only pixels from the "tight bounding box" are stored: see bounds below and [this ilustration](https://github.com/S2change/vegetation_loss/blob/main/scripts/data_exploration/tifs_to_hdf5_to_tifs/CNCA_tifs_to_hdf5/s2_tiles_and_tight_bboxes_portugal.png)
-- (june 29): create a log file per tile: new file with `create_hdf`; update existing file with `append_hdf`.
+- (June 29, 2026): create a log file per tile: new file with `create_hdf`; update existing file with `append_hdf`. 
 
 # Instructions
 
