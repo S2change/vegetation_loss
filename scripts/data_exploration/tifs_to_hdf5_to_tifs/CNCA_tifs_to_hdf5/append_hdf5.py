@@ -32,9 +32,9 @@ from hdf5_utils import (
 
 def append_tile(tile, h5_filename):
     if not os.path.exists(h5_filename):
-        raise FileNotFoundError(
-            f"{h5_filename} does not exist — run create_hdf5.py first."
-        )
+        print(f"  Skipping tile {tile}: HDF5 file not found ({h5_filename}).")
+        print(f"  Run create_hdf5.py first to initialise this tile.")
+        return
 
     # ── Read existing state ────────────────────────────────────────────────────
     with h5py.File(h5_filename, 'r') as h5f:
