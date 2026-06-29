@@ -1,5 +1,6 @@
 # version June 29, 2026
 
+- Create new file with `create_hdf`; update existing file with `append_hdf`. **New files to append have to have acquisition dates posterior to the files already stored in the current `hdf5` file**.
 - Geotiff files for the same day (yyyy-mm-dd) are aggregated into a single timestamp. Multiple files can correspont to distinct `geotiff` subfiles (same acquisition date and distinct processing date) and/or to `geotiff` files for the same day (e.g. S2A and S2B separated by ~10 minutes);
 - Output hdf5 files have fields:
   - `xs_new, ys_new`,
