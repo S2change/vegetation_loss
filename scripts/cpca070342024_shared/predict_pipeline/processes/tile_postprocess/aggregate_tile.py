@@ -74,30 +74,15 @@ def _required_env(name: str) -> str:
     return v
 
 
-def _stitch_blocks(blocks: list[dict], n_rows: int, n_cols: int,
-                   block_h: int, block_w: int, n_dates: int,
-                   tile_origin_x: float, tile_origin_y: float,
-                   pixel_res: float,
-                   row_offset: int = 0, col_offset: int = 0) -> np.ndarray:
-    """Place each block's labels at its cell in the (cropped) tile canvas.
+def _check_block_origins(blocks: list[dict], block_h: int, block_w: int,
+                         tile_origin_x: float, tile_origin_y: float,
+                         pixel_res: float,
+                         row_offset: int = 0, col_offset: int = 0) -> None:
+    """Warn for any block whose recorded world origin drifts > 0.5 m off-grid.
 
-    `row_offset`/`col_offset` are the block-grid coords of the canvas's
-    top-left cell (the NW-most processed block) when only a sub-rectangle of
-    the tile was processed; a block at grid (r, c) lands at canvas cell
-    (r - row_offset, c - col_offset). For a full-tile run both offsets are 0.
-    tile_origin_x/y is the world NW corner of that top-left cell. Warns on
-    per-block world-origin drift > 0.5 m.
-
-    Frees each block's `labels` entry (`del b["labels"]`) immediately after
-    copying it into the canvas, so the per-block label arrays aren't held
-    alongside the stitched canvas — otherwise the tile's labels would be
-    resident twice (scattered in `blocks` + stitched here), the aggregator's
-    largest avoidable memory cost. The block dicts keep their small metadata
-    (row/col/world_origin), which the later block-grid + drift steps still use.
+    Pulled out of stitching so the warning fires once (not once per date) now
+    that the tile is stitched one date at a time.
     """
-    labels = np.zeros(
-        (n_dates, n_rows * block_h, n_cols * block_w), dtype=np.uint8,
-    )
     block_w_m = block_w * pixel_res
     block_h_m = block_h * pixel_res
     for b in blocks:
@@ -111,13 +96,34 @@ def _stitch_blocks(blocks: list[dict], n_rows: int, n_cols: int,
             print(f"  [warn] block ({b['block_row']},{b['block_col']}) world "
                   f"origin off: expected ({expected_x}, {expected_y}), "
                   f"got ({got_x}, {got_y})")
+
+
+def _stitch_one_date(blocks: list[dict], date_idx: int,
+                     n_rows: int, n_cols: int, block_h: int, block_w: int,
+                     row_offset: int = 0, col_offset: int = 0) -> np.ndarray:
+    """Stitch ONE date's label slice into a single (tile_h, tile_w) canvas.
+
+    Builds a 2-D canvas for `date_idx` only, placing each block's
+    `labels[date_idx]` at its grid cell. Stitching one date at a time (rather
+    than the whole `(n_dates, tile_h, tile_w)` cube at once) is what keeps the
+    aggregator's peak memory flat in the number of dates: a single date's
+    canvas is `tile_h * tile_w` bytes (~127 MB at 11264²) regardless of how
+    many target dates the run spans. This matters for multi-year runs (dozens
+    of dates) where the full cube was several GiB and drove the OOM.
+
+    `row_offset`/`col_offset` map a block at grid (r, c) to canvas cell
+    (r - row_offset, c - col_offset) for sub-rectangle runs (0 for full tile).
+    Does NOT free `b["labels"]` — the caller reuses every block across all
+    date indices, then frees them after the date loop.
+    """
+    canvas = np.zeros((n_rows * block_h, n_cols * block_w), dtype=np.uint8)
+    for b in blocks:
+        r = int(b["block_row"]) - row_offset
+        c = int(b["block_col"]) - col_offset
         y0 = r * block_h
         x0 = c * block_w
-        labels[:, y0:y0 + block_h, x0:x0 + block_w] = b["labels"]
-        # Release this block's label array now it's in the canvas; the later
-        # aggregation steps only need the dict's metadata, not `labels`.
-        del b["labels"]
-    return labels
+        canvas[y0:y0 + block_h, x0:x0 + block_w] = b["labels"][date_idx]
+    return canvas
 
 
 def _dissolve_block_polygons(block_gdf: gpd.GeoDataFrame,
@@ -238,54 +244,47 @@ def _read_hdf5_crs(hdf5_path: str | None) -> CRS | None:
         return None
 
 
-def _write_geotiffs_per_date(output_dir: str,
-                             tile_id: str,
-                             labels: np.ndarray,
-                             target_dates: np.ndarray,
-                             world_origin_x: float,
-                             world_origin_y: float,
-                             pixel_res: float,
-                             crs: CRS | None) -> list[str]:
-    """Write one LZW-compressed GeoTIFF per target date.
+def _write_one_geotiff(output_dir: str,
+                       tile_id: str,
+                       date_canvas: np.ndarray,
+                       ordinal: int,
+                       world_origin_x: float,
+                       world_origin_y: float,
+                       pixel_res: float,
+                       crs: CRS | None) -> str:
+    """Write one date's (tile_h, tile_w) label canvas as an LZW GeoTIFF.
 
     Class 0 (background / no detection) is tagged as the GeoTIFF's nodata
-    value so QGIS / ArcGIS render it transparent by default.
-
-    Returns the list of paths written.
+    value so QGIS / ArcGIS render it transparent by default. Called once per
+    date from the per-date loop so the full label cube never has to exist.
+    Returns the path written.
     """
-    n_dates, tile_h, tile_w = labels.shape
-    # rasterio's `from_origin(x, y, xres, yres)` builds an affine where
-    # the upper-left pixel's NW corner is (x, y), x grows east at xres,
-    # y shrinks south at yres. World origin in our metadata is the LIVE
-    # NW corner of the tile, which matches that convention.
+    tile_h, tile_w = date_canvas.shape
+    iso = _date.fromordinal(int(ordinal)).isoformat()
+    # rasterio's `from_origin(x, y, xres, yres)` builds an affine where the
+    # upper-left pixel's NW corner is (x, y), x grows east at xres, y shrinks
+    # south at yres — matching our LIVE-NW-corner world origin.
     transform = from_origin(world_origin_x, world_origin_y, pixel_res, pixel_res)
-
-    paths: list[str] = []
-    for i in range(n_dates):
-        ordinal = int(target_dates[i])
-        iso = _date.fromordinal(ordinal).isoformat()
-        out_path = os.path.join(output_dir, f"{tile_id}_tile_{iso}.tif")
-        profile = {
-            "driver": "GTiff",
-            "dtype": "uint8",
-            "count": 1,
-            "height": tile_h,
-            "width": tile_w,
-            "transform": transform,
-            "nodata": 0,
-            "compress": "LZW",
-            "tiled": True,
-            "blockxsize": 256,
-            "blockysize": 256,
-        }
-        if crs is not None:
-            profile["crs"] = crs
-        with rasterio.open(out_path, "w", **profile) as dst:
-            dst.write(labels[i], 1)
-            # Tag the band with the date so gdalinfo + QGIS show it.
-            dst.set_band_description(1, f"voted_labels_{iso}")
-        paths.append(out_path)
-    return paths
+    out_path = os.path.join(output_dir, f"{tile_id}_tile_{iso}.tif")
+    profile = {
+        "driver": "GTiff",
+        "dtype": "uint8",
+        "count": 1,
+        "height": tile_h,
+        "width": tile_w,
+        "transform": transform,
+        "nodata": 0,
+        "compress": "LZW",
+        "tiled": True,
+        "blockxsize": 256,
+        "blockysize": 256,
+    }
+    if crs is not None:
+        profile["crs"] = crs
+    with rasterio.open(out_path, "w", **profile) as dst:
+        dst.write(date_canvas, 1)
+        dst.set_band_description(1, f"voted_labels_{iso}")
+    return out_path
 
 
 def _write_block_grid(out_path: str,
@@ -379,6 +378,17 @@ def main() -> None:
     
     # Master-level patch-area floor (m^2)
     min_tile_patch_m2 = float(os.environ.get("MIN_TILE_PATCH_M2", "5000"))
+
+    # Dense tile .npz ({TILE_ID}_tile.npz): the full (n_dates, tile_h, tile_w)
+    # label cube. OFF by default — for a full-country tile that cube is several
+    # GiB, and building it forces the whole stack into memory at once, which was
+    # the aggregator's OOM driver. The per-date GeoTIFFs carry the same label
+    # data in a GIS-ready, memory-friendly form, and nothing in the pipeline
+    # reads this .npz back. Set WRITE_DENSE_NPZ=1 to opt in (e.g. for a small
+    # tile where a single dense array is convenient for analysis); doing so
+    # restores the multi-GiB peak, so size the aggregator's memory accordingly.
+    write_dense_npz = (os.environ.get("WRITE_DENSE_NPZ", "0")
+                       not in ("0", "", "false", "False"))
 
     t_total = time.perf_counter()
 
@@ -515,25 +525,17 @@ def main() -> None:
     tile_origin_x = float(origin_block["world_origin_x"])
     tile_origin_y = float(origin_block["world_origin_y"])
 
-    print(f"\nStitching {n_rows * n_cols} blocks into "
-          f"({n_dates}, {tile_h}, {tile_w}) uint8...")
-    t0 = time.perf_counter()
-    labels = _stitch_blocks(
-        blocks, n_rows, n_cols, block_h, block_w, n_dates,
-        tile_origin_x, tile_origin_y, ref_pres,
+    # One-time origin drift check (was previously done inside the stitch, which
+    # now runs per date — so do it once here instead of n_dates times).
+    _check_block_origins(
+        blocks, block_h, block_w, tile_origin_x, tile_origin_y, ref_pres,
         row_offset=min_row, col_offset=min_col,
     )
-    print(f"  Stitch time: {time.perf_counter() - t0:.2f} s")
-
-    # ── Per-date detection summary ────────────────────────────────────────
-    print("\nPer-date detections in the merged tile:")
-    for i in range(n_dates):
-        uniq, cnts = np.unique(labels[i], return_counts=True)
-        post = {int(u): int(c) for u, c in zip(uniq, cnts) if u != 0}
-        iso = _date.fromordinal(int(ref_dates[i])).isoformat()
-        print(f"  {iso}: {post}")
 
     # ── Step A: read per-block polygons, dissolve, write vector outputs ───
+    # Done before the label stitch/TIF loop: the polygon GeoDataFrames are the
+    # other large transient, and there's no reason for them to coexist with the
+    # label canvases.
     print("\nReading per-block polygons (.gpkg)...")
     t0 = time.perf_counter()
     gpkg_pattern = f"{tile_id}_block_*.gpkg"
@@ -553,6 +555,7 @@ def main() -> None:
     block_gdf.set_crs(src_crs, inplace=True, allow_override=True)
     print(f"  Read {len(gpkg_paths)} block .gpkg ({len(block_gdf)} polygons) "
           f"in {time.perf_counter() - t0:.2f} s")
+    del block_gdfs   # release the per-block frames; concat holds the data now
 
     print("\nDissolving boundary-straddling patches per (date, class)...")
     print(f"  Master patch-area floor: {min_tile_patch_m2} m^2 (post-merge)")
@@ -562,6 +565,7 @@ def main() -> None:
     )
     print(f"  {len(block_gdf)} block polygons -> {len(tile_gdf)} merged "
           f"patches in {time.perf_counter() - t0:.2f} s")
+    del block_gdf    # the merged tile_gdf is all we need from here
     if len(tile_gdf) > 0:
         per_class = tile_gdf.groupby(["class_id", "date_iso"])["n_pixels"].agg(
             ["count", "sum"]
@@ -582,39 +586,70 @@ def main() -> None:
     print(f"\nWrote {gpkg_path}")
     print(f"      {parquet_path}")
     print(f"  ({len(tile_gdf)} patches in {time.perf_counter() - t0:.2f} s)")
+    del tile_gdf
 
-    # ── Step B: dense .npz (auxiliary output) ─────────────────────────────
-    npz_path = os.path.join(output_dir, f"{tile_id}_tile.npz")
-    t0 = time.perf_counter()
-    _write_dense_npz(
-        npz_path,
-        labels=labels, target_dates=ref_dates, classes=ref_classes,
-        tile_id=tile_id,
-        world_origin_x=tile_origin_x, world_origin_y=tile_origin_y,
-        pixel_res=ref_pres, threshold=ref_threshold,
-        n_block_rows=n_rows, n_block_cols=n_cols,
-    )
-    write_npz_s = time.perf_counter() - t0
-    npz_bytes = os.path.getsize(npz_path)
-    print(f"Wrote {npz_path}")
-    print(f"  ({npz_bytes / 1024:.1f} KB in {write_npz_s:.2f} s)")
-
-    # ── Step C: per-date GeoTIFFs (GIS-ready output) ──────────────────────
-    print(f"\nWriting per-date GeoTIFFs...")
+    # ── Step B: per-date stitch + GeoTIFF (+ optional dense .npz) ──────────
+    # Stitch ONE date at a time into a (tile_h, tile_w) canvas, print its
+    # detection summary, and write its GeoTIFF — so the full (n_dates, tile_h,
+    # tile_w) cube never exists. Peak label memory is the scattered per-block
+    # arrays (freed after this loop) plus one date's canvas, flat in n_dates.
     crs = _read_hdf5_crs(os.environ.get("TILE_HDF5_PATH"))
+    print(f"\nStitching + writing {n_dates} per-date GeoTIFF(s) "
+          f"({tile_h} x {tile_w} each)...")
     if crs is not None:
         print(f"  CRS:  {crs}")
+    if write_dense_npz:
+        print(f"  WRITE_DENSE_NPZ=1: also accumulating the dense "
+              f"({n_dates}, {tile_h}, {tile_w}) cube for {tile_id}_tile.npz "
+              f"— this restores the multi-GiB memory peak.")
+
+    # Per-date detection summary (printed inline as we stitch each date).
+    print("\nPer-date detections in the merged tile:")
     t0 = time.perf_counter()
-    tif_paths = _write_geotiffs_per_date(
-        output_dir, tile_id, labels, ref_dates,
-        tile_origin_x, tile_origin_y, ref_pres, crs,
-    )
+    tif_paths: list[str] = []
+    # Only allocate the dense cube when the user opted in.
+    dense_labels = (np.zeros((n_dates, tile_h, tile_w), dtype=np.uint8)
+                    if write_dense_npz else None)
+    for i in range(n_dates):
+        date_canvas = _stitch_one_date(
+            blocks, i, n_rows, n_cols, block_h, block_w,
+            row_offset=min_row, col_offset=min_col,
+        )
+        uniq, cnts = np.unique(date_canvas, return_counts=True)
+        post = {int(u): int(c) for u, c in zip(uniq, cnts) if u != 0}
+        iso = _date.fromordinal(int(ref_dates[i])).isoformat()
+        print(f"  {iso}: {post}")
+        if dense_labels is not None:
+            dense_labels[i] = date_canvas
+        tif_paths.append(_write_one_geotiff(
+            output_dir, tile_id, date_canvas, int(ref_dates[i]),
+            tile_origin_x, tile_origin_y, ref_pres, crs,
+        ))
     write_tif_s = time.perf_counter() - t0
+    # Per-block labels are fully consumed now; free them before the block-grid
+    # step (which only needs metadata).
+    for b in blocks:
+        b.pop("labels", None)
     total_tif_bytes = sum(os.path.getsize(p) for p in tif_paths)
-    print(f"  Wrote {len(tif_paths)} GeoTIFF(s) in {write_tif_s:.2f} s "
-          f"(total {total_tif_bytes / 1024:.1f} KB):")
-    for p in tif_paths:
-        print(f"    {p}  ({os.path.getsize(p) / 1024:.1f} KB)")
+    print(f"\n  Wrote {len(tif_paths)} GeoTIFF(s) in {write_tif_s:.2f} s "
+          f"(total {total_tif_bytes / 1024:.1f} KB)")
+
+    # ── Optional dense .npz (auxiliary; off by default — see WRITE_DENSE_NPZ) ─
+    if dense_labels is not None:
+        npz_path = os.path.join(output_dir, f"{tile_id}_tile.npz")
+        t0 = time.perf_counter()
+        _write_dense_npz(
+            npz_path,
+            labels=dense_labels, target_dates=ref_dates, classes=ref_classes,
+            tile_id=tile_id,
+            world_origin_x=tile_origin_x, world_origin_y=tile_origin_y,
+            pixel_res=ref_pres, threshold=ref_threshold,
+            n_block_rows=n_rows, n_block_cols=n_cols,
+        )
+        npz_bytes = os.path.getsize(npz_path)
+        print(f"Wrote {npz_path}")
+        print(f"  ({npz_bytes / 1024:.1f} KB in {time.perf_counter() - t0:.2f} s)")
+        del dense_labels
 
     # ── Step D: block-grid outline (debug overlay) ────────────────────────
     # One rectangle per block's LIVE extent so you can overlay it on the
