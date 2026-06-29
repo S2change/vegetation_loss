@@ -87,6 +87,13 @@ def _stitch_blocks(blocks: list[dict], n_rows: int, n_cols: int,
     (r - row_offset, c - col_offset). For a full-tile run both offsets are 0.
     tile_origin_x/y is the world NW corner of that top-left cell. Warns on
     per-block world-origin drift > 0.5 m.
+
+    Frees each block's `labels` entry (`del b["labels"]`) immediately after
+    copying it into the canvas, so the per-block label arrays aren't held
+    alongside the stitched canvas — otherwise the tile's labels would be
+    resident twice (scattered in `blocks` + stitched here), the aggregator's
+    largest avoidable memory cost. The block dicts keep their small metadata
+    (row/col/world_origin), which the later block-grid + drift steps still use.
     """
     labels = np.zeros(
         (n_dates, n_rows * block_h, n_cols * block_w), dtype=np.uint8,
@@ -107,6 +114,9 @@ def _stitch_blocks(blocks: list[dict], n_rows: int, n_cols: int,
         y0 = r * block_h
         x0 = c * block_w
         labels[:, y0:y0 + block_h, x0:x0 + block_w] = b["labels"]
+        # Release this block's label array now it's in the canvas; the later
+        # aggregation steps only need the dict's metadata, not `labels`.
+        del b["labels"]
     return labels
 
 
