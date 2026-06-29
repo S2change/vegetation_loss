@@ -2,13 +2,13 @@
 
 - Geotiff files for the same day (yyyy-mm-dd) are aggregated into a single timestamp. Multiple files can correspont to distinct `geotiff` subfiles (same acquisition date and distinct processing date) and/or to `geotiff` files for the same day (e.g. S2A and S2B separated by ~10 minutes);
 - Output hdf5 files have fields:
-  - xs_new, ys_new,
-  - ts (ordinal dates), original_timestamps (milliseconds),
-  - S2_filename (index for the hdf5 file), e.g. `S2_MSIL2A_20250813_T29TPG`
-  - S2_original_filenames (all aggregated files), e.g. `S2C_MSIL2A_20251109-112321_N0511_R037_T29SMC_20251109T130709__S2C_MSIL2A_20251109-112321_N0511_R037_T29SMC_20251109T141914`.
-  - pixel_count_pt, number of pixels in PT_mask, irrespectively of orbits (not useful to compute `cloud_cover_pt`)
-  - clear_pixel_count_pt, number of pixels that satisfy 3 conditions: within the orbit, within the territory (pt), and not masked as clouds
-  - count_orbit_pixels_pt, total number of pixels in available orbits. This is the sum of 1) number of pixels in PT, in available orbits, and not masked as clouds, and 2) number of pixels in PT, in available orbits, and masked as clouds
+  - `xs_new, ys_new`,
+  - `ts` (ordinal dates), `original_timestamps` (milliseconds),
+  - `S2_filename` (index for the hdf5 file), e.g. `S2_MSIL2A_20250813_T29TPG`
+  - `S2_original_filenames` (all aggregated files), e.g. `S2C_MSIL2A_20251109-112321_N0511_R037_T29SMC_20251109T130709__S2C_MSIL2A_20251109-112321_N0511_R037_T29SMC_20251109T141914`.
+  - `pixel_count_pt`, number of pixels in PT_mask, irrespectively of orbits (not useful to compute `cloud_cover_pt`)
+  - `clear_pixel_count_pt`, number of pixels that satisfy 3 conditions: within the orbit, within the territory (pt), and not masked as clouds
+  - `count_orbit_pixels_pt`, total number of pixels in available orbits. This is the sum of 1) number of pixels in PT, in available orbits, and not masked as clouds, and 2) number of pixels in PT, in available orbits, and masked as clouds
   - cloud_cover_pt, with `cloud_cover_pt = (1-clear_pixel_count_pt/count_orbit_pixels_pt)`, 
 - Cloud cover is estimated just for PT and for the whole aggregate; aggregates with `cloud_cover_pt` less than `MAX_CLOUD_COVER_PT` (60%) are not stored in the output hdf5 files
 - Aggregates (e.g. tile T29TPG and orbit 080) with `clear_pixel_count_pt==0` are not stored in the output hdf5 files.
