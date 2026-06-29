@@ -4,7 +4,8 @@
 - Output hdf5 files have fields:
   - xs_new, ys_new,
   - ts (ordinal dates), original_timestamps (milliseconds),
-  - S2_filename (index for the hdf5 file), S2_original_filenames (all aggregated files),
+  - S2_filename (index for the hdf5 file), e.g. `S2_MSIL2A_20250813_T29TPG`
+  - S2_original_filenames (all aggregated files), e.g. `S2C_MSIL2A_20251109-112321_N0511_R037_T29SMC_20251109T130709__S2C_MSIL2A_20251109-112321_N0511_R037_T29SMC_20251109T141914`.
   - pixel_count_pt, number of pixels in PT_mask, irrespectively of orbits (not useful to compute `cloud_cover_pt`)
   - clear_pixel_count_pt, number of pixels that satisfy 3 conditions: within the orbit, within the territory (pt), and not masked as clouds
   - count_orbit_pixels_pt, total number of pixels in available orbits. This is the sum of 1) number of pixels in PT, in available orbits, and not masked as clouds, and 2) number of pixels in PT, in available orbits, and masked as clouds
