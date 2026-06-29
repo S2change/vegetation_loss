@@ -1,7 +1,16 @@
-# version June 9, 2026
+# version June 29, 2026
 
+- Create new file with `create_hdf5`; update existing file with `append_hdf5`. **New files to append have to have acquisition dates posterior to the files already stored in the current `hdf5` file**.
 - Geotiff files for the same day (yyyy-mm-dd) are aggregated into a single timestamp. Multiple files can correspont to distinct `geotiff` subfiles (same acquisition date and distinct processing date) and/or to `geotiff` files for the same day (e.g. S2A and S2B separated by ~10 minutes);
-- Output hdf5 files have fields: xs_new, ys_new, ts, original_timestamps, S2_filename, S2_original_filenames (all aggregated files), cloud_cover_pt, pixel_count_pt, clear_pixel_count_pt, count_orbit_pixels_pt,  with `cloud_cover_pt = (1-clear_pixel_count_pt/count_orbit_pixels_pt)`, where `clear_pixel_count_pt` is the number of pixels that satisfy 3 conditions: within the orbit, within the territory (pt), and not masked as clouds:
+- Output hdf5 files have fields:
+  - `xs_new, ys_new`,
+  - `ts` (ordinal dates), `original_timestamps` (milliseconds),
+  - `S2_filename` (index for the hdf5 file), e.g. `S2_MSIL2A_20250813_T29TPG`
+  - `S2_original_filenames` (all aggregated files), e.g. `S2C_MSIL2A_20251109-112321_N0511_R037_T29SMC_20251109T130709__S2C_MSIL2A_20251109-112321_N0511_R037_T29SMC_20251109T141914`.
+  - `pixel_count_pt`, number of pixels in PT_mask, irrespectively of orbits (not useful to compute `cloud_cover_pt`)
+  - `clear_pixel_count_pt`, number of pixels that satisfy 3 conditions: within the orbit, within the territory (pt), and not masked as clouds
+  - `count_orbit_pixels_pt`, total number of pixels in available orbits. This is the sum of 1) number of pixels in PT, in available orbits, and not masked as clouds, and 2) number of pixels in PT, in available orbits, and masked as clouds
+  - cloud_cover_pt, with `cloud_cover_pt = (1-clear_pixel_count_pt/count_orbit_pixels_pt)`, 
 - Cloud cover is estimated just for PT and for the whole aggregate; aggregates with `cloud_cover_pt` less than `MAX_CLOUD_COVER_PT` (60%) are not stored in the output hdf5 files
 - Aggregates (e.g. tile T29TPG and orbit 080) with `clear_pixel_count_pt==0` are not stored in the output hdf5 files.
 - Inputs are:
@@ -9,7 +18,8 @@
   - PT cloud files (e.g. `S2C_MSIL1C_20250625-113341_N0511_R080_T29TPG_mask_omni.tif`)
   - PT mask files, e.g. `mask_T29TPG.tif`
 - HDF5 chunks: (12,10,n_slots=256*256), open for appending new timestamps; COORDS_NODATA=-9999
-- From the original tile, omne only keep the "tight bounding box": see bounds below and [this ilustration](https://github.com/S2change/vegetation_loss/blob/main/scripts/data_exploration/tifs_to_hdf5_to_tifs/CNCA_tifs_to_hdf5/s2_tiles_and_tight_bboxes_portugal.png)
+- From the original geotiff tiles, only pixels from the "tight bounding box" are stored: see bounds below and [this ilustration](https://github.com/S2change/vegetation_loss/blob/main/scripts/data_exploration/tifs_to_hdf5_to_tifs/CNCA_tifs_to_hdf5/s2_tiles_and_tight_bboxes_portugal.png)
+- (June 29, 2026): create a log file per tile: new file with `create_hdf`; update existing file with `append_hdf`. 
 
 # Instructions
 

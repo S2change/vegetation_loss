@@ -4,8 +4,8 @@ import numpy as np
 import h5py
 import rasterio.windows
 from hdf5_utils import (
-    parse_filter_sort_files,
-    FOLDER_S2, FOLDER_PT_MASKS, FOLDER_HDF5,
+    parse_filter_sort_files, write_tile_log,
+    FOLDER_S2, FOLDER_PT_MASKS, FOLDER_HDF5, FOLDER_LOGS,
     BAND_NAMES, TILE_NAMES, MIN_DATE, MAX_DATE, N_TS_CHUNK, OUTPUT_NODATA_VAL,
     CHIP_SIDE, PIXEL_RES,
     read_pt_mask_pixels, build_chip_layout, read_and_combine_tifs,
@@ -110,7 +110,7 @@ def write_hdf5(h5_filename, file_metadata, band_names, mask_rows, mask_cols, xs_
 def main():
     for tile in TILE_NAMES:
         print(f"\nProcessing tile {tile}...")
-        file_metadata = parse_filter_sort_files(FOLDER_S2, FOLDER_PT_MASKS, tile, MIN_DATE, MAX_DATE)
+        file_metadata, folders_dict, all_metrics = parse_filter_sort_files(FOLDER_S2, FOLDER_PT_MASKS, tile, MIN_DATE, MAX_DATE)
         if not file_metadata:
             print(f"  No files found for tile {tile}. Skipping.")
             continue
@@ -122,6 +122,12 @@ def main():
         h5_filename = os.path.join(FOLDER_HDF5, f'{tile}.h5')
         write_hdf5(h5_filename, file_metadata, BAND_NAMES, mask_rows, mask_cols, xs_flat, ys_flat)
         print(f"  Done: {h5_filename}")
+
+        os.makedirs(FOLDER_LOGS, exist_ok=True)
+        write_tile_log(folders_dict, all_metrics,
+                       os.path.join(FOLDER_LOGS, f'{tile}_log.csv'),
+                       stored_prefixes={m['filename'] for m in file_metadata},
+                       append=False)
 
 
 if __name__ == "__main__":

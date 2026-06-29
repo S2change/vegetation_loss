@@ -23,8 +23,8 @@ import numpy as np
 import h5py
 import rasterio.windows
 from hdf5_utils import (
-    parse_filter_sort_files,
-    FOLDER_S2, FOLDER_PT_MASKS, FOLDER_HDF5,
+    parse_filter_sort_files, write_tile_log,
+    FOLDER_S2, FOLDER_PT_MASKS, FOLDER_HDF5, FOLDER_LOGS,
     BAND_NAMES, TILE_NAMES, MIN_DATE, MAX_DATE, OUTPUT_NODATA_VAL,
     read_pt_mask_pixels, read_and_combine_tifs,
 )
@@ -32,9 +32,9 @@ from hdf5_utils import (
 
 def append_tile(tile, h5_filename):
     if not os.path.exists(h5_filename):
-        raise FileNotFoundError(
-            f"{h5_filename} does not exist — run create_hdf5.py first."
-        )
+        print(f"  Skipping tile {tile}: HDF5 file not found ({h5_filename}).")
+        print(f"  Run create_hdf5.py first to initialise this tile.")
+        return
 
     # ── Read existing state ────────────────────────────────────────────────────
     with h5py.File(h5_filename, 'r') as h5f:
@@ -54,7 +54,7 @@ def append_tile(tile, h5_filename):
     # Use the day after the last stored timestamp so the scan only returns
     # strictly newer acquisitions, keeping the time axis chronologically ordered.
     tile_min_date = date.fromordinal(last_ordinal + 1) if last_ordinal > 0 else MIN_DATE
-    all_metadata = parse_filter_sort_files(
+    all_metadata, folders_dict, all_metrics = parse_filter_sort_files(
         FOLDER_S2, FOLDER_PT_MASKS, tile, tile_min_date, MAX_DATE
     )
     if not all_metadata:
@@ -62,6 +62,13 @@ def append_tile(tile, h5_filename):
         return
 
     new_metadata = [m for m in all_metadata if m['filename'] not in existing_names]
+
+    os.makedirs(FOLDER_LOGS, exist_ok=True)
+    write_tile_log(folders_dict, all_metrics,
+                   os.path.join(FOLDER_LOGS, f'{tile}_log.csv'),
+                   stored_prefixes={m['filename'] for m in new_metadata},
+                   append=True)
+
     if not new_metadata:
         print(f"  No new timestamps for tile {tile}.")
         return
