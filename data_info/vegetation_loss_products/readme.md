@@ -1,5 +1,5 @@
 ## Data available to download
-- DL_MBPV_v3: `DL_MBPV_v3_20230201_20230501_T5_A10.zip`.  This is a Geopackage file with predictions for Portugal for the time period 2023-02-01 to 2023-05-01 (February, March and April 2023). The full map for February 2023 to Jan 2024 (Deliverable E.4.2) will be uploaded here.
+- DL_MBPV_v3: `DL_MBPV_v3_20230201_20250131.7z` zipped file.  This is a Geopackage file with predictions for all Portugal for the time period 2023-02-01 to 2023-01-31 (24 months) -- product for Deliverable E.4.2. The most inportant attributes are `date_iso` (yyyy-mm-dd); `class_id`(1: "Cortes"; 2: "Fogos"); `confidence` (values between 0 and 100), and `area_m2` (feature area). Coordinates are in CRS EPSG:32629 (UTM).
 - CCD_MBPV_v1: `MBPV_v1.7z` zipped file (open with `7-zip` and password). It includes 12 bimensal maps for 2023-2024 (see below), each one with predicted vegetation loss polygons for the whole Portugal with the following fields: 
 fid,
 date_value,
